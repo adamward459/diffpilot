@@ -9,10 +9,11 @@ Code and tests are grouped by feature folder:
 
 | Folder | Holds |
 | --- | --- |
-| `diffpilot/<Feature>/` | source of one feature |
+| `diffpilot/Features/<Feature>/` | source of one feature |
+| `diffpilot/App/` | app entry point and main window; tested like a feature |
 | `diffpilot/Shared/` | code used by more than one feature; a change here touches every feature |
-| `diffpilotTests/<Feature>/` | unit tests |
-| `diffpilotUITests/<Feature>/` | e2e tests that launch the app |
+| `diffpilotTests/Features/<Feature>/` | unit tests (`App/` and `Shared/` mirror the same way) |
+| `diffpilotUITests/Features/<Feature>/` | e2e and screenshot tests that launch the app |
 
 A test type whose name contains `Performance` is a hot path test, in either test target. A UI test type whose name contains `Screenshot` captures the feature's screenshots. `features.json` holds only what the folders cannot say:
 
@@ -23,7 +24,7 @@ A test type whose name contains `Performance` is a hot path test, in either test
 
 ## Workflow
 
-1. Put new code in its feature folder, and new tests in the matching test folders. A new folder is a new feature.
+1. Put new code in `diffpilot/Features/<Feature>/`, and new tests in the matching test folders. A new folder under `Features/` is a new feature.
 2. When you add code on a hot path, add a `*Performance*` test and a `hotpaths` entry.
 3. Before you report the work as complete, run `scripts/test.py related`. It prints the commands for the features your changes touch, compared with the upstream branch, including uncommitted and untracked files.
 4. Run the commands that cover your change, and every `hotpath` command it prints. Do not report the work as complete until they pass. If you skip a printed command, say which one and why.
@@ -34,7 +35,7 @@ On failure, the script prints an `xcresulttool` command that shows the failure m
 
 ## Screenshot tests
 
-- One `<Feature>ScreenshotUITests` type in `diffpilotUITests/<Feature>/`. Drive the app to the state that shows the feature, then attach `window.screenshot()` with `attachment.name = "<kebab-case-name>"` and `attachment.lifetime = .keepAlways`. The name becomes the file name.
+- One `<Feature>ScreenshotUITests` type in `diffpilotUITests/Features/<Feature>/`. Drive the app to the state that shows the feature, then attach `window.screenshot()` with `attachment.name = "<kebab-case-name>"` and `attachment.lifetime = .keepAlways`. The name becomes the file name.
 - Use deterministic data, such as a fixture launch environment, so screenshots only change when the UI changes.
 
 ## Hot path tests
