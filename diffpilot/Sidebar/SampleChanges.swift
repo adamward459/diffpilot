@@ -43,12 +43,12 @@ nonisolated enum SampleChanges {
 
             let roll = rng.next(100)
             let status: FileStatus = roll < 60 ? .modified : roll < 82 ? .added : roll < 90 ? .deleted : .renamed
-            let size = 1 + rng.next(120)
+            let size = 1 + rng.next(40)
             result.append(FileChange(
                 path: path,
                 status: status,
                 additions: status == .deleted ? 0 : size,
-                deletions: status == .added ? 0 : rng.next(40),
+                deletions: status == .added ? 0 : rng.next(15),
                 isViewed: rng.next(100) < 25,
                 isUncommitted: rng.next(100) < 12,
                 commentCount: rng.next(100) < 15 ? 1 + rng.next(5) : 0

@@ -18,15 +18,15 @@ private struct SummaryHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 8) {
+            HStack(spacing: 5) {
                 if isLoading {
                     Text("Loading changes…")
                 } else {
                     Text("\(summary.fileCount) files")
                     Text("·")
                     HStack(spacing: 4) {
-                        Text("+\(summary.additions)").foregroundStyle(.green)
-                        Text("−\(summary.deletions)").foregroundStyle(.red)
+                        Text("+\(summary.additions.formatted(.number.notation(.compactName)))").foregroundStyle(.green)
+                        Text("−\(summary.deletions.formatted(.number.notation(.compactName)))").foregroundStyle(.red)
                     }
                     .font(.system(size: 11.5, design: .monospaced))
                     Text("·")
@@ -36,6 +36,7 @@ private struct SummaryHeader: View {
             .font(.system(size: 12))
             .foregroundStyle(.secondary)
             .lineLimit(1)
+            .minimumScaleFactor(0.8)
 
             Capsule()
                 .fill(.quaternary)
