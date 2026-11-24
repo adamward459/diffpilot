@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { DiffLine, ReviewThread } from '../src/bridge.ts';
-import { BIG_LINES, buildFileRows, codeHtml, wordRanges } from '../src/rows.ts';
+import { BIG_LINES, buildFileRows, codeHtml, esc, wordRanges } from '../src/rows.ts';
 import type { LineRow, PageFile, Row } from '../src/rows.ts';
 
 const file = (over: Partial<PageFile> = {}): PageFile => ({
@@ -159,4 +159,8 @@ test('codeHtml marks word ranges, also inside a token', () => {
 
 test('codeHtml marks word ranges without tokens', () => {
   assert.equal(codeHtml('abcd', null, [[1, 2]]), 'a<span class=" w">b</span>cd');
+});
+
+test('esc makes a path safe inside a quoted attribute', () => {
+  assert.equal(esc(`a" onfocus="x'<b>&.ts`), 'a&quot; onfocus=&quot;x&#39;&lt;b&gt;&amp;.ts');
 });

@@ -38,7 +38,8 @@ export const GENERATED = /(^|\/)(yarn\.lock|package-lock\.json|pnpm-lock\.yaml|P
 const WORD_DIFF_MAX = 500;
 const WORD_DIFF_MIN_SAME = 0.4;
 
-export const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const ENTITY: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+export const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ENTITY[c] ?? c);
 
 export function buildFileRows(file: PageFile, f: number, threads: ReviewThread[]): Row[] {
   const out: Row[] = [{ k: 'fh', f, key: `fh${f}` }];
