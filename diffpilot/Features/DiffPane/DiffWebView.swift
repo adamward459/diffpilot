@@ -20,6 +20,16 @@ enum WebKitFeatures {
     }
 }
 
+extension WebKitFeatures {
+    // WebKit shrinks the page viewport by the toolbar height. The page needs the full height to scroll under the toolbar.
+    static func stopInsettingForToolbar(_ web: WKWebView) {
+        let set = NSSelectorFromString("_setAutomaticallyAdjustsContentInsets:")
+        guard web.responds(to: set) else { return }
+        typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
+        unsafeBitCast(web.method(for: set), to: Setter.self)(web, set, false)
+    }
+}
+
 final class PaneSchemeHandler: NSObject, WKURLSchemeHandler {
     static let scheme = "diffpilot"
     static let entry = URL(string: "diffpilot://pane/diffpane.html")!
@@ -70,6 +80,8 @@ struct DiffWebView: NSViewRepresentable {
         configuration.userContentController.add(WeakMessageHandler(model), name: Self.handlerName)
         WebKitFeatures.disable60FPSCap(configuration.preferences)
         let web = WKWebView(frame: .zero, configuration: configuration)
+        WebKitFeatures.stopInsettingForToolbar(web)
+        web.setAccessibilityIdentifier("diff-pane")
         web.setValue(false, forKey: "drawsBackground")
         #if DEBUG
             web.isInspectable = true
@@ -100,6 +112,5 @@ struct DiffPaneView: View {
                 .ignoresSafeArea(.container, edges: .top)
                 .onChange(of: proxy.safeAreaInsets.top, initial: true) { _, top in model.setInset(top) }
         }
-        .accessibilityIdentifier("diff-pane")
     }
 }
