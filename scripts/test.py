@@ -233,6 +233,8 @@ def run_kind(kind: str, names: list[str], base: str | None = None) -> int:
         print(f"No {kind} tests for: {' '.join(names)}", file=sys.stderr)
         return 0
 
+    if kind != "unit":
+        subprocess.run([sys.executable, str(ROOT / "scripts" / "fixture_repo.py")], check=True)
     print(f"== {kind}: {' '.join(tests)}", file=sys.stderr)
     code, bundle = xcode_test(ROOT, tests, kind)
     if code != 0:

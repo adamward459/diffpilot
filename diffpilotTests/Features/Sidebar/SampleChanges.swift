@@ -1,12 +1,8 @@
 import Foundation
 
+@testable import diffpilot
+
 nonisolated enum SampleChanges {
-    static let defaultCount = 2000
-
-    static func configuredCount() -> Int {
-        ProcessInfo.processInfo.environment["DIFFPILOT_SAMPLE_COUNT"].flatMap { Int($0) } ?? defaultCount
-    }
-
     static func generate(count: Int) -> [FileChange] {
         var rng = SplitMix(seed: 0x9E37_79B9_7F4A_7C15)
         var seen = Set<String>()

@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 
 @Observable
@@ -8,12 +9,16 @@ final class SidebarModel {
     var filter = FileFilter()
     var mode = SidebarMode.tree
     var selection: String?
+    var repo = RepoChanges.configuredRepo()
     var isLoading = true
 
     func load() async {
-        let count = SampleChanges.configuredCount()
+        guard let repo else {
+            isLoading = false
+            return
+        }
         let loaded = await Task.detached(priority: .userInitiated) {
-            let changes = SampleChanges.generate(count: count)
+            let changes = (try? RepoChanges.load(repo: repo)) ?? []
             let root = FileTree.build(changes)
             return (root, FileTree.files(in: root), ChangeSummary(changes))
         }.value
