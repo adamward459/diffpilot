@@ -17,6 +17,18 @@ struct DiffPaneModelTests {
         var threads: [ReviewThread] {
             commands.compactMap { if case .thread(let thread) = $0 { thread } else { nil } }
         }
+        var themes: [PaneTheme] {
+            commands.compactMap { if case .setTheme(let theme) = $0 { theme } else { nil } }
+        }
+        var fileStates: [String] {
+            commands.compactMap {
+                if case .fileState(let path, let viewed, let collapsed) = $0 {
+                    "\(path) \(viewed) \(collapsed)"
+                } else {
+                    nil
+                }
+            }
+        }
         var insets: [Double] {
             commands.compactMap { if case .setInset(let points) = $0 { points } else { nil } }
         }
@@ -233,5 +245,58 @@ struct DiffPaneModelTests {
         model.handle(.ready)
         #expect(recorder.loads == [["f0.txt", "f1.txt"]])
         #expect(recorder.threads.map(\.anchor) == [.file(path: "f1.txt")])
+    }
+
+    private let sampleTheme = PaneTheme(colors: [:], isDark: false, increaseContrast: false, reduceTransparency: false)
+
+    @Test func sendsTheThemeWhenThePageIsReadyAndAgainOnlyWhenItChanges() {
+        let recorder = Recorder()
+        let model = makeModel(recorder, repo: nil)
+        model.setTheme(sampleTheme)
+        #expect(recorder.themes.isEmpty)
+        model.handle(.ready)
+        #expect(recorder.themes == [sampleTheme])
+        model.setTheme(sampleTheme)
+        #expect(recorder.themes.count == 1)
+        var dark = sampleTheme
+        dark.isDark = true
+        model.setTheme(dark)
+        #expect(recorder.themes == [sampleTheme, dark])
+    }
+
+    @Test func markingAFileViewedCollapsesItAndUnmarkingExpandsIt() {
+        let recorder = Recorder()
+        let model = makeModel(recorder, repo: nil)
+        model.toggleViewed("a.ts")
+        #expect(model.viewed == ["a.ts"])
+        model.toggleViewed("a.ts")
+        #expect(model.viewed.isEmpty)
+        #expect(recorder.fileStates == ["a.ts true true", "a.ts false false"])
+    }
+
+    @Test func pageCollapseTogglesKeepTheViewedFlag() {
+        let recorder = Recorder()
+        let model = makeModel(recorder, repo: nil)
+        model.handle(.toggleCollapsed("a.ts"))
+        model.handle(.toggleCollapsed("a.ts"))
+        #expect(recorder.fileStates == ["a.ts false true", "a.ts false false"])
+    }
+
+    @Test func aReloadedPageGetsTheFileStatesAgain() {
+        let recorder = Recorder()
+        let model = makeModel(recorder, repo: nil)
+        model.toggleViewed("a.ts")
+        model.handle(.ready)
+        #expect(recorder.fileStates == ["a.ts true true", "a.ts true true"])
+    }
+
+    @Test func commentOnVisibleFileOpensAFileThread() {
+        let recorder = Recorder()
+        let model = makeModel(recorder, repo: nil)
+        model.commentOnVisibleFile()
+        #expect(recorder.threads.isEmpty)
+        model.handle(.visibleFile("a.ts"))
+        model.commentOnVisibleFile()
+        #expect(recorder.threads.first?.anchor == .file(path: "a.ts"))
     }
 }

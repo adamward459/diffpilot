@@ -13,6 +13,9 @@ final class DiffPaneModel {
     private(set) var firstPaintAt: Date?
     private(set) var visiblePath: String?
     private(set) var scrollStats: ScrollStats?
+    private(set) var viewed: Set<String> = []
+    private(set) var collapsed: Set<String> = []
+    var mode = PaneMode.diff
 
     private let repo: URL?
     private let base: String
@@ -23,6 +26,7 @@ final class DiffPaneModel {
     private var isPageReady = false
     private var hasSentFirstBatch = false
     private var inset = 0.0
+    private var theme: PaneTheme?
     private var pendingReveal: String?
     private var firstPaintInterval: OSSignpostIntervalState?
 
@@ -46,7 +50,7 @@ final class DiffPaneModel {
         let scroll =
             scrollStats.map { String(format: "%d/%.2f/%.2f/%.2f", $0.frames, $0.medianMs, $0.p95Ms, $0.maxMs) } ?? ""
         return
-            "top=\(visiblePath ?? ""); threads=\(threads.threads.count); scroll=\(scroll); reply=\(reply?.body ?? "")"
+            "top=\(visiblePath ?? ""); threads=\(threads.threads.count); viewed=\(viewed.count); scroll=\(scroll); reply=\(reply?.body ?? "")"
     }
 
     func load() async {
@@ -65,6 +69,26 @@ final class DiffPaneModel {
         isPageReady = false
         hasSentFirstBatch = false
         batches = files.map { DiffBatches($0, lineBudget: Self.lineBudget) }
+    }
+
+    func setTheme(_ next: PaneTheme) {
+        guard next != theme else { return }
+        theme = next
+        if isPageReady { send(.setTheme(next)) }
+    }
+
+    func toggleViewed(_ path: String) {
+        if viewed.remove(path) == nil {
+            viewed.insert(path)
+            collapsed.insert(path)
+        } else {
+            collapsed.remove(path)
+        }
+        sendFileState(path)
+    }
+
+    func commentOnVisibleFile() {
+        if let path = visiblePath { handle(.createThread(.file(path: path))) }
     }
 
     func setInset(_ points: Double) {
@@ -86,7 +110,9 @@ final class DiffPaneModel {
         switch message {
         case .ready:
             isPageReady = true
+            if let theme { send(.setTheme(theme)) }
             send(.setInset(inset))
+            for path in viewed.union(collapsed).sorted() { sendFileState(path) }
             sendFirstBatchIfReady()
         case .needMore:
             sendNextBatch()
@@ -104,6 +130,9 @@ final class DiffPaneModel {
             }
         case .visibleFile(let path):
             visiblePath = path
+        case .toggleCollapsed(let path):
+            if collapsed.remove(path) == nil { collapsed.insert(path) }
+            sendFileState(path)
         case .scrollStats(let stats):
             scrollStats = stats
         case .createThread(let anchor):
@@ -118,6 +147,10 @@ final class DiffPaneModel {
             threads.remove(id)
             send(.removeThread(id))
         }
+    }
+
+    private func sendFileState(_ path: String) {
+        send(.fileState(path: path, viewed: viewed.contains(path), collapsed: collapsed.contains(path)))
     }
 
     private func sendFirstBatchIfReady() {
@@ -151,4 +184,9 @@ final class DiffPaneModel {
             if let updated = threads.appendClaude(id, "", done: true) { send(.thread(updated)) }
         }
     }
+}
+
+enum PaneMode: String, CaseIterable {
+    case diff = "Diff"
+    case edit = "Edit"
 }

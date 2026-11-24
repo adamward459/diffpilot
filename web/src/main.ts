@@ -1,10 +1,11 @@
 import { Virtualizer, elementScroll, measureElement, observeElementOffset, observeElementRect } from '@tanstack/virtual-core';
 import type { VirtualItem } from '@tanstack/virtual-core';
-import type { FileDiff, HighlightRequest, HighlightResult, HostApi, ReviewThread, Token } from './bridge.ts';
+import type { FileDiff, HighlightRequest, HighlightResult, HostApi, ReviewThread, Theme, Token } from './bridge.ts';
 import { send } from './bridge.ts';
 import { I, fileIcon } from './icons.ts';
 import { SIZE, buildFileRows, codeHtml, esc, wordRanges } from './rows.ts';
 import type { PageFile, Row } from './rows.ts';
+import { applyTheme } from './theme.ts';
 import { mountThread, unmountThread } from './threads.tsx';
 import type { ThreadApi } from './threads.tsx';
 import { btn, dots } from './ui.ts';
@@ -37,6 +38,7 @@ const S = {
   hlQueued: new Set<number>(),
   nodes: new Map<string, Mounted>(),
   threadEls: new Map<number, HTMLElement>(),
+  states: new Map<string, { viewed: boolean; collapsed: boolean }>(),
 };
 
 const byId = <T extends HTMLElement>(id: string): T => {
@@ -59,7 +61,7 @@ function cls(light: string, dark: string): string {
   colorClass.set(k, c);
   const sheet = colorSheet.sheet;
   sheet?.insertRule(`.${c}{color:${light}}`);
-  sheet?.insertRule(`@media (prefers-color-scheme: dark){.${c}{color:${dark}}}`);
+  sheet?.insertRule(`.dark .${c}{color:${dark}}`);
   return c;
 }
 
@@ -97,25 +99,25 @@ const minibar = (a: number, d: number): string => {
   });
   return `<span class="inline-flex gap-px">${cells.join('')}</span>`;
 };
-const ICON_BTN = 'inline-flex size-[26px] flex-none items-center justify-center rounded-md text-fg2 hover:bg-hover';
+const GLASS_BAR = 'glass shadow-[inset_0_1px_0_var(--glass-hi)]';
 function fileHeaderHtml(f: number, pinned: boolean): string {
   const file = fileAt(f);
   const dir = file.path.replace(/[^/]*$/, '');
   const count = threadsOf(file.path).length;
   const renamed = file.oldPath ? `<span class="text-muted">${esc(file.oldPath)} →</span>` : '';
-  const frame = pinned
-    ? 'glass border-b border-glassb border-t-0 shadow-[inset_0_1px_0_var(--glass-hi)]'
-    : 'border-y border-line bg-ed2';
-  return `<div class="flex h-[38px] items-center gap-[7px] pr-2 pl-2.5 whitespace-nowrap ${frame}" data-f="${f}">
-    <button class="flex text-muted" data-act="collapse" aria-label="${file.collapsed ? 'Expand' : 'Collapse'} ${esc(file.path)}">${I(file.collapsed ? 'chevR' : 'chevD', 13)}</button>${fileIcon(file.path)}
+  const frame = pinned ? `${GLASS_BAR} border-b border-glassb` : 'border-y border-line bg-ed2';
+  return `<div class="flex h-[38px] items-center gap-[7px] pr-3 pl-2.5 whitespace-nowrap ${frame}" data-f="${f}">
+    <button class="flex text-muted" data-act="collapse" aria-label="${file.collapsed ? 'Expand' : 'Collapse'} ${esc(file.path)}">${I(file.collapsed ? 'chevR' : 'chevD', 12)}</button>${fileIcon(file.symbol, file.tint)}
     <span class="min-w-0 overflow-hidden text-[12.5px] text-ellipsis" role="heading" aria-level="3" aria-label="${esc(file.path)}">${renamed}<span class="text-muted">${esc(dir)}</span><b class="font-semibold">${esc(file.path.slice(dir.length))}</b></span>
     <span class="inline-flex h-4 min-w-4 items-center justify-center rounded bg-cap px-[3px] font-mono text-[10.5px] font-semibold text-muted">${file.status}</span>
     <span class="font-mono text-[11.5px]"><span class="text-ok">+${file.additions}</span> <span class="text-err">−${file.deletions}</span></span>${minibar(file.additions, file.deletions)}
-    ${count ? `<span class="ml-1 inline-flex items-center gap-0.5 text-[11px] text-muted">${I('bubble', 13)}${count}</span>` : ''}
-    <span class="ml-auto flex flex-none items-center gap-1"><span class="inline-flex flex-none gap-0.5 rounded-md border border-capb bg-cap p-0.5 [&>span]:inline-flex [&>span]:h-5 [&>span]:items-center [&>span]:rounded [&>span]:px-[7px] [&>span]:text-xs [&>span]:text-fg2"><span class="bg-raised !text-fg shadow-[0_1px_2px_rgba(0,0,0,.15),0_0_0_.5px_var(--line2)] dark:bg-[#3c3c3c]">Diff</span><span>Edit</span></span>
-      <button class="${ICON_BTN}" title="Comment on file" aria-label="Comment on file" data-act="filecomment">${I('bubblePlus', 15)}</button><span class="${ICON_BTN}" title="Open in editor">${I('openExt', 15)}</span><span class="${ICON_BTN}">${I('more', 15)}</span>
-      <button class="inline-flex h-[26px] items-center gap-1.5 rounded-md px-2 text-xs text-fg2" data-act="viewed"><span class="inline-flex size-3.5 flex-none items-center justify-center rounded border ${file.viewed ? 'border-accent bg-accent text-white' : 'border-line2 bg-raised'}">${file.viewed ? I('check', 10) : ''}</span>Viewed</button>
-    </span></div>`;
+    ${count ? `<span class="ml-1 inline-flex items-center gap-0.5 text-[11px] text-muted">${I('bubble', 12)}${count}</span>` : ''}
+    ${file.viewed ? `<span class="ml-auto inline-flex items-center gap-1 text-[11px] text-muted" aria-label="Viewed">${I('check', 12)}Viewed</span>` : ''}
+  </div>`;
+}
+function hunkHtml(text: string, pinned: boolean): string {
+  const frame = pinned ? `${GLASS_BAR} border-b border-glassb` : 'border-y border-line bg-hunk';
+  return `<div class="flex h-7 items-center gap-2 overflow-hidden pr-2 pl-3 font-mono text-[11.5px]/7 whitespace-nowrap text-muted ${frame}">${esc(text)}</div>`;
 }
 
 const LINE_STYLE = {
@@ -130,7 +132,7 @@ function rowHtml(r: Row): string {
     case 'fh':
       return fileHeaderHtml(r.f, false);
     case 'hk':
-      return `<div class="flex h-7 items-center gap-2 overflow-hidden border-y border-line bg-hunk pr-2 pl-3 font-mono text-[11.5px]/7 whitespace-nowrap text-muted">${esc(r.text)}</div>`;
+      return hunkHtml(r.text, false);
     case 'gap':
       return '<div class="h-3"></div>';
     case 'load':
@@ -142,7 +144,7 @@ function rowHtml(r: Row): string {
       const toks = tk ? (r.t === 'd' ? tk.old[r.oi] : tk.new[r.ni]) : null;
       const ranges = r.pair ? wordRanges(r) : null;
       const s = LINE_STYLE[r.t];
-      return `<div class="group row-hover relative grid h-5 grid-cols-[40px_40px_3px_1fr] font-mono text-xs/5 ${s.row} ${s.word}"><span class="${NO} ${s.no}">${r.o ?? ''}</span><span class="${NO} ${s.no}">${r.n ?? ''}</span><span class="${s.rib}"></span><span class="overflow-hidden pl-3 whitespace-pre text-code">${codeHtml(r.text, toks, ranges, cls)}</span><button class="absolute top-px left-[62px] z-[2] hidden size-[18px] items-center justify-center rounded bg-accent text-white group-hover:flex" aria-label="Add comment" data-act="linecomment">${I('plus', 12)}</button></div>`;
+      return `<div class="group row-hover relative grid h-5 grid-cols-[40px_40px_3px_1fr] font-mono text-xs/5 ${s.row} ${s.word}"><span class="${NO} ${s.no}">${r.o ?? ''}</span><span class="${NO} ${s.no}">${r.n ?? ''}</span><span class="${s.rib}"></span><span class="overflow-hidden pl-3 whitespace-pre text-code">${codeHtml(r.text, toks, ranges, cls)}</span><button class="absolute top-px left-[62px] z-[2] hidden size-[18px] items-center justify-center rounded bg-accent text-on-accent group-hover:flex" aria-label="Add comment" data-act="linecomment">${I('plus', 12)}</button></div>`;
     }
     default:
       return '';
@@ -196,8 +198,6 @@ function makeNode(r: Row, index: number): Mounted {
   return m;
 }
 
-let stickyFile = -1;
-let stickyVersion: number | undefined;
 function render(): void {
   const items = v.getVirtualItems();
   const seen = new Set<string>();
@@ -238,13 +238,16 @@ function render(): void {
   }
 }
 
+let stickyKey = '';
 function updateSticky(items: VirtualItem[]): void {
   const top = (v.scrollOffset ?? 0) + S.inset;
   let cur: VirtualItem | null = null;
+  let under: VirtualItem | null = null;
   let nextHeader: VirtualItem | null = null;
   for (const it of items) {
     if (it.end > top && !cur) cur = it;
-    else if (cur && S.rows[it.index]?.k === 'fh') {
+    if (cur && !under && it.end > top + SIZE.fh) under = it;
+    if (cur && it !== cur && S.rows[it.index]?.k === 'fh') {
       nextHeader = it;
       break;
     }
@@ -258,14 +261,18 @@ function updateSticky(items: VirtualItem[]): void {
     sticky.style.visibility = 'hidden';
     return;
   }
-  sticky.style.visibility = 'visible';
   const file = fileAt(r.f);
-  if (r.f !== stickyFile || stickyVersion !== file.version) {
-    stickyFile = r.f;
-    stickyVersion = file.version;
-    sticky.innerHTML = fileHeaderHtml(r.f, true);
+  const below = under && S.rows[under.index];
+  const hunk = below && below.f === r.f && !file.collapsed ? below.h : undefined;
+  const key = `${r.f}:${file.version ?? 0}:${hunk ?? ''}`;
+  if (key !== stickyKey) {
+    stickyKey = key;
+    const bar = hunk === undefined ? '' : hunkHtml(file.hunks[hunk]?.header ?? '', true);
+    sticky.innerHTML = fileHeaderHtml(r.f, true) + bar;
   }
-  const push = nextHeader ? Math.min(0, nextHeader.start - top - SIZE.fh) : 0;
+  sticky.style.visibility = 'visible';
+  const height = SIZE.fh + (hunk === undefined ? 0 : SIZE.hk);
+  const push = nextHeader ? Math.min(0, nextHeader.start - top - height) : 0;
   sticky.style.transform = `translateY(${S.inset + push}px)`;
 }
 
@@ -336,23 +343,11 @@ function onAct(e: Event): void {
   if (!file) return;
   switch (b.dataset.act) {
     case 'collapse':
-      file.collapsed = !file.collapsed;
-      bump(file);
-      rebuildFile(f);
-      if (!node) scrollToRow(`fh${f}`);
-      break;
-    case 'viewed':
-      file.viewed = !file.viewed;
-      file.collapsed = file.viewed;
-      bump(file);
-      rebuildFile(f);
+      send({ type: 'toggleCollapsed', path: file.path });
       break;
     case 'loadbig':
       file.expanded = true;
       rebuildFile(f);
-      break;
-    case 'filecomment':
-      send({ type: 'createThread', path: file.path });
       break;
     case 'linecomment':
       if (r?.k === 'ln') {
@@ -374,6 +369,7 @@ let firstPainted = false;
 function load(batch: FileDiff[], done: boolean): void {
   for (const file of batch) {
     const f = S.files.push(file) - 1;
+    Object.assign(file, S.states.get(file.path));
     S.fileRows[f] = rowsOf(f);
   }
   S.done = done;
@@ -414,6 +410,22 @@ function removeThread(id: number): void {
   rebuildFile(f);
 }
 
+function fileState(path: string, viewed: boolean, collapsed: boolean): void {
+  S.states.set(path, { viewed, collapsed });
+  const f = fileIndex(path);
+  if (f < 0) return;
+  const file = fileAt(f);
+  const collapsing = collapsed && !file.collapsed;
+  Object.assign(file, { viewed, collapsed });
+  bump(file);
+  rebuildFile(f);
+  if (collapsing && f === S.topFile) scrollToRow(`fh${f}`);
+}
+
+function setTheme(theme: Theme): void {
+  applyTheme(document.documentElement, theme);
+}
+
 function reveal(path: string): void {
   const f = fileIndex(path);
   if (f >= 0) scrollToRow(`fh${f}`);
@@ -449,6 +461,6 @@ function benchScroll(): void {
   requestAnimationFrame(step);
 }
 
-const dp: HostApi = { load, thread, removeThread, reveal, setInset, benchScroll };
+const dp: HostApi = { load, thread, removeThread, reveal, setInset, setTheme, fileState, benchScroll };
 window.dp = dp;
 send({ type: 'ready' });

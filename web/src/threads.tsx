@@ -41,7 +41,7 @@ function Avatar({ who }: { who: string }) {
   const base = 'flex size-[22px] flex-none items-center justify-center rounded-full text-[10px] font-bold text-white';
   return who === 'Claude' ? (
     <span class={`${base} bg-claude`}>
-      <Icon name="sparkleF" size={13} />
+      <Icon name="sparkle" size={13} />
     </span>
   ) : (
     <span class={`${base} bg-[#616161]`}>
@@ -139,17 +139,17 @@ function Composer({ t, api, autoFocus }: { t: ReviewThread; api: ThreadApi; auto
   return (
     <div class="relative border-t border-line px-3 pt-2 pb-2.5">
       {pop && (
-        <div class="glass absolute bottom-[calc(100%-4px)] left-3 z-[5] min-w-[220px] rounded-[10px] p-[5px] text-[13px] shadow-[var(--shadow)]">
+        <div class="glass absolute bottom-[calc(100%-4px)] left-3 z-[5] min-w-[220px] rounded-xl p-[5px] text-[13px] shadow-[inset_0_1px_0_var(--glass-hi),var(--shadow)]">
           {pop.list.map((p, i) => (
             <div
               key={p.id}
-              class={`flex h-[26px] items-center gap-[7px] rounded-[5px] pr-2 pl-1.5 ${i === pop.hl ? 'bg-accent text-white' : ''}`}
+              class={`flex h-[26px] items-center gap-[7px] rounded-[5px] pr-2 pl-1.5 ${i === pop.hl ? 'bg-accent text-on-accent' : ''}`}
               onMouseDown={(e) => {
                 e.preventDefault();
                 pick(p);
               }}
             >
-              <Icon name="sparkleF" size={14} />
+              <Icon name="sparkle" size={14} />
               {p.name}
               <span class="ml-auto text-[11.5px] opacity-80">{p.sub}</span>
             </div>
@@ -184,7 +184,7 @@ function Composer({ t, api, autoFocus }: { t: ReviewThread; api: ThreadApi; auto
           ) : null}
           <button class={btnPrimary} onClick={submit}>
             {t.comments.length ? 'Reply' : 'Comment'}
-            <span class="text-[11px] text-white/75">⌘↩</span>
+            <span class="text-[11px] opacity-75">⌘↩</span>
           </button>
         </div>
       )}
@@ -198,7 +198,7 @@ function Thread({ t, api }: { t: ReviewThread; api: ThreadApi }) {
   const claude = t.comments.some((c) => c.author === 'Claude');
   const busy = t.comments.some((c) => c.isStreaming);
   return (
-    <div class={`overflow-hidden rounded-lg border bg-raised shadow-[0_1px_2px_rgba(0,0,0,.08)] ${claude ? 'border-claude-b' : 'border-line2'}`}>
+    <div class={`glass-card overflow-hidden rounded-xl border ${claude ? 'border-claude-b' : 'border-transparent'}`}>
       <div class="flex h-[34px] items-center gap-2 border-b border-line pr-2 pl-3 text-xs whitespace-nowrap text-fg2">
         <span>{label}</span>
         {t.comments.length === 0 ? <span class={`${chip} bg-amber-soft text-amber`}>Draft</span> : null}

@@ -4,40 +4,56 @@
 @import "tailwindcss/utilities.css" layer(utilities);
 @source "./";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --amber-soft: color-mix(in srgb, var(--amber) 14%, var(--ed));
-  --side: #f8f8f8; --ed: #ffffff; --ed2: #f8f8f8; --raised: #ffffff; --pop: #f8f8f8;
-  --line: #e5e5e5; --line2: #cecece;
-  --text: #3b3b3b; --text2: #555555; --muted: #6e7681; --faint: #9e9e9e;
-  --hover: color-mix(in srgb, #000 4%, var(--ed)); --row-hover: rgba(0,0,0,.04); --press: color-mix(in srgb, #000 8%, var(--ed)); --cap: color-mix(in srgb, #000 3%, var(--ed)); --cap-b: #cecece;
-  --accent: #005fb8; --accent-t: #005fb8; --accent-soft: color-mix(in srgb, rgb(0,95,184) 12%, var(--ed)); --sel: color-mix(in srgb, rgb(0,95,184) 10%, var(--ed)); --sel-num: color-mix(in srgb, rgb(0,95,184) 20%, var(--ed));
-  --claude: #c15f3c; --claude-bg: color-mix(in srgb, rgb(217,119,87) 10%, var(--ed)); --claude-b: rgba(193,95,60,.35);
-  --err: #e51400; --ok: #2ea043; --amber: #bf8803;
-  --add-bg: color-mix(in srgb, rgb(155,185,85) 20%, var(--ed)); --add-num: color-mix(in srgb, rgb(155,185,85) 32%, var(--ed)); --add-rib: #2ea043; --add-w: color-mix(in srgb, rgb(156,204,44) 40%, var(--ed));
-  --del-bg: color-mix(in srgb, rgb(255,0,0) 10%, var(--ed)); --del-num: color-mix(in srgb, rgb(255,0,0) 18%, var(--ed)); --del-rib: #f85149; --del-w: color-mix(in srgb, rgb(255,0,0) 22%, var(--ed));
-  --hunk: color-mix(in srgb, rgb(0,95,184) 6%, var(--ed));
-  --p: #000000;
-  --glass: rgba(255,255,255,.6); --glass-b: rgba(0,0,0,.08); --glass-hi: rgba(255,255,255,.7);
-  --shadow: 0 0 8px 2px rgba(0,0,0,.16), 0 0 0 1px #cecece;
+  --text: #1d1d1f; --text2: rgb(0 0 0 / .5); --muted: rgb(0 0 0 / .5); --faint: rgb(0 0 0 / .25);
+  --line: rgb(0 0 0 / .1); --line2: rgb(0 0 0 / .13);
+  --accent: #007aff; --on-accent: #fff;
+  --ed: #fff; --ed2: #ececec; --raised: #fff;
+  --ok: #28cd41; --err: #ff3b30; --amber: #ff9500;
+  --tint-blue: #007aff; --tint-teal: #30b0c7; --tint-orange: #ff9500; --tint-yellow: #ffcc00; --tint-purple: #af52de; --tint-secondary: rgb(0 0 0 / .5);
+  --claude: #c15f3c;
+  --glass-hi: rgb(255 255 255 / .7);
+  --shadow-card: 0 4px 18px rgb(0 0 0 / .12);
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --side: #181818; --ed: #1f1f1f; --ed2: #181818; --raised: #252526; --pop: #202020;
-    --line: #2b2b2b; --line2: #3c3c3c;
-    --text: #cccccc; --text2: #b4b4b4; --muted: #9d9d9d; --faint: #6e7681;
-    --hover: color-mix(in srgb, #fff 5%, var(--ed)); --row-hover: rgba(255,255,255,.05); --press: color-mix(in srgb, #fff 10%, var(--ed)); --cap: color-mix(in srgb, #fff 7%, var(--ed)); --cap-b: #3c3c3c;
-    --accent: #0078d4; --accent-t: #4daafc; --accent-soft: color-mix(in srgb, rgb(0,120,212) 25%, var(--ed)); --sel: color-mix(in srgb, rgb(0,120,212) 20%, var(--ed)); --sel-num: color-mix(in srgb, rgb(0,120,212) 35%, var(--ed));
-    --claude: #e8916c; --claude-bg: color-mix(in srgb, rgb(232,145,108) 12%, var(--ed)); --claude-b: rgba(232,145,108,.35);
-    --err: #f14c4c; --ok: #2ea043; --amber: #cca700;
-    --add-bg: color-mix(in srgb, rgb(155,185,85) 15%, var(--ed)); --add-num: color-mix(in srgb, rgb(155,185,85) 25%, var(--ed)); --add-rib: #2ea043; --add-w: color-mix(in srgb, rgb(156,204,44) 30%, var(--ed));
-    --del-bg: color-mix(in srgb, rgb(255,0,0) 12%, var(--ed)); --del-num: color-mix(in srgb, rgb(255,0,0) 20%, var(--ed)); --del-rib: #f85149; --del-w: color-mix(in srgb, rgb(255,0,0) 30%, var(--ed));
-    --hunk: color-mix(in srgb, rgb(0,120,212) 8%, var(--ed));
-    --p: #d4d4d4;
-    --glass: rgba(31,31,31,.55); --glass-b: rgba(255,255,255,.10); --glass-hi: rgba(255,255,255,.08);
-    --shadow: 0 0 8px 2px rgba(0,0,0,.6), 0 0 0 1px #454545;
-    color-scheme: dark;
-  }
+:root.dark {
+  --claude: #e8916c;
+  --glass-hi: rgb(255 255 255 / .09);
+  --shadow-card: 0 4px 18px rgb(0 0 0 / .45);
+  color-scheme: dark;
+}
+:root {
+  --cap: color-mix(in srgb, var(--text) 7%, var(--ed));
+  --cap-b: var(--line2);
+  --accent-t: var(--accent);
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, var(--ed));
+  --sel: color-mix(in srgb, var(--accent) 12%, var(--ed));
+  --amber-soft: color-mix(in srgb, var(--amber) 16%, var(--ed));
+  --hover: color-mix(in srgb, var(--text) 6%, var(--ed));
+  --row-hover: color-mix(in srgb, var(--text) 5%, transparent);
+  --press: color-mix(in srgb, var(--text) 11%, var(--ed));
+  --claude-bg: color-mix(in srgb, var(--claude) 11%, var(--ed));
+  --claude-b: color-mix(in srgb, var(--claude) 38%, transparent);
+  --add-bg: color-mix(in srgb, var(--ok) 13%, var(--ed));
+  --add-num: color-mix(in srgb, var(--ok) 26%, var(--ed));
+  --add-rib: var(--ok);
+  --add-w: color-mix(in srgb, var(--ok) 36%, var(--ed));
+  --del-bg: color-mix(in srgb, var(--err) 13%, var(--ed));
+  --del-num: color-mix(in srgb, var(--err) 23%, var(--ed));
+  --del-rib: var(--err);
+  --del-w: color-mix(in srgb, var(--err) 32%, var(--ed));
+  --hunk: color-mix(in srgb, var(--accent) 7%, var(--ed));
+  --p: var(--text);
+  --glass: color-mix(in srgb, var(--ed) 58%, transparent);
+  --glass-card: color-mix(in srgb, var(--raised) 72%, transparent);
+  --glass-b: var(--line);
+  --shadow: 0 8px 28px rgb(0 0 0 / .22), 0 0 0 .5px var(--line);
+}
+:root.opaque {
+  --glass: var(--ed);
+  --glass-card: var(--raised);
 }
 
 @theme inline {
@@ -75,6 +91,7 @@
   --color-del-w: var(--del-w);
   --color-hunk: var(--hunk);
   --color-code: var(--p);
+  --color-on-accent: var(--on-accent);
   --color-glassb: var(--glass-b);
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   --font-mono: "SF Mono", ui-monospace, Menlo, monospace;
@@ -90,6 +107,20 @@
   background: var(--glass);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
   backdrop-filter: blur(24px) saturate(180%);
+  :root.opaque & {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@utility glass-card {
+  background: var(--glass-card);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow-card), 0 0 0 .5px var(--line2);
+  :root.opaque & {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
 @utility row-hover {
   &:hover { background-image: linear-gradient(var(--row-hover), var(--row-hover)); }

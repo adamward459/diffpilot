@@ -56,4 +56,20 @@ final class DiffPaneUITests: XCTestCase {
         XCTAssertTrue(pane.waitUntil { pane.recognizedText().contains("Please split this file") })
         XCTAssertEqual(pane.reply, "")
     }
+
+    func testViewedToggleInTheToolbarMarksAndUnmarksTheTopFile() {
+        XCTAssertTrue(pane.waitUntil { pane.topFile == "docs/archive.md" }, pane.stateValue)
+        XCTAssertTrue(pane.viewedToggle.waitForExistence(timeout: 5))
+        pane.viewedToggle.click()
+        XCTAssertTrue(pane.waitUntil { pane.viewedCount == 1 }, pane.stateValue)
+        pane.viewedToggle.click()
+        XCTAssertTrue(pane.waitUntil { pane.viewedCount == 0 }, pane.stateValue)
+    }
+
+    func testToolbarControlsAreNativeAndSitAboveThePane() {
+        XCTAssertTrue(pane.waitUntil { pane.topFile == "docs/archive.md" }, pane.stateValue)
+        XCTAssertTrue(pane.commentButton.waitForExistence(timeout: 5))
+        XCTAssertLessThan(pane.commentButton.frame.maxY, pane.paneFrame.minY + DiffPaneDriver.toolbarHeight)
+        XCTAssertTrue(pane.app.descendants(matching: .any)["pane-mode"].firstMatch.exists)
+    }
 }

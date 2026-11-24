@@ -12,6 +12,7 @@ export type Range = [start: number, end: number];
 interface RowBase {
   f: number;
   key: string;
+  h?: number;
 }
 export type Row =
   | (RowBase & { k: 'fh' | 'gap' | 'load' })
@@ -67,10 +68,10 @@ export function buildFileRows(file: PageFile, f: number, threads: ReviewThread[]
   let oi = 0;
   let ni = 0;
   file.hunks.forEach((hunk, hi) => {
-    out.push({ k: 'hk', f, key: `h${f}:${hi}`, text: hunk.header });
+    out.push({ k: 'hk', f, key: `h${f}:${hi}`, h: hi, text: hunk.header });
     let dels: LineRow[] = [];
     hunk.lines.forEach(([t, o, n, text]: DiffLine, li) => {
-      const r: LineRow = { k: 'ln', f, key: `l${f}:${hi}:${li}`, t, o, n, text, oi: t !== 'a' ? oi++ : -1, ni: t !== 'd' ? ni++ : -1 };
+      const r: LineRow = { k: 'ln', f, key: `l${f}:${hi}:${li}`, h: hi, t, o, n, text, oi: t !== 'a' ? oi++ : -1, ni: t !== 'd' ? ni++ : -1 };
       if (t === 'd') dels.push(r);
       else if (t === 'a' && dels.length) {
         const d = dels.shift();
@@ -81,7 +82,7 @@ export function buildFileRows(file: PageFile, f: number, threads: ReviewThread[]
       } else dels = [];
       out.push(r);
       const side = t === 'd' ? 'old' : 'new';
-      for (const thread of anchored.get(`${side}:${t === 'd' ? o : n}`) ?? []) out.push({ k: 'th', f, key: `t${thread.id}`, thread });
+      for (const thread of anchored.get(`${side}:${t === 'd' ? o : n}`) ?? []) out.push({ k: 'th', f, key: `t${thread.id}`, h: hi, thread });
     });
   });
   out.push(gap);

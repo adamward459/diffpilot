@@ -35,18 +35,24 @@ final class PaneSchemeHandler: NSObject, WKURLSchemeHandler {
 
     private static let mimeTypes = [
         "html": "text/html", "js": "text/javascript", "css": "text/css", "json": "application/json",
+        "png": "image/png",
     ]
+    private static let symbolPrefix = "/sf/"
 
     func webView(_ webView: WKWebView, start task: any WKURLSchemeTask) {
         guard let url = task.request.url, let resources = Bundle.main.resourceURL else {
             return task.didFailWithError(URLError(.badURL))
         }
         let file = resources.appendingPathComponent(url.lastPathComponent)
-        guard let data = try? Data(contentsOf: file, options: .mappedIfSafe) else {
-            return task.didFailWithError(URLError(.fileDoesNotExist))
-        }
+        let isSymbol = url.path.hasPrefix(Self.symbolPrefix)
+        let data =
+            isSymbol
+            ? SymbolImages.png(named: url.deletingPathExtension().lastPathComponent)
+            : try? Data(contentsOf: file, options: .mappedIfSafe)
+        guard let data else { return task.didFailWithError(URLError(.fileDoesNotExist)) }
         let headers = [
-            "Content-Type": Self.mimeTypes[file.pathExtension] ?? "application/octet-stream",
+            "Content-Type": Self.mimeTypes[isSymbol ? "png" : file.pathExtension] ?? "application/octet-stream",
+            "Cache-Control": isSymbol ? "max-age=31536000" : "no-cache",
             "Content-Length": String(data.count),
         ]
         task.didReceive(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: headers)!)
@@ -73,10 +79,41 @@ private final class PageBridge: NSObject, WKScriptMessageHandler, WKNavigationDe
     }
 }
 
+@MainActor
+final class ThemeObserver {
+    private var appearance: NSKeyValueObservation?
+    private var observers: [(center: NotificationCenter, token: any NSObjectProtocol)] = []
+
+    func start(_ web: WKWebView, model: DiffPaneModel) {
+        let apply = { [weak web, weak model] in
+            guard let web, let model else { return }
+            model.setTheme(PaneTheme.current(web.effectiveAppearance))
+        }
+        apply()
+        appearance = web.observe(\.effectiveAppearance) { _, _ in MainActor.assumeIsolated(apply) }
+        let sources = [
+            (NotificationCenter.default, NSColor.systemColorsDidChangeNotification),
+            (NSWorkspace.shared.notificationCenter, NSWorkspace.accessibilityDisplayOptionsDidChangeNotification),
+        ]
+        observers = sources.map { center, name in
+            (
+                center,
+                center.addObserver(forName: name, object: nil, queue: .main) { _ in MainActor.assumeIsolated(apply) }
+            )
+        }
+    }
+
+    deinit {
+        for (center, token) in observers { center.removeObserver(token) }
+    }
+}
+
 struct DiffWebView: NSViewRepresentable {
     static let handlerName = "dp"
 
     let model: DiffPaneModel
+
+    func makeCoordinator() -> ThemeObserver { ThemeObserver() }
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -97,13 +134,14 @@ struct DiffWebView: NSViewRepresentable {
                 if case .failure(let error) = result { NSLog("diffpane: \(script) failed: \(error)") }
             }
         }
+        context.coordinator.start(web, model: model)
         web.load(URLRequest(url: PaneSchemeHandler.entry))
         return web
     }
 
     func updateNSView(_ web: WKWebView, context: Context) {}
 
-    static func dismantleNSView(_ web: WKWebView, coordinator: ()) {
+    static func dismantleNSView(_ web: WKWebView, coordinator: ThemeObserver) {
         web.configuration.userContentController.removeScriptMessageHandler(forName: handlerName)
     }
 }

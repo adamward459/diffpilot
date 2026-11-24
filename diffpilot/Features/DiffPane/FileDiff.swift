@@ -1,3 +1,5 @@
+import Foundation
+
 nonisolated extension FileStatus: Encodable {}
 
 nonisolated struct FileDiff: Equatable, Sendable, Encodable {
@@ -8,6 +10,24 @@ nonisolated struct FileDiff: Equatable, Sendable, Encodable {
     var additions = 0
     var deletions = 0
     var hunks: [Hunk] = []
+
+    private enum CodingKeys: String, CodingKey {
+        case path, oldPath, status, isBinary, additions, deletions, hunks, symbol, tint
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(path, forKey: .path)
+        try container.encodeIfPresent(oldPath, forKey: .oldPath)
+        try container.encode(status, forKey: .status)
+        try container.encode(isBinary, forKey: .isBinary)
+        try container.encode(additions, forKey: .additions)
+        try container.encode(deletions, forKey: .deletions)
+        try container.encode(hunks, forKey: .hunks)
+        let icon = FileIcon.forFile(named: (path as NSString).lastPathComponent)
+        try container.encode(icon.symbol, forKey: .symbol)
+        try container.encode(icon.tint.rawValue, forKey: .tint)
+    }
 }
 
 nonisolated struct Hunk: Equatable, Sendable, Encodable {

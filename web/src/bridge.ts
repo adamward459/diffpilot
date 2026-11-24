@@ -15,6 +15,8 @@ export interface FileDiff {
   additions: number;
   deletions: number;
   hunks: Hunk[];
+  symbol: string;
+  tint: string;
 }
 
 export type ThreadAnchor =
@@ -32,6 +34,13 @@ export interface ReviewThread {
   comments: ThreadComment[];
 }
 
+export interface Theme {
+  colors: Record<string, string>;
+  isDark: boolean;
+  increaseContrast: boolean;
+  reduceTransparency: boolean;
+}
+
 // Swift calls these through callAsyncJavaScript (HostCommand in PageMessage.swift).
 export interface HostApi {
   load(files: FileDiff[], done: boolean): void;
@@ -39,6 +48,8 @@ export interface HostApi {
   removeThread(id: number): void;
   reveal(path: string): void;
   setInset(points: number): void;
+  setTheme(theme: Theme): void;
+  fileState(path: string, viewed: boolean, collapsed: boolean): void;
   benchScroll(): void;
 }
 
@@ -48,6 +59,7 @@ export type PageMessage =
   | { type: 'needMore' }
   | { type: 'firstPaint' }
   | { type: 'visibleFile'; path: string }
+  | { type: 'toggleCollapsed'; path: string }
   | { type: 'scrollStats'; frames: number; p50: number; p95: number; max: number }
   | { type: 'createThread'; path: string; side?: Side; line?: number }
   | { type: 'post'; thread: number; text: string }

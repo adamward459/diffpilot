@@ -20,6 +20,14 @@ final class DiffPaneScreenshotUITests: XCTestCase {
         XCTAssertTrue(pane.waitUntil { pane.recognizedText().contains("archive.md") })
         try attach(pane.window, named: "diffpane-\(appearance)")
 
+        pane.paneCoordinate(x: pane.paneFrame.midX, y: pane.paneFrame.midY).click()
+        for _ in 0..<4 { pane.app.typeKey(.downArrow, modifierFlags: []) }
+        Thread.sleep(forTimeInterval: 1)
+        Thread.sleep(forTimeInterval: 1.5)
+        try attach(pane.window, named: "diffpane-pinned-\(appearance)")
+        pane.app.typeKey(.home, modifierFlags: [])
+        Thread.sleep(forTimeInterval: 1.5)
+
         pane.hoverAndClickLineButton(line: 2)
         XCTAssertTrue(pane.waitUntil { pane.threadCount == 1 })
         pane.app.typeText("@claude is this line needed?")
