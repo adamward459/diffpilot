@@ -1,38 +1,52 @@
 import Foundation
 import Observation
+import os
 
 @Observable
 final class DiffPaneModel {
     static let lineBudget = 2500
+    static let signposter = OSSignposter(subsystem: "com.adamward459.diffpilot", category: "DiffPane")
+    static let firstPaintSignpost: StaticString = "firstPaint"
 
     var send: (HostCommand) -> Void
     private(set) var threads = ThreadStore()
     private(set) var firstPaintAt: Date?
     private(set) var visiblePath: String?
+    private(set) var scrollStats: ScrollStats?
 
     private let repo: URL?
     private let base: String
     private let replier: any ClaudeReplier
+    private let benchScrollDelay: Duration?
     private var batches: DiffBatches?
     private var isLoaded = false
     private var isPageReady = false
     private var hasSentFirstBatch = false
     private var inset = 0.0
     private var pendingReveal: String?
+    private var firstPaintInterval: OSSignpostIntervalState?
 
     init(
         repo: URL?, base: String = "main", replier: any ClaudeReplier = ScriptedReplier(),
+        benchScrollDelay: Duration? = ProcessInfo.processInfo.environment["DIFFPILOT_BENCH"].flatMap(Double.init).map {
+            .seconds($0)
+        },
         send: @escaping (HostCommand) -> Void = { _ in }
     ) {
         self.repo = repo
         self.base = base
         self.replier = replier
+        self.benchScrollDelay = benchScrollDelay
         self.send = send
+        firstPaintInterval = Self.signposter.beginInterval(Self.firstPaintSignpost)
     }
 
     var accessibilitySummary: String {
         let reply = threads.threads.values.flatMap(\.comments).last(where: { $0.author == ThreadStore.claudeName })
-        return "top=\(visiblePath ?? ""); threads=\(threads.threads.count); reply=\(reply?.body ?? "")"
+        let scroll =
+            scrollStats.map { String(format: "%d/%.2f/%.2f/%.2f", $0.frames, $0.medianMs, $0.p95Ms, $0.maxMs) } ?? ""
+        return
+            "top=\(visiblePath ?? ""); threads=\(threads.threads.count); scroll=\(scroll); reply=\(reply?.body ?? "")"
     }
 
     func load() async {
@@ -72,8 +86,20 @@ final class DiffPaneModel {
             sendNextBatch()
         case .firstPaint:
             firstPaintAt = Date()
+            if let interval = firstPaintInterval {
+                Self.signposter.endInterval(Self.firstPaintSignpost, interval)
+                firstPaintInterval = nil
+            }
+            if let delay = benchScrollDelay {
+                Task {
+                    try? await Task.sleep(for: delay)
+                    send(.benchScroll)
+                }
+            }
         case .visibleFile(let path):
             visiblePath = path
+        case .scrollStats(let stats):
+            scrollStats = stats
         case .createThread(let anchor):
             send(.thread(threads.create(anchor)))
         case .post(let id, let text):

@@ -1,10 +1,18 @@
 import Foundation
 
+nonisolated struct ScrollStats: Equatable, Sendable {
+    var frames: Int
+    var medianMs: Double
+    var p95Ms: Double
+    var maxMs: Double
+}
+
 nonisolated enum PageMessage: Equatable, Sendable {
     case ready
     case needMore
     case firstPaint
     case visibleFile(String)
+    case scrollStats(ScrollStats)
     case createThread(ThreadAnchor)
     case post(thread: Int, text: String)
     case askClaude(thread: Int)
@@ -19,6 +27,11 @@ nonisolated enum PageMessage: Equatable, Sendable {
         case "visibleFile":
             guard let path = fields["path"] as? String else { return nil }
             self = .visibleFile(path)
+        case "scrollStats":
+            guard let frames = fields["frames"] as? Int, let median = fields["p50"] as? Double,
+                let p95 = fields["p95"] as? Double, let max = fields["max"] as? Double
+            else { return nil }
+            self = .scrollStats(ScrollStats(frames: frames, medianMs: median, p95Ms: p95, maxMs: max))
         case "createThread":
             guard let path = fields["path"] as? String else { return nil }
             if let side = (fields["side"] as? String).flatMap(ThreadAnchor.Side.init(rawValue:)),
@@ -48,6 +61,7 @@ nonisolated enum HostCommand: Sendable {
     case removeThread(Int)
     case reveal(path: String)
     case setInset(Double)
+    case benchScroll
 
     var call: (script: String, arguments: [String: Any]) {
         switch self {
@@ -61,6 +75,8 @@ nonisolated enum HostCommand: Sendable {
             ("dp.reveal(path)", ["path": path])
         case .setInset(let points):
             ("dp.setInset(points)", ["points": points])
+        case .benchScroll:
+            ("dp.benchScroll()", [:])
         }
     }
 

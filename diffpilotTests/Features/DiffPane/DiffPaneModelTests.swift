@@ -181,7 +181,28 @@ struct DiffPaneModelTests {
         model.handle(.createThread(.file(path: "a.ts")))
         model.handle(.askClaude(thread: 1))
         await settle { recorder.threads.last?.comments.last?.isStreaming == false }
-        #expect(model.accessibilitySummary == "top=a.ts; threads=1; reply=one two three ")
+        #expect(model.accessibilitySummary == "top=a.ts; threads=1; scroll=; reply=one two three ")
+    }
+
+    @Test func summaryIncludesTheLatestScrollStats() {
+        let model = makeModel(Recorder(), repo: nil)
+        model.handle(.scrollStats(ScrollStats(frames: 120, medianMs: 8.3, p95Ms: 9.1, maxMs: 16.7)))
+        #expect(model.accessibilitySummary.contains("scroll=120/8.30/9.10/16.70"))
+    }
+
+    @Test func benchScrollRunsAfterTheFirstPaintOnlyWhenAsked() async {
+        let plain = Recorder()
+        let quiet = DiffPaneModel(repo: nil, benchScrollDelay: nil, send: { plain.commands.append($0) })
+        quiet.handle(.firstPaint)
+
+        let bench = Recorder()
+        let model = DiffPaneModel(repo: nil, benchScrollDelay: .zero, send: { bench.commands.append($0) })
+        model.handle(.firstPaint)
+        await settle { bench.commands.contains { if case .benchScroll = $0 { true } else { false } } }
+        try? await Task.sleep(for: .milliseconds(30))
+
+        #expect(!plain.commands.contains { if case .benchScroll = $0 { true } else { false } })
+        #expect(bench.commands.contains { if case .benchScroll = $0 { true } else { false } })
     }
 
     @Test func removeDropsTheThreadAndTellsThePage() {

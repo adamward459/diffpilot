@@ -14,6 +14,13 @@ struct PageMessageTests {
         #expect(PageMessage(body: ["type": "visibleFile"]) == nil)
     }
 
+    @Test func parsesScrollStats() {
+        #expect(
+            PageMessage(body: ["type": "scrollStats", "frames": 90, "p50": 8.3, "p95": 9.0, "max": 17.1])
+                == .scrollStats(ScrollStats(frames: 90, medianMs: 8.3, p95Ms: 9, maxMs: 17.1)))
+        #expect(PageMessage(body: ["type": "scrollStats", "frames": 90]) == nil)
+    }
+
     @Test func parsesLineAndFileThreads() {
         #expect(
             PageMessage(body: ["type": "createThread", "path": "a.ts", "side": "old", "line": 4])

@@ -349,5 +349,26 @@ function setInset(px) {
   rebuild();
 }
 
-window.dp = { load, thread, removeThread, reveal, setInset };
+const BENCH_SECONDS = 3;
+const BENCH_PX_PER_SECOND = 6000;
+function benchScroll() {
+  const dts = [];
+  root.scrollTop = 0;
+  let last = 0;
+  let start = 0;
+  const step = (t) => {
+    if (start) {
+      dts.push(t - last);
+      root.scrollTop += BENCH_PX_PER_SECOND * ((t - last) / 1000);
+    } else start = t;
+    last = t;
+    if (t - start < BENCH_SECONDS * 1000) return requestAnimationFrame(step);
+    dts.sort((a, b) => a - b);
+    const at = (q) => dts[Math.min(dts.length - 1, Math.floor(dts.length * q))];
+    send('scrollStats', { frames: dts.length, p50: at(0.5), p95: at(0.95), max: dts[dts.length - 1] });
+  };
+  requestAnimationFrame(step);
+}
+
+window.dp = { load, thread, removeThread, reveal, setInset, benchScroll };
 send('ready');

@@ -1,3 +1,4 @@
+import AppKit
 import Vision
 import XCTest
 
@@ -26,6 +27,9 @@ struct DiffPaneDriver {
     var threadCount: Int { Int(field("threads")) ?? 0 }
     var reply: String { field("reply") }
 
+    // Frames, median, p95, and max frame time in ms of the last scroll burst.
+    var scrollStats: [Double] { field("scroll").split(separator: "/").compactMap { Double($0) } }
+
     private func field(_ name: String) -> String {
         for part in stateValue.components(separatedBy: "; ") where part.hasPrefix(name + "=") {
             return String(part.dropFirst(name.count + 1))
@@ -33,11 +37,11 @@ struct DiffPaneDriver {
         return ""
     }
 
-    func waitUntil(timeout: TimeInterval = 15, _ condition: () -> Bool) -> Bool {
+    func waitUntil(timeout: TimeInterval = 15, pollEvery: TimeInterval = 0.05, _ condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if condition() { return true }
-            Thread.sleep(forTimeInterval: 0.05)
+            Thread.sleep(forTimeInterval: pollEvery)
         }
         return condition()
     }
@@ -60,6 +64,30 @@ struct DiffPaneDriver {
     func clickFileCommentButton() {
         let pane = paneFrame
         paneCoordinate(x: pane.maxX - 163, y: pane.minY + Self.fileHeaderHeight / 2).click()
+    }
+
+    // Drags the window onto the display with the highest refresh rate and returns that rate.
+    func moveToFastestScreen() -> Double {
+        let screens = NSScreen.screens
+        guard let primary = screens.first,
+            let fastest = screens.max(by: { $0.maximumFramesPerSecond < $1.maximumFramesPerSecond })
+        else { return 60 }
+        func topLeftFrame(_ screen: NSScreen) -> CGRect {
+            CGRect(
+                x: screen.frame.minX, y: primary.frame.maxY - screen.frame.maxY, width: screen.frame.width,
+                height: screen.frame.height)
+        }
+        let target = topLeftFrame(fastest)
+        let center = CGPoint(x: window.frame.midX, y: window.frame.midY)
+        if !target.contains(center) {
+            let grab = window.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0)).withOffset(
+                CGVector(dx: 0, dy: 20))
+            let drop = window.coordinate(withNormalizedOffset: .zero).withOffset(
+                CGVector(dx: target.midX - window.frame.minX, dy: target.midY - window.frame.minY))
+            grab.press(forDuration: 0.2, thenDragTo: drop)
+        }
+        let now = CGPoint(x: window.frame.midX, y: window.frame.midY)
+        return Double((screens.first { topLeftFrame($0).contains(now) } ?? fastest).maximumFramesPerSecond)
     }
 
     func recognizedText() -> String {
