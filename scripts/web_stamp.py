@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Keep the committed DiffPane web build in step with its source.
 
-web/web.stamp holds a hash of the build inputs (web/src, package.json, package-lock.json,
+web/web.stamp holds a hash of the build inputs (web/src, package.json, package-lock.json, tsconfig.json,
 build.mjs) and a hash of the committed build output. `check` fails when either one changed
 without a rebuild.
 
@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 OUTPUT = ROOT / "diffpilot" / "Features" / "DiffPane" / "Web"
 STAMP = WEB / "web.stamp"
-INPUT_FILES = ["package.json", "package-lock.json", "build.mjs"]
+INPUT_FILES = ["package.json", "package-lock.json", "build.mjs", "tsconfig.json"]
 
 
 def digest(root: Path, files: list[Path]) -> str:
@@ -46,7 +46,7 @@ def problems() -> list[str]:
     found = []
     if recorded.get("inputs") != inputs():
         found.append(
-            "web/src, package.json, package-lock.json, or build.mjs changed since the last build: "
+            "web/src, package.json, package-lock.json, tsconfig.json, or build.mjs changed since the last build: "
             "run `npm run build` in web/ and commit diffpilot/Features/DiffPane/Web/ and web/web.stamp"
         )
     if recorded.get("output") != output():

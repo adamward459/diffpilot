@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="h-full overflow-hidden">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,12 +7,12 @@
 <title>Diff</title>
 <link rel="stylesheet" href="diffpane.css">
 </head>
-<body>
-<div class="scroll" id="scroll" role="document" aria-label="Diff">
-  <div class="spacer" id="spacer"></div>
+<body class="m-0 h-full overflow-hidden bg-ed font-sans text-[13px]/[18px] text-fg antialiased">
+<div class="absolute inset-0 overflow-x-hidden overflow-y-auto overscroll-contain" id="scroll" role="document" aria-label="Diff">
+  <div class="relative w-full" id="spacer"></div>
 </div>
-<div class="sticky" id="sticky" style="visibility:hidden"></div>
-<div class="empty" id="empty" hidden>No changes</div>
+<div class="absolute inset-x-0 top-0 z-10 will-change-transform" id="sticky" style="visibility:hidden"></div>
+<div class="absolute inset-0 flex items-center justify-center text-[13px] text-muted" id="empty" hidden>No changes</div>
 <script type="module" src="diffpane.js"></script>
 </body>
 </html>

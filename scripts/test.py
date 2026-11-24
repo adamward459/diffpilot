@@ -16,7 +16,7 @@ and a change in it touches every feature.
                                          (or REF) and fail on metrics more than 5% worse
   scripts/test.py screenshot [feature...] capture screenshots into screenshots/feature/<Feature>/
   scripts/test.py related                print the test commands that match the current changes
-  scripts/test.py lint                   check the folder layout, features.json, and that the committed web build is current
+  scripts/test.py lint                   check the folder layout, features.json, that the committed web build is current, and that web/ type checks
 """
 
 from __future__ import annotations
@@ -450,6 +450,16 @@ def related() -> None:
         print("  scripts/pr_screenshots.py")
 
 
+def web_typecheck() -> None:
+    web = ROOT / "web"
+    if not (web / "node_modules").is_dir():
+        print("web types skipped: run `npm ci` in web/ to type check the page", file=sys.stderr)
+        return
+    done = subprocess.run(["npm", "run", "--silent", "typecheck"], cwd=web, capture_output=True, text=True)
+    if done.returncode != 0:
+        raise LintError("web/ does not type check (npm run typecheck):\n" + (done.stdout + done.stderr).strip())
+
+
 def main(argv: list[str]) -> int:
     if not argv or argv[0] not in ("unit", "e2e", "hotpath", "screenshot", "related", "lint"):
         print(__doc__.strip(), file=sys.stderr)
@@ -462,7 +472,8 @@ def main(argv: list[str]) -> int:
             stale = web_stamp.problems()
             if stale:
                 raise LintError("\n".join(stale))
-            print("Layout, features.json, and web build OK", file=sys.stderr)
+            web_typecheck()
+            print("Layout, features.json, web build, and web types OK", file=sys.stderr)
             return 0
         if command == "related":
             related()

@@ -1,0 +1,73 @@
+export type Status = 'A' | 'M' | 'D' | 'R';
+export type LineKind = 'c' | 'a' | 'd';
+export type Side = 'old' | 'new';
+
+export type DiffLine = readonly [kind: LineKind, old: number | null, new: number | null, text: string];
+export interface Hunk {
+  header: string;
+  lines: DiffLine[];
+}
+export interface FileDiff {
+  path: string;
+  oldPath?: string;
+  status: Status;
+  isBinary: boolean;
+  additions: number;
+  deletions: number;
+  hunks: Hunk[];
+}
+
+export type ThreadAnchor =
+  | { kind: 'file'; path: string }
+  | { kind: 'line'; path: string; side: Side; line: number };
+export interface ThreadComment {
+  id: number;
+  author: string;
+  body: string;
+  isStreaming: boolean;
+}
+export interface ReviewThread {
+  id: number;
+  anchor: ThreadAnchor;
+  comments: ThreadComment[];
+}
+
+// Swift calls these through callAsyncJavaScript (HostCommand in PageMessage.swift).
+export interface HostApi {
+  load(files: FileDiff[], done: boolean): void;
+  thread(thread: ReviewThread): void;
+  removeThread(id: number): void;
+  reveal(path: string): void;
+  setInset(points: number): void;
+  benchScroll(): void;
+}
+
+// The page posts these to Swift (PageMessage.init(body:) in PageMessage.swift).
+export type PageMessage =
+  | { type: 'ready' }
+  | { type: 'needMore' }
+  | { type: 'firstPaint' }
+  | { type: 'visibleFile'; path: string }
+  | { type: 'scrollStats'; frames: number; p50: number; p95: number; max: number }
+  | { type: 'createThread'; path: string; side?: Side; line?: number }
+  | { type: 'post'; thread: number; text: string }
+  | { type: 'askClaude'; thread: number }
+  | { type: 'remove'; thread: number };
+
+declare global {
+  interface Window {
+    dp: HostApi;
+    webkit: { messageHandlers: { dp: { postMessage(message: PageMessage): void } } };
+  }
+}
+
+export const send = (message: PageMessage): void => window.webkit.messageHandlers.dp.postMessage(message);
+
+export type Token = [length: number, light: string, dark: string];
+export interface HighlightRequest {
+  f: number;
+  path: string;
+  oldText: string;
+  newText: string;
+}
+export type HighlightResult = { f: number; none: true } | { f: number; none?: undefined; old: Token[][]; new: Token[][] };
