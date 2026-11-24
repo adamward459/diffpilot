@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Run diffpilot tests grouped by feature folder.
 
-A feature is a folder diffpilot/<Feature>/. Its unit tests are the test types in
-diffpilotTests/<Feature>/ and its e2e tests are those in diffpilotUITests/<Feature>/.
+A feature is a folder diffpilot/Features/<Feature>/. App/ and Shared/ sit next to
+Features/ and count as features too. Unit tests mirror the source path in diffpilotTests/
+(diffpilotTests/Features/<Feature>/) and e2e tests in diffpilotUITests/.
 Test types whose name contains "Performance" are hot path tests; features.json maps
 them to source globs. UI test types whose name contains "Screenshot" capture the
 feature's screenshots into screenshots/feature/<Feature>/. Shared/ is a feature too,
@@ -34,6 +35,8 @@ ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "features.json"
 SOURCE_DIR = "diffpilot"
 SHARED = "Shared"
+FEATURES_DIR = "Features"
+TOP_LEVEL_FEATURES = ("App", SHARED)
 KIND_TARGETS = {"unit": "diffpilotTests", "e2e": "diffpilotUITests"}
 PERF_MARKER = "Performance"
 SCREENSHOT_MARKER = "Screenshot"
@@ -99,7 +102,15 @@ def changed_files(base: str) -> list[str]:
 
 def folder_of(path: str) -> str | None:
     parts = path.split("/")
-    return parts[1] if len(parts) > 2 else None
+    if len(parts) > 3 and parts[1] == FEATURES_DIR:
+        return parts[2]
+    if len(parts) > 2 and parts[1] in TOP_LEVEL_FEATURES:
+        return parts[1]
+    return None
+
+
+def feature_dir(top: str, feature: str) -> str:
+    return f"{top}/{feature}/" if feature in TOP_LEVEL_FEATURES else f"{top}/{FEATURES_DIR}/{feature}/"
 
 
 def features(files: list[str]) -> list[str]:
@@ -161,9 +172,9 @@ def lint(manifest: dict, files: list[str], types: list[TestType]) -> None:
         if top in (SOURCE_DIR, *KIND_TARGETS.values()):
             folder = folder_of(f)
             if folder is None:
-                errors.append(f"{f}: move it into a feature folder ({top}/<Feature>/) or {top}/{SHARED}/")
+                errors.append(f"{f}: move it into {top}/{FEATURES_DIR}/<Feature>/, or {top}/App/ or {top}/{SHARED}/")
             elif top != SOURCE_DIR and folder not in feats:
-                errors.append(f"{f}: no source folder {SOURCE_DIR}/{folder}/ for this test folder")
+                errors.append(f"{f}: no source folder {feature_dir(SOURCE_DIR, folder)} for this test folder")
 
     for feature, reasons in manifest["na"].items():
         if feature not in feats:
@@ -181,7 +192,7 @@ def lint(manifest: dict, files: list[str], types: list[TestType]) -> None:
             has_na = kind in manifest["na"].get(feature, {})
             if not has_tests and not has_na:
                 errors.append(
-                    f"{feature} has no {kind} tests: add them in {target}/{feature}/, "
+                    f"{feature} has no {kind} tests: add them in {feature_dir(target, feature)}, "
                     f"or set na.{feature}.{kind} in features.json with a reason"
                 )
             if has_tests and has_na:
@@ -192,7 +203,7 @@ def lint(manifest: dict, files: list[str], types: list[TestType]) -> None:
         if not has_shots and not has_na:
             errors.append(
                 f"{feature} has no screenshot test: add a *{SCREENSHOT_MARKER}UITests type in "
-                f"diffpilotUITests/{feature}/, or set na.{feature}.screenshot in features.json with a reason"
+                f"{feature_dir(KIND_TARGETS['e2e'], feature)}, or set na.{feature}.screenshot in features.json with a reason"
             )
         if has_shots and has_na:
             errors.append(f"{feature} has a screenshot test, so remove na.{feature}.screenshot from features.json")

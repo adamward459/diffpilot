@@ -12,12 +12,12 @@
     },
     {
       "feature": "Sidebar",
-      "glob": "diffpilot/Sidebar/FileTree.swift",
+      "glob": "diffpilot/Features/Sidebar/FileTree.swift",
       "tests": ["diffpilotTests/FilePerformanceTests"]
     },
     {
       "feature": "Sidebar",
-      "glob": "diffpilot/Sidebar/*Outline*.swift",
+      "glob": "diffpilot/Features/Sidebar/*Outline*.swift",
       "tests": ["diffpilotTests/SidebarPerformanceBaselineTests", "diffpilotUITests/SidebarPerformanceUITests"]
     }
   ]
