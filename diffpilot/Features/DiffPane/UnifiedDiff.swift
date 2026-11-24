@@ -98,7 +98,6 @@ nonisolated enum UnifiedDiff {
         }
 
         // For `diff --git a/P b/P` the two halves have equal length, which keeps spaces in P unambiguous.
-        // A rename header gets its real paths from the `rename from` and `rename to` lines.
         static func headerPath(_ line: Substring.UTF8View) -> String {
             let rest = Array(line.dropFirst("diff --git a/".utf8.count))
             let half = (rest.count - 3) / 2

@@ -27,7 +27,6 @@ final class DiffPanePerformanceUITests: XCTestCase {
 
     private let benchDelay = 6
 
-    // The page scrolls 18,000 px in 3 s on its own, so the frame times are the page's cost and not the input device's.
     func testScrollingKeepsTheDisplayRate() throws {
         var worst = 0.0
         var refresh = 60.0
@@ -36,13 +35,13 @@ final class DiffPanePerformanceUITests: XCTestCase {
             pane.app.launchEnvironment["DIFFPILOT_BENCH"] = "\(benchDelay)"
             pane.app.launch()
             XCTAssertTrue(pane.state.waitForExistence(timeout: 10))
-            refresh = pane.moveToFastestScreen()
+            refresh = Double(pane.moveToFastestScreen().maximumFramesPerSecond)
             sleep(UInt32(benchDelay + 4))
-            XCTAssertTrue(pane.waitUntil(timeout: 30, pollEvery: 1) { !pane.scrollStats.isEmpty }, pane.stateValue)
-            let stats = pane.scrollStats
-            worst = max(worst, stats[2])
+            XCTAssertTrue(pane.waitUntil(timeout: 30, pollEvery: 1) { pane.scrollStats != nil }, pane.stateValue)
+            let stats = try XCTUnwrap(pane.scrollStats)
+            worst = max(worst, stats.p95)
             print(
-                "scroll bench: frames=\(Int(stats[0])) p50=\(stats[1])ms p95=\(stats[2])ms max=\(stats[3])ms display=\(refresh)Hz window=\(pane.window.frame)"
+                "scroll bench: frames=\(stats.frames) p50=\(stats.p50)ms p95=\(stats.p95)ms max=\(stats.max)ms display=\(refresh)Hz window=\(pane.window.frame)"
             )
             pane.app.terminate()
         }

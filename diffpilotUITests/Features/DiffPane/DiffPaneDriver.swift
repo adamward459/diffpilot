@@ -27,8 +27,18 @@ struct DiffPaneDriver {
     var threadCount: Int { Int(field("threads")) ?? 0 }
     var reply: String { field("reply") }
 
-    // Frames, median, p95, and max frame time in ms of the last scroll burst.
-    var scrollStats: [Double] { field("scroll").split(separator: "/").compactMap { Double($0) } }
+    struct ScrollStats {
+        var frames: Int
+        var p50: Double
+        var p95: Double
+        var max: Double
+    }
+
+    var scrollStats: ScrollStats? {
+        let values = field("scroll").split(separator: "/").compactMap { Double($0) }
+        guard values.count == 4 else { return nil }
+        return ScrollStats(frames: Int(values[0]), p50: values[1], p95: values[2], max: values[3])
+    }
 
     private func field(_ name: String) -> String {
         for part in stateValue.components(separatedBy: "; ") where part.hasPrefix(name + "=") {
@@ -73,9 +83,7 @@ struct DiffPaneDriver {
             height: screen.frame.height)
     }
 
-    // Drags the window onto the screen when it is elsewhere and returns that screen's refresh rate.
-    @discardableResult
-    func move(to screen: NSScreen) -> Double {
+    func move(to screen: NSScreen) {
         let target = Self.topLeftFrame(screen)
         if !target.contains(CGPoint(x: window.frame.midX, y: window.frame.midY)) {
             let grab = window.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0)).withOffset(
@@ -84,14 +92,16 @@ struct DiffPaneDriver {
                 CGVector(dx: target.midX - window.frame.minX, dy: target.midY - window.frame.minY))
             grab.press(forDuration: 0.2, thenDragTo: drop)
         }
-        return Double(screen.maximumFramesPerSecond)
     }
 
     // Window screenshots fail on a secondary display that is asleep, so the e2e tests use the primary one.
     func moveToPrimaryScreen() { move(to: NSScreen.screens[0]) }
 
-    func moveToFastestScreen() -> Double {
-        move(to: NSScreen.screens.max { $0.maximumFramesPerSecond < $1.maximumFramesPerSecond } ?? NSScreen.screens[0])
+    func moveToFastestScreen() -> NSScreen {
+        let screen =
+            NSScreen.screens.max { $0.maximumFramesPerSecond < $1.maximumFramesPerSecond } ?? NSScreen.screens[0]
+        move(to: screen)
+        return screen
     }
 
     func recognizedText() -> String {

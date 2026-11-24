@@ -37,7 +37,6 @@ nonisolated struct DiffLine: Equatable, Sendable, Encodable {
 }
 
 extension Array where Element == FileDiff {
-    // Same order as the sidebar tree: folders before files, each level sorted by lowercased name.
     nonisolated func inTreeOrder() -> [FileDiff] {
         let keys = map { file in
             (

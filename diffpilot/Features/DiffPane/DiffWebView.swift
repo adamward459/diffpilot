@@ -5,7 +5,6 @@ enum WebKitFeatures {
     static let near60FPSKey = "PreferPageRenderingUpdatesNear60FPSEnabled"
 
     // WebKit has no public switch for the 60 fps cap, so this reads its private feature list.
-    // A missing feature or selector leaves the page at 60 fps.
     @discardableResult
     static func disable60FPSCap(_ preferences: WKPreferences) -> Bool {
         let list = NSSelectorFromString("_features")
@@ -111,11 +110,11 @@ struct DiffWebView: NSViewRepresentable {
 
 struct DiffPaneView: View {
     let model: DiffPaneModel
-    @State private var showsPage = false
+    @State private var isPastFirstFrame = false
 
     var body: some View {
         GeometryReader { proxy in
-            if showsPage {
+            if isPastFirstFrame {
                 DiffWebView(model: model)
                     .ignoresSafeArea(.container, edges: .top)
             }
@@ -129,9 +128,8 @@ struct DiffPaneView: View {
                 .accessibilityIdentifier("diff-pane")
         }
         .task {
-            // Creating the web view after the first frame keeps launch time flat.
             try? await Task.sleep(for: .milliseconds(1))
-            showsPage = true
+            isPastFirstFrame = true
         }
     }
 }
