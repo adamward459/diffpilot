@@ -30,13 +30,15 @@ private struct SummaryHeader: View {
                     }
                     .font(.system(size: 11.5, design: .monospaced))
                     Text("·")
-                    Text("\(summary.viewed) of \(summary.fileCount) viewed")
+                    Text("\(summary.viewed)/\(summary.fileCount) viewed")
                 }
             }
             .font(.system(size: 12))
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .minimumScaleFactor(0.8)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("summary")
 
             Capsule()
                 .fill(.quaternary)
@@ -63,42 +65,46 @@ private struct FilterRow: View {
     @Bindable var model: SidebarModel
 
     var body: some View {
-        HStack(spacing: 6) {
+        GlassEffectContainer(spacing: 6) {
             HStack(spacing: 6) {
-                Image(systemName: "line.3.horizontal.decrease")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                TextField("Filter", text: $model.filter.query)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-            }
-            .padding(.horizontal, 7)
-            .frame(height: 24)
-            .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
+                HStack(spacing: 6) {
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    TextField("Filter", text: $model.filter.query)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .accessibilityIdentifier("filter-field")
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .glassEffect(.regular, in: .capsule)
 
-            ToggleButton(symbol: "pencil", help: "Only uncommitted", isOn: $model.filter.onlyUncommitted)
-            ToggleButton(symbol: "eye", help: "Hide viewed", isOn: $model.filter.hideViewed)
-            Button {
-                model.mode = model.mode == .tree ? .list : .tree
-            } label: {
-                Image(systemName: model.mode == .tree ? "list.bullet.indent" : "list.bullet")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24, height: 24)
+                ToggleButton(symbol: "pencil", title: "Only uncommitted", id: "toggle-uncommitted", isOn: $model.filter.onlyUncommitted)
+                ToggleButton(symbol: "eye", title: "Hide viewed", id: "toggle-hide-viewed", isOn: $model.filter.hideViewed)
+                Button {
+                    model.mode = model.mode == .tree ? .list : .tree
+                } label: {
+                    Image(systemName: model.mode == .tree ? "list.bullet.indent" : "list.bullet")
+                        .font(.system(size: 12))
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .help(model.mode == .tree ? "Switch to list" : "Switch to tree")
+                .accessibilityLabel(model.mode == .tree ? "Switch to list" : "Switch to tree")
+                .accessibilityIdentifier("mode-button")
             }
-            .buttonStyle(.plain)
-            .help(model.mode == .tree ? "Switch to list" : "Switch to tree")
         }
         .padding(.horizontal, 10)
-        .frame(height: 38)
-        .overlay(alignment: .top) { Divider() }
-        .overlay(alignment: .bottom) { Divider() }
+        .padding(.vertical, 6)
     }
 }
 
 private struct ToggleButton: View {
     let symbol: String
-    let help: String
+    let title: String
+    let id: String
     @Binding var isOn: Bool
 
     var body: some View {
@@ -107,11 +113,13 @@ private struct ToggleButton: View {
         } label: {
             Image(systemName: symbol)
                 .font(.system(size: 12))
-                .foregroundStyle(isOn ? Color.accentColor : .secondary)
-                .frame(width: 24, height: 24)
-                .background(isOn ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .frame(width: 20, height: 20)
         }
-        .buttonStyle(.plain)
-        .help(help)
+        .buttonStyle(.glass(isOn ? .regular.tint(.accentColor) : .regular))
+        .buttonBorderShape(.circle)
+        .help(title)
+        .accessibilityLabel(title)
+        .accessibilityValue(isOn ? "on" : "off")
+        .accessibilityIdentifier(id)
     }
 }
