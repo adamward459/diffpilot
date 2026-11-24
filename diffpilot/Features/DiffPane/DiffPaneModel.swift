@@ -43,6 +43,7 @@ final class DiffPaneModel {
         self.benchScrollDelay = benchScrollDelay
         self.send = send
         firstPaintInterval = Self.signposter.beginInterval(Self.firstPaintSignpost)
+        SymbolImages.warmUp()
     }
 
     var accessibilitySummary: String {

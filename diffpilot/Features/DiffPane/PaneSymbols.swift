@@ -13,8 +13,12 @@ enum SymbolImages {
     static let renderScale = 3.0
     private static let pointSize = 16.0
 
-    @MainActor
-    static func png(named name: String) -> Data? {
+    // The first symbol render takes about 80 ms. Doing it off the main thread keeps it out of the first paint.
+    static func warmUp() {
+        Task.detached(priority: .utility) { _ = png(named: PaneSymbol.plus.rawValue) }
+    }
+
+    nonisolated static func png(named name: String) -> Data? {
         let configuration = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)
         guard
             let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
