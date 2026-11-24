@@ -11,9 +11,8 @@ final class SidebarModel {
     var isLoading = true
 
     func load() async {
-        let count = SampleChanges.configuredCount()
         let loaded = await Task.detached(priority: .userInitiated) {
-            let changes = SampleChanges.generate(count: count)
+            let changes = SampleChanges.load()
             let root = FileTree.build(changes)
             return (root, FileTree.files(in: root), ChangeSummary(changes))
         }.value

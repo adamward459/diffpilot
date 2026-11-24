@@ -7,6 +7,32 @@ nonisolated enum SampleChanges {
         ProcessInfo.processInfo.environment["DIFFPILOT_SAMPLE_COUNT"].flatMap { Int($0) } ?? defaultCount
     }
 
+    static func load() -> [FileChange] {
+        if ProcessInfo.processInfo.environment["DIFFPILOT_FIXTURE"] == "design" { return design }
+        return generate(count: configuredCount())
+    }
+
+    static let design: [FileChange] = {
+        func file(_ path: String, _ status: FileStatus, _ add: Int, _ del: Int, viewed: Bool = false, uncommitted: Bool = false, comments: Int = 0) -> FileChange {
+            FileChange(path: path, status: status, additions: add, deletions: del, isViewed: viewed, isUncommitted: uncommitted, commentCount: comments)
+        }
+        let files: [FileChange] = [
+            file("docs/archive.md", .added, 19, 0, viewed: true),
+            file("src/api/archive.ts", .modified, 38, 6, comments: 1),
+            file("src/api/client.ts", .modified, 4, 1, viewed: true),
+            file("src/components/inbox/ArchiveToast.tsx", .added, 48, 0),
+            file("src/components/inbox/MessageRow.tsx", .modified, 23, 15),
+            file("src/hooks/useArchiveUndo.ts", .added, 64, 0, uncommitted: true, comments: 2),
+            file("src/lib/queryKeys.ts", .modified, 3, 1, viewed: true),
+            file("src/types/message.ts", .modified, 5, 0),
+            file("tests/api/archive.test.ts", .modified, 31, 4, uncommitted: true),
+            file("tests/hooks/useArchiveUndo.test.ts", .added, 112, 0),
+            file("package.json", .modified, 1, 1),
+            file("pnpm-lock.yaml", .modified, 21, 8),
+        ]
+        return files.sorted { $0.path < $1.path }
+    }()
+
     static func generate(count: Int) -> [FileChange] {
         var rng = SplitMix(seed: 0x9E3779B97F4A7C15)
         var seen = Set<String>()
