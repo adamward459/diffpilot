@@ -50,6 +50,7 @@ const root = byId<HTMLDivElement>('scroll');
 const spacer = byId<HTMLDivElement>('spacer');
 const sticky = byId<HTMLDivElement>('sticky');
 const empty = byId<HTMLDivElement>('empty');
+const edge = byId<HTMLDivElement>('edge');
 
 const colorClass = new Map<string, string>();
 const colorSheet = document.head.appendChild(document.createElement('style'));
@@ -433,6 +434,7 @@ function reveal(path: string): void {
 
 function setInset(px: number): void {
   S.inset = px;
+  edge.style.height = `${px}px`;
   v.setOptions({ ...v.options, paddingStart: px });
   rebuild();
 }
