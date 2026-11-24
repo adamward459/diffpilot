@@ -25,7 +25,7 @@ nonisolated enum SidebarMetrics {
 
     static func record(_ change: @Sendable (inout MetricCounts) -> Void) {
         #if DEBUG
-        (scoped ?? app).update(change)
+            (scoped ?? app).update(change)
         #endif
     }
 

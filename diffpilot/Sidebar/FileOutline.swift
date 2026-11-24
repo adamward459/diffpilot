@@ -71,7 +71,8 @@ final class OutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewD
                 expanded = Set(input.root.children.filter(\.isFolder).map(\.path))
                 seeded = true
             }
-            top = listMode
+            top =
+                listMode
                 ? FileTree.list(input.files, input.filter)
                 : FileTree.filter(input.root, input.filter).children
             reload(expandAll: !listMode && input.filter.hasQuery)
@@ -122,7 +123,9 @@ final class OutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewD
     private func find(_ path: String, in nodes: [FileNode]) -> FileNode? {
         for node in nodes {
             if node.change?.path == path { return node }
-            if node.isFolder, path.hasPrefix(node.path + "/"), let found = find(path, in: node.children) { return found }
+            if node.isFolder, path.hasPrefix(node.path + "/"), let found = find(path, in: node.children) {
+                return found
+            }
         }
         return nil
     }
@@ -169,7 +172,8 @@ final class OutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewD
 
     private func track(_ notification: Notification, expanded isExpanded: Bool) {
         guard !isReloading, !listMode, shownFilter?.hasQuery != true,
-              let node = notification.userInfo?["NSObject"] as? FileNode else { return }
+            let node = notification.userInfo?["NSObject"] as? FileNode
+        else { return }
         if isExpanded { expanded.insert(node.path) } else { expanded.remove(node.path) }
     }
 }

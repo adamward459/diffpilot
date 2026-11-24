@@ -2,11 +2,13 @@ import AppKit
 import Foundation
 import SwiftUI
 import Testing
+
 @testable import diffpilot
 
 @MainActor
-struct PerfBaselineTests {
-    private static let baselineURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("PerfBaseline.json")
+struct SidebarPerformanceBaselineTests {
+    private static let baselineURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent(
+        "PerfBaseline.json")
     private static let tolerance = 0.05
 
     private static func scenarios() -> [String: MetricCounts] {
@@ -22,7 +24,9 @@ struct PerfBaselineTests {
         result["filter-uau"] = SidebarMetrics.measure { _ = FileTree.filter(root, FileFilter(query: "uau")) }
         result["filter-src-api"] = SidebarMetrics.measure { _ = FileTree.filter(root, FileFilter(query: "src/api")) }
         result["list-uau"] = SidebarMetrics.measure { _ = FileTree.list(files, FileFilter(query: "uau")) }
-        result["toggle-uncommitted"] = SidebarMetrics.measure { _ = FileTree.filter(root, FileFilter(onlyUncommitted: true)) }
+        result["toggle-uncommitted"] = SidebarMetrics.measure {
+            _ = FileTree.filter(root, FileFilter(onlyUncommitted: true))
+        }
         result["toggle-hide-viewed"] = SidebarMetrics.measure { _ = FileTree.list(files, FileFilter(hideViewed: true)) }
         return result
     }
@@ -33,7 +37,9 @@ struct PerfBaselineTests {
         let files = FileTree.files(in: root)
         let controller = OutlineController()
         let scroll = controller.makeScrollView()
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 272, height: 700), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 272, height: 700), styleMask: [.titled], backing: .buffered,
+            defer: false)
         window.contentView = scroll
         let outline = scroll.documentView as! NSOutlineView
         func input(_ filter: FileFilter, _ mode: SidebarMode = .tree) -> FileOutline {
@@ -74,8 +80,13 @@ struct PerfBaselineTests {
 
     @Test func outlineReusesCellsAndReloadsOncePerChange() {
         let (counts, visible) = Self.outlineScenarios()
-        for name in ["outline-expand-all", "outline-scroll", "outline-type-char", "outline-toggle-hide-viewed", "outline-list-mode"] {
-            #expect(counts[name]?.cellsCreated ?? .max <= visible + 40, "\(name) created \(counts[name]?.cellsCreated ?? -1) cells for \(visible) visible rows")
+        for name in [
+            "outline-expand-all", "outline-scroll", "outline-type-char", "outline-toggle-hide-viewed",
+            "outline-list-mode",
+        ] {
+            #expect(
+                counts[name]?.cellsCreated ?? .max <= visible + 40,
+                "\(name) created \(counts[name]?.cellsCreated ?? -1) cells for \(visible) visible rows")
         }
         for name in ["outline-expand-all", "outline-type-char", "outline-toggle-hide-viewed", "outline-list-mode"] {
             #expect(counts[name]?.reloads == 1, "\(name) reloaded \(counts[name]?.reloads ?? -1) times")
@@ -97,14 +108,18 @@ struct PerfBaselineTests {
             return
         }
 
-        let expected = try #require(try Self.readBaseline()["unit"], "No unit baseline in PerfBaseline.json. Re-record with DIFFPILOT_RECORD_BASELINE=1.")
+        let expected = try #require(
+            try Self.readBaseline()["unit"],
+            "No unit baseline in PerfBaseline.json. Re-record with DIFFPILOT_RECORD_BASELINE=1.")
         var failures: [String] = []
         for (name, counts) in actual.sorted(by: { $0.key < $1.key }) {
             guard let old = expected[name] else {
                 failures.append("\(name): missing from baseline")
                 continue
             }
-            if counts.reloads != old.reloads { failures.append("\(name).reloads: baseline \(old.reloads), now \(counts.reloads)") }
+            if counts.reloads != old.reloads {
+                failures.append("\(name).reloads: baseline \(old.reloads), now \(counts.reloads)")
+            }
             for (field, oldValue, newValue) in [
                 ("nodesVisited", old.nodesVisited, counts.nodesVisited),
                 ("cellsCreated", old.cellsCreated + 5, counts.cellsCreated),
@@ -114,7 +129,10 @@ struct PerfBaselineTests {
                 failures.append("\(name).\(field): baseline \(oldValue), now \(newValue)")
             }
         }
-        #expect(failures.isEmpty, "Work counts grew more than 5%: \(failures.joined(separator: "; ")). If intended, re-record with DIFFPILOT_RECORD_BASELINE=1.")
+        #expect(
+            failures.isEmpty,
+            "Work counts grew more than 5%: \(failures.joined(separator: "; ")). If intended, re-record with DIFFPILOT_RECORD_BASELINE=1."
+        )
     }
 
     static func readBaseline() throws -> [String: [String: MetricCounts]] {

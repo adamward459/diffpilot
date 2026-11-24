@@ -168,7 +168,10 @@ nonisolated enum FileTree {
         guard filter.isActive else { return root }
         let matcher = FileMatcher(filter.query)
         var visited = 0
-        defer { let total = visited; SidebarMetrics.record { $0.nodesVisited += total } }
+        defer {
+            let total = visited
+            SidebarMetrics.record { $0.nodesVisited += total }
+        }
         func prune(_ node: FileNode) -> FileNode? {
             visited += 1
             guard let change = node.change else {
@@ -196,7 +199,9 @@ nonisolated enum FileTree {
         return scored.map(\.node)
     }
 
-    private static func accepts(_ node: FileNode, _ change: FileChange, _ filter: FileFilter, _ matcher: FileMatcher?) -> Int? {
+    private static func accepts(_ node: FileNode, _ change: FileChange, _ filter: FileFilter, _ matcher: FileMatcher?)
+        -> Int?
+    {
         if filter.onlyUncommitted && !change.isUncommitted { return nil }
         if filter.hideViewed && change.isViewed { return nil }
         guard let matcher else { return 0 }
@@ -214,7 +219,11 @@ nonisolated enum FileTree {
                 path += "/" + next
                 current = nested
             }
-            folders.append((title.lowercased(), FileNode(folder: title, path: path, children: makeChildren(current, parentPath: path))))
+            folders.append(
+                (
+                    title.lowercased(),
+                    FileNode(folder: title, path: path, children: makeChildren(current, parentPath: path))
+                ))
         }
         folders.sort { $0.key < $1.key }
         let files = builder.files

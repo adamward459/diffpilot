@@ -2,7 +2,9 @@ import XCTest
 
 final class SidebarPerformanceUITests: XCTestCase {
     override func setUpWithError() throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["DIFFPILOT_PERF_UI"] == "1", "Set DIFFPILOT_PERF_UI=1 to run host-dependent measurements")
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["DIFFPILOT_HOTPATH"] == "1",
+            "Host-dependent; runs only under scripts/test.py hotpath")
         continueAfterFailure = false
     }
 
@@ -28,7 +30,10 @@ final class SidebarPerformanceUITests: XCTestCase {
 
         let sidebar = app.scrollViews.firstMatch
 
-        measure(metrics: [XCTOSSignpostMetric.scrollingAndDecelerationMetric, XCTCPUMetric(application: app)], options: options) {
+        measure(
+            metrics: [XCTOSSignpostMetric.scrollingAndDecelerationMetric, XCTCPUMetric(application: app)],
+            options: options
+        ) {
             sidebar.swipeUp(velocity: .fast)
         }
     }

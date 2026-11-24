@@ -13,8 +13,13 @@ nonisolated enum SampleChanges {
     }
 
     static let design: [FileChange] = {
-        func file(_ path: String, _ status: FileStatus, _ add: Int, _ del: Int, viewed: Bool = false, uncommitted: Bool = false, comments: Int = 0) -> FileChange {
-            FileChange(path: path, status: status, additions: add, deletions: del, isViewed: viewed, isUncommitted: uncommitted, commentCount: comments)
+        func file(
+            _ path: String, _ status: FileStatus, _ add: Int, _ del: Int, viewed: Bool = false,
+            uncommitted: Bool = false, comments: Int = 0
+        ) -> FileChange {
+            FileChange(
+                path: path, status: status, additions: add, deletions: del, isViewed: viewed,
+                isUncommitted: uncommitted, commentCount: comments)
         }
         let files: [FileChange] = [
             file("docs/archive.md", .added, 19, 0, viewed: true),
@@ -34,15 +39,21 @@ nonisolated enum SampleChanges {
     }()
 
     static func generate(count: Int) -> [FileChange] {
-        var rng = SplitMix(seed: 0x9E3779B97F4A7C15)
+        var rng = SplitMix(seed: 0x9E37_79B9_7F4A_7C15)
         var seen = Set<String>()
         var result: [FileChange] = []
         result.reserveCapacity(count)
 
         let roots = ["src", "src", "src", "src", "tests", "tests", "docs", "packages", "scripts"]
-        let areas = ["api", "components", "hooks", "lib", "types", "utils", "store", "features/auth", "features/inbox", "features/billing", "views", "models"]
+        let areas = [
+            "api", "components", "hooks", "lib", "types", "utils", "store", "features/auth", "features/inbox",
+            "features/billing", "views", "models",
+        ]
         let subs = ["", "", "", "inbox", "compose", "settings", "shared/forms", "legacy"]
-        let words = ["Archive", "Message", "Inbox", "Toast", "Query", "Client", "Undo", "Thread", "Label", "Filter", "Draft", "Sync", "Cache", "Session", "Token", "Router", "Panel", "Dialog", "Avatar", "Search"]
+        let words = [
+            "Archive", "Message", "Inbox", "Toast", "Query", "Client", "Undo", "Thread", "Label", "Filter", "Draft",
+            "Sync", "Cache", "Session", "Token", "Router", "Panel", "Dialog", "Avatar", "Search",
+        ]
         let kinds = ["", "Row", "List", "View", "Provider", "Store", "Service", "Helper", "Config"]
         let extensions = ["ts", "ts", "tsx", "tsx", "swift", "swift", "md", "json", "yaml"]
 
@@ -70,15 +81,16 @@ nonisolated enum SampleChanges {
             let roll = rng.next(100)
             let status: FileStatus = roll < 60 ? .modified : roll < 82 ? .added : roll < 90 ? .deleted : .renamed
             let size = 1 + rng.next(40)
-            result.append(FileChange(
-                path: path,
-                status: status,
-                additions: status == .deleted ? 0 : size,
-                deletions: status == .added ? 0 : rng.next(15),
-                isViewed: rng.next(100) < 25,
-                isUncommitted: rng.next(100) < 12,
-                commentCount: rng.next(100) < 15 ? 1 + rng.next(5) : 0
-            ))
+            result.append(
+                FileChange(
+                    path: path,
+                    status: status,
+                    additions: status == .deleted ? 0 : size,
+                    deletions: status == .added ? 0 : rng.next(15),
+                    isViewed: rng.next(100) < 25,
+                    isUncommitted: rng.next(100) < 12,
+                    commentCount: rng.next(100) < 15 ? 1 + rng.next(5) : 0
+                ))
         }
         return result.sorted { $0.path < $1.path }
     }
@@ -90,10 +102,10 @@ private nonisolated struct SplitMix {
     init(seed: UInt64) { state = seed }
 
     mutating func next(_ bound: Int) -> Int {
-        state &+= 0x9E3779B97F4A7C15
+        state &+= 0x9E37_79B9_7F4A_7C15
         var z = state
-        z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
-        z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
         return Int((z ^ (z >> 31)) % UInt64(bound))
     }
 }

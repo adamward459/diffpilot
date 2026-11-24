@@ -7,7 +7,9 @@ struct FileSidebar: View {
         VStack(spacing: 0) {
             SummaryHeader(summary: model.summary, isLoading: model.isLoading)
             FilterRow(model: model)
-            FileOutline(root: model.root, files: model.files, filter: model.filter, mode: model.mode, selection: $model.selection)
+            FileOutline(
+                root: model.root, files: model.files, filter: model.filter, mode: model.mode,
+                selection: $model.selection)
         }
     }
 }
@@ -80,8 +82,11 @@ private struct FilterRow: View {
                 .frame(height: 28)
                 .glassEffect(.regular, in: .capsule)
 
-                ToggleButton(symbol: "pencil", title: "Only uncommitted", id: "toggle-uncommitted", isOn: $model.filter.onlyUncommitted)
-                ToggleButton(symbol: "eye", title: "Hide viewed", id: "toggle-hide-viewed", isOn: $model.filter.hideViewed)
+                ToggleButton(
+                    symbol: "pencil", title: "Only uncommitted", id: "toggle-uncommitted",
+                    isOn: $model.filter.onlyUncommitted)
+                ToggleButton(
+                    symbol: "eye", title: "Hide viewed", id: "toggle-hide-viewed", isOn: $model.filter.hideViewed)
                 Button {
                     model.mode = model.mode == .tree ? .list : .tree
                 } label: {
