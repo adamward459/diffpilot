@@ -9,16 +9,29 @@ nonisolated struct MetricCounts: Codable, Equatable, Sendable {
     var matcherByteCompares = 0
 }
 
+nonisolated final class MetricCounter: Sendable {
+    private let state = OSAllocatedUnfairLock(initialState: MetricCounts())
+
+    var snapshot: MetricCounts { state.withLock { $0 } }
+
+    func update(_ change: @Sendable (inout MetricCounts) -> Void) { state.withLock { change(&$0) } }
+}
+
 nonisolated enum SidebarMetrics {
-    private static let counts = OSAllocatedUnfairLock(initialState: MetricCounts())
+    static let app = MetricCounter()
+    @TaskLocal static var scoped: MetricCounter?
 
-    static var snapshot: MetricCounts { counts.withLock { $0 } }
+    static var snapshot: MetricCounts { app.snapshot }
 
-    static func reset() { counts.withLock { $0 = MetricCounts() } }
-
-    static func record(_ update: @Sendable (inout MetricCounts) -> Void) {
+    static func record(_ change: @Sendable (inout MetricCounts) -> Void) {
         #if DEBUG
-        counts.withLock { update(&$0) }
+        (scoped ?? app).update(change)
         #endif
+    }
+
+    static func measure(_ body: () -> Void) -> MetricCounts {
+        let counter = MetricCounter()
+        $scoped.withValue(counter, operation: body)
+        return counter.snapshot
     }
 }
