@@ -43,7 +43,7 @@ final class PaneSchemeHandler: NSObject, WKURLSchemeHandler {
         guard let url = task.request.url, let resources = Bundle.main.resourceURL else {
             return task.didFailWithError(URLError(.badURL))
         }
-        let file = resources.appendingPathComponent(url.lastPathComponent)
+        let file = resources.appendingPathComponent("Web").appendingPathComponent(url.lastPathComponent)
         let isSymbol = url.path.hasPrefix(Self.symbolPrefix)
         let data =
             isSymbol
