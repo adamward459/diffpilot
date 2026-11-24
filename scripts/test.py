@@ -11,7 +11,9 @@ and a change in it touches every feature.
 
   scripts/test.py unit [feature...]      run unit tests (all features when none named)
   scripts/test.py e2e [feature...]       run e2e UI tests
-  scripts/test.py hotpath [feature...]   run hot path performance tests
+  scripts/test.py hotpath [feature...] [--base REF]
+                                         run hot path tests here and on the PR base branch
+                                         (or REF) and fail on metrics more than 5% worse
   scripts/test.py screenshot [feature...] capture screenshots into screenshots/feature/<Feature>/
   scripts/test.py related                print the test commands that match the current changes
   scripts/test.py lint                   check the folder layout and features.json
@@ -24,6 +26,7 @@ import os
 import platform
 import re
 import shutil
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -38,6 +41,9 @@ FEATURES_DIR = "Features"
 TOP_LEVEL_FEATURES = ("App", SHARED)
 KIND_TARGETS = {"unit": "diffpilotTests", "e2e": "diffpilotUITests"}
 PERF_MARKER = "Performance"
+HOTPATH_TOLERANCE = 0.05
+# Medians of 5 launch samples differ by up to 11% on identical code; 15 samples cut that to ~3%.
+HOTPATH_ROUNDS = 3
 SCREENSHOT_MARKER = "Screenshot"
 SCREENSHOT_DIR = ROOT / "screenshots" / "feature"
 NA_KINDS = (*KIND_TARGETS, "screenshot")
@@ -208,7 +214,7 @@ def lint(manifest: dict, files: list[str], types: list[TestType]) -> None:
         raise LintError("\n".join(errors))
 
 
-def run_kind(kind: str, names: list[str]) -> int:
+def run_kind(kind: str, names: list[str], base: str | None = None) -> int:
     manifest, files = load_manifest(), swift_files()
     types = test_types(files)
     lint(manifest, files, types)
@@ -227,6 +233,18 @@ def run_kind(kind: str, names: list[str]) -> int:
         print(f"No {kind} tests for: {' '.join(names)}", file=sys.stderr)
         return 0
 
+    print(f"== {kind}: {' '.join(tests)}", file=sys.stderr)
+    code, bundle = xcode_test(ROOT, tests, kind)
+    if code != 0:
+        print(f"Failure details: xcrun xcresulttool get test-results tests --path {bundle}", file=sys.stderr)
+    elif kind == "screenshot":
+        export_screenshots(bundle, types, names)
+    elif kind == "hotpath":
+        return compare_with_base(bundle, types, base)
+    return code
+
+
+def xcode_test(cwd: Path, tests: list[str], kind: str) -> tuple[int, Path]:
     args = [f"-only-testing:{t}" for t in tests]
     env = dict(os.environ)
     if kind == "hotpath":
@@ -235,7 +253,6 @@ def run_kind(kind: str, names: list[str]) -> int:
         # xcodebuild passes TEST_RUNNER_* to the test process without the prefix.
         env["TEST_RUNNER_DIFFPILOT_HOTPATH"] = "1"
     bundle = Path(tempfile.mkdtemp(prefix=f"diffpilot-{kind}-")) / "result.xcresult"
-    print(f"== {kind}: {' '.join(tests)}", file=sys.stderr)
     code = subprocess.run(
         [
             "xcodebuild",
@@ -251,14 +268,114 @@ def run_kind(kind: str, names: list[str]) -> int:
             str(bundle),
             *args,
         ],
-        cwd=ROOT,
+        cwd=cwd,
         env=env,
-    ).returncode
-    if code != 0:
-        print(f"Failure details: xcrun xcresulttool get test-results tests --path {bundle}", file=sys.stderr)
-    elif kind == "screenshot":
-        export_screenshots(bundle, types, names)
-    return code
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    noise = re.compile(r"\[MT\] (IDELaunchParametersSnapshot|IDETestOperationsObserverDebug|IDERunDestination)")
+    sys.stderr.write("".join(line for line in code.stderr.splitlines(True) if not noise.search(line)))
+    return code.returncode, bundle
+
+
+def read_metrics(bundle: Path) -> dict[tuple[str, str], dict]:
+    out = subprocess.run(
+        ["xcrun", "xcresulttool", "get", "test-results", "metrics", "--path", str(bundle)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    metrics = {}
+    for test in json.loads(out or "[]"):
+        for run in test["testRuns"]:
+            for m in run["metrics"]:
+                if m["measurements"]:
+                    metrics[(test["testIdentifier"], m["displayName"])] = {
+                        "measurements": m["measurements"],
+                        "unit": m.get("unitOfMeasurement", ""),
+                        "smaller_is_better": m.get("polarity") != "prefers larger",
+                    }
+    return metrics
+
+
+def pool(into: dict, metrics: dict) -> None:
+    for key, m in metrics.items():
+        into.setdefault(key, {**m, "measurements": []})["measurements"] += m["measurements"]
+
+
+def resolve_base(explicit: str | None) -> str:
+    if explicit:
+        return explicit
+    try:
+        name = subprocess.run(
+            ["gh", "pr", "view", "--json", "baseRefName", "-q", ".baseRefName"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        name = "main"
+    subprocess.run(["git", "fetch", "-q", "origin", name], cwd=ROOT, capture_output=True)
+    return f"origin/{name}"
+
+
+def base_worktree(ref: str) -> Path:
+    common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir")[0])
+    path = common.parent / ".claude" / "worktrees" / "hotpath-base"
+    sha = git("rev-parse", ref)[0]
+    if path.exists():
+        subprocess.run(["git", "-C", str(path), "checkout", "-q", "-f", "--detach", sha], check=True)
+    else:
+        subprocess.run(["git", "worktree", "add", "-q", "--detach", str(path), sha], cwd=ROOT, check=True)
+    return path
+
+
+def compare_with_base(head_bundle: Path, types: list[TestType], base: str | None) -> int:
+    head: dict = {}
+    pool(head, read_metrics(head_bundle))
+    if not head:
+        print("No measured metrics; nothing to compare with the base branch.", file=sys.stderr)
+        return 0
+
+    target_of = {t.name: t.target for t in types}
+    tests = sorted({f"{target_of[tid.split('/')[0]]}/{tid.split('/')[0]}" for tid, _ in head})
+    ref = resolve_base(base)
+    path = base_worktree(ref)
+    print(f"== hotpath baseline: {ref} at {git('rev-parse', '--short', ref)[0]}", file=sys.stderr)
+
+    baseline: dict = {}
+    # Alternate base and head so slow drift on the machine hits both sides equally.
+    for round in range(HOTPATH_ROUNDS):
+        for side, cwd, into in (("base", path, baseline), ("head", ROOT, head)):
+            if side == "head" and round == 0:
+                continue
+            print(f"== hotpath round {round + 1}/{HOTPATH_ROUNDS}: {side}", file=sys.stderr)
+            code, bundle = xcode_test(cwd, tests, "hotpath")
+            if code != 0:
+                print(f"{side} run failed, so there is nothing to compare: {bundle}", file=sys.stderr)
+                return code
+            pool(into, read_metrics(bundle))
+
+    regressions = 0
+    for key in sorted(head):
+        test_id, name = key
+        h = statistics.median(head[key]["measurements"])
+        unit = head[key]["unit"]
+        if key not in baseline:
+            print(f"  {test_id} {name}: {h:.4g} {unit} (new, no baseline)", file=sys.stderr)
+            continue
+        b = statistics.median(baseline[key]["measurements"])
+        change = (h - b) / b if b else 0.0
+        worse = change > HOTPATH_TOLERANCE if head[key]["smaller_is_better"] else change < -HOTPATH_TOLERANCE
+        regressions += worse
+        verdict = f"REGRESSION (limit {HOTPATH_TOLERANCE:.0%})" if worse else "ok"
+        samples = f"{len(baseline[key]['measurements'])} vs {len(head[key]['measurements'])} samples"
+        print(
+            f"  {test_id} {name}: base {b:.4g} -> head {h:.4g} {unit} ({change:+.1%}, {samples}) {verdict}",
+            file=sys.stderr,
+        )
+    return 1 if regressions else 0
 
 
 def export_screenshots(bundle: Path, types: list[TestType], names: list[str]) -> None:
@@ -342,7 +459,11 @@ def main(argv: list[str]) -> int:
         if command == "related":
             related()
             return 0
-        return run_kind(command, rest)
+        base = None
+        if "--base" in rest:
+            i = rest.index("--base")
+            base, rest = rest[i + 1], rest[:i] + rest[i + 2 :]
+        return run_kind(command, rest, base)
     except LintError as e:
         print(f"lint: {e}".replace("\n", "\nlint: "), file=sys.stderr)
         return 1
