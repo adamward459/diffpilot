@@ -19,17 +19,17 @@ final class SidebarScreenshotUITests: XCTestCase {
         app.launch()
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 5))
-        attach(window, named: "sidebar-\(appearance)")
+        try attach(window, named: "sidebar-\(appearance)")
 
         let filter = app.textFields.firstMatch
         XCTAssertTrue(filter.waitForExistence(timeout: 5))
         filter.click()
         filter.typeText("archive")
-        attach(window, named: "sidebar-filter-\(appearance)")
+        try attach(window, named: "sidebar-filter-\(appearance)")
     }
 
-    private func attach(_ window: XCUIElement, named name: String) {
-        let attachment = XCTAttachment(screenshot: window.screenshot())
+    private func attach(_ window: XCUIElement, named name: String) throws {
+        let attachment = XCTAttachment(screenshot: try window.uncoveredScreenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)

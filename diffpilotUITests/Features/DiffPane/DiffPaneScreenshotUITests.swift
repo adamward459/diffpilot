@@ -18,7 +18,7 @@ final class DiffPaneScreenshotUITests: XCTestCase {
         XCTAssertTrue(pane.state.waitForExistence(timeout: 10))
         pane.moveToPrimaryScreen()
         XCTAssertTrue(pane.waitUntil { pane.recognizedText().contains("archive.md") })
-        attach(pane.window, named: "diffpane-\(appearance)")
+        try attach(pane.window, named: "diffpane-\(appearance)")
 
         pane.hoverAndClickLineButton(line: 2)
         XCTAssertTrue(pane.waitUntil { pane.threadCount == 1 })
@@ -26,11 +26,11 @@ final class DiffPaneScreenshotUITests: XCTestCase {
         pane.app.typeKey(.return, modifierFlags: .command)
         XCTAssertTrue(pane.waitUntil(timeout: 20) { pane.reply.contains("did not change any code yet.") })
         XCTAssertTrue(pane.waitUntil { pane.recognizedText().contains("change any code") })
-        attach(pane.window, named: "diffpane-thread-\(appearance)")
+        try attach(pane.window, named: "diffpane-thread-\(appearance)")
     }
 
-    private func attach(_ window: XCUIElement, named name: String) {
-        let attachment = XCTAttachment(screenshot: window.screenshot())
+    private func attach(_ window: XCUIElement, named name: String) throws {
+        let attachment = XCTAttachment(screenshot: try window.uncoveredScreenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
