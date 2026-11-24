@@ -94,7 +94,7 @@ def upstream() -> str:
     try:
         return git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")[0]
     except subprocess.CalledProcessError:
-        return "HEAD"
+        return git("merge-base", "HEAD", resolve_base(None))[0]
 
 
 def changed_files(base: str) -> list[str]:
@@ -333,6 +333,9 @@ def base_worktree(ref: str) -> Path:
         subprocess.run(["git", "-C", str(path), "checkout", "-q", "-f", "--detach", sha], check=True)
     else:
         subprocess.run(["git", "worktree", "add", "-q", "--detach", str(path), sha], cwd=ROOT, check=True)
+    fixture = path / "scripts" / "fixture_repo.py"
+    if fixture.exists():
+        subprocess.run([sys.executable, str(fixture)], check=True)
     return path
 
 
