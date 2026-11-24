@@ -4,6 +4,7 @@ nonisolated enum PageMessage: Equatable, Sendable {
     case ready
     case needMore
     case firstPaint
+    case visibleFile(String)
     case createThread(ThreadAnchor)
     case post(thread: Int, text: String)
     case askClaude(thread: Int)
@@ -15,6 +16,9 @@ nonisolated enum PageMessage: Equatable, Sendable {
         case "ready": self = .ready
         case "needMore": self = .needMore
         case "firstPaint": self = .firstPaint
+        case "visibleFile":
+            guard let path = fields["path"] as? String else { return nil }
+            self = .visibleFile(path)
         case "createThread":
             guard let path = fields["path"] as? String else { return nil }
             if let side = (fields["side"] as? String).flatMap(ThreadAnchor.Side.init(rawValue:)),

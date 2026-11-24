@@ -174,6 +174,16 @@ struct DiffPaneModelTests {
         #expect(recorder.threads.last?.comments.map(\.author) == ["Claude"])
     }
 
+    @Test func summaryReportsTheTopFileThreadsAndTheLatestReply() async {
+        let recorder = Recorder()
+        let model = makeModel(recorder, repo: nil)
+        model.handle(.visibleFile("a.ts"))
+        model.handle(.createThread(.file(path: "a.ts")))
+        model.handle(.askClaude(thread: 1))
+        await settle { recorder.threads.last?.comments.last?.isStreaming == false }
+        #expect(model.accessibilitySummary == "top=a.ts; threads=1; reply=one two three ")
+    }
+
     @Test func removeDropsTheThreadAndTellsThePage() {
         let recorder = Recorder()
         let model = makeModel(recorder, repo: nil)

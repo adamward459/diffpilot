@@ -1,0 +1,37 @@
+import XCTest
+
+final class DiffPaneScreenshotUITests: XCTestCase {
+    @MainActor
+    func testDiffPaneLight() throws {
+        try capture(appearance: "light")
+    }
+
+    @MainActor
+    func testDiffPaneDark() throws {
+        try capture(appearance: "dark")
+    }
+
+    @MainActor
+    private func capture(appearance: String) throws {
+        let pane = DiffPaneDriver(appearance: appearance)
+        pane.app.launch()
+        XCTAssertTrue(pane.state.waitForExistence(timeout: 10))
+        XCTAssertTrue(pane.waitUntil { pane.recognizedText().contains("archive.md") })
+        attach(pane.window, named: "diffpane-\(appearance)")
+
+        pane.hoverAndClickLineButton(line: 2)
+        XCTAssertTrue(pane.waitUntil { pane.threadCount == 1 })
+        pane.app.typeText("@claude is this line needed?")
+        pane.app.typeKey(.return, modifierFlags: .command)
+        XCTAssertTrue(pane.waitUntil(timeout: 20) { pane.reply.contains("did not change any code yet.") })
+        XCTAssertTrue(pane.waitUntil { pane.recognizedText().contains("change any code") })
+        attach(pane.window, named: "diffpane-thread-\(appearance)")
+    }
+
+    private func attach(_ window: XCUIElement, named name: String) {
+        let attachment = XCTAttachment(screenshot: window.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}

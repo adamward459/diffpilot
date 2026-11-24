@@ -81,7 +81,6 @@ struct DiffWebView: NSViewRepresentable {
         WebKitFeatures.disable60FPSCap(configuration.preferences)
         let web = WKWebView(frame: .zero, configuration: configuration)
         WebKitFeatures.stopInsettingForToolbar(web)
-        web.setAccessibilityIdentifier("diff-pane")
         web.setValue(false, forKey: "drawsBackground")
         #if DEBUG
             web.isInspectable = true
@@ -111,6 +110,13 @@ struct DiffPaneView: View {
             DiffWebView(model: model)
                 .ignoresSafeArea(.container, edges: .top)
                 .onChange(of: proxy.safeAreaInsets.top, initial: true) { _, top in model.setInset(top) }
+        }
+        .overlay {
+            Color.clear
+                .allowsHitTesting(false)
+                .accessibilityElement()
+                .accessibilityLabel(model.accessibilitySummary)
+                .accessibilityIdentifier("diff-pane")
         }
     }
 }

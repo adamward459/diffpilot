@@ -8,6 +8,7 @@ final class DiffPaneModel {
     var send: (HostCommand) -> Void
     private(set) var threads = ThreadStore()
     private(set) var firstPaintAt: Date?
+    private(set) var visiblePath: String?
 
     private let repo: URL?
     private let base: String
@@ -27,6 +28,11 @@ final class DiffPaneModel {
         self.base = base
         self.replier = replier
         self.send = send
+    }
+
+    var accessibilitySummary: String {
+        let reply = threads.threads.values.flatMap(\.comments).last(where: { $0.author == ThreadStore.claudeName })
+        return "top=\(visiblePath ?? ""); threads=\(threads.threads.count); reply=\(reply?.body ?? "")"
     }
 
     func load() async {
@@ -66,6 +72,8 @@ final class DiffPaneModel {
             sendNextBatch()
         case .firstPaint:
             firstPaintAt = Date()
+        case .visibleFile(let path):
+            visiblePath = path
         case .createThread(let anchor):
             send(.thread(threads.create(anchor)))
         case .post(let id, let text):

@@ -7,7 +7,7 @@ const MEASURED = new Set(['th', 'fc']);
 const send = (type, fields = {}) => window.webkit.messageHandlers.dp.postMessage({ type, ...fields });
 
 const S = {
-  files: [], fileRows: [], rows: [], done: false, pending: false, inset: 0,
+  files: [], fileRows: [], rows: [], done: false, pending: false, inset: 0, topFile: -1,
   threads: new Map(), byFile: new Map(),
   tokens: new Map(), hlQueued: new Set(),
   nodes: new Map(), threadEls: new Map(),
@@ -175,7 +175,7 @@ function render() {
 }
 
 function updateSticky(items) {
-  const top = v.scrollOffset ?? 0;
+  const top = (v.scrollOffset ?? 0) + S.inset;
   let cur = null;
   let nextHeader = null;
   for (const it of items) {
@@ -186,6 +186,10 @@ function updateSticky(items) {
     }
   }
   const r = cur && S.rows[cur.index];
+  if (r && r.f >= 0 && r.f !== S.topFile) {
+    S.topFile = r.f;
+    send('visibleFile', { path: S.files[r.f].path });
+  }
   if (!r || r.f < 0 || (r.k === 'fh' && cur.start >= top - 1)) {
     sticky.style.visibility = 'hidden';
     return;

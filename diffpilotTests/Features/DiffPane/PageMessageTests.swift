@@ -9,6 +9,11 @@ struct PageMessageTests {
         #expect(PageMessage(body: ["type": "firstPaint", "at": 12.5]) == .firstPaint)
     }
 
+    @Test func parsesTheVisibleFile() {
+        #expect(PageMessage(body: ["type": "visibleFile", "path": "a.ts"]) == .visibleFile("a.ts"))
+        #expect(PageMessage(body: ["type": "visibleFile"]) == nil)
+    }
+
     @Test func parsesLineAndFileThreads() {
         #expect(
             PageMessage(body: ["type": "createThread", "path": "a.ts", "side": "old", "line": 4])

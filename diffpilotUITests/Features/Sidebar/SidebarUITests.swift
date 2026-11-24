@@ -14,7 +14,7 @@ final class SidebarUITests: XCTestCase {
 
     private var outline: XCUIElement { app.outlines["file-outline"] }
     private var filterField: XCUIElement { app.textFields["filter-field"] }
-    private var detailPath: XCUIElement { app.staticTexts["detail-path"] }
+    private var pane: XCUIElement { app.otherElements["diff-pane"] }
 
     private func row(_ name: String) -> XCUIElement { outline.cells[name].firstMatch }
 
@@ -104,11 +104,12 @@ final class SidebarUITests: XCTestCase {
         XCTAssertTrue(outline.staticTexts["src/components/inbox"].exists)
     }
 
-    func testClickingFileShowsPathInDetailPane() {
-        XCTAssertTrue(app.staticTexts["Select a file"].exists)
-        row("archive.md").click()
-        XCTAssertTrue(detailPath.waitForExistence(timeout: 5))
-        XCTAssertEqual(detailPath.value as? String, "docs/archive.md")
+    func testClickingFileShowsItInTheDiffPane() {
+        XCTAssertTrue(pane.waitForExistence(timeout: 5))
+        row("Cache.md").click()
+        let shown = NSPredicate(format: "label CONTAINS %@", "top=docs/Cache.md;")
+        expectation(for: shown, evaluatedWith: pane)
+        waitForExpectations(timeout: 10)
     }
 
     func testDownArrowMovesSelection() {
