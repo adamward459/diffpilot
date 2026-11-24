@@ -59,6 +59,7 @@ final class FolderCell: NSTableCellView {
 
     init() {
         super.init(frame: .zero)
+        SidebarMetrics.record { $0.cellsCreated += 1 }
         identifier = Self.id
         addSubview(icon)
         addSubview(label)
@@ -77,8 +78,11 @@ final class FolderCell: NSTableCellView {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    func configure(name: String) {
+    func configure(name: String, path: String) {
+        SidebarMetrics.record { $0.cellsConfigured += 1 }
         label.stringValue = name
+        setAccessibilityLabel(name)
+        setAccessibilityIdentifier(path)
     }
 
     override var backgroundStyle: NSView.BackgroundStyle {
@@ -146,6 +150,7 @@ final class FileCell: NSTableCellView {
 
     init() {
         super.init(frame: .zero)
+        SidebarMetrics.record { $0.cellsCreated += 1 }
         identifier = Self.id
         imageView = icon
         textField = name
@@ -185,10 +190,13 @@ final class FileCell: NSTableCellView {
     required init?(coder: NSCoder) { fatalError() }
 
     func configure(node: FileNode, change: FileChange, showsParent: Bool) {
+        SidebarMetrics.record { $0.cellsConfigured += 1 }
         let icon = Icons.file(named: node.name)
         self.icon.image = icon.image
         tint = icon.tint
         name.stringValue = node.name
+        setAccessibilityLabel(node.name)
+        setAccessibilityIdentifier(node.path)
         parent.stringValue = showsParent ? node.parentPath : ""
         commentStack.isHidden = change.commentCount == 0
         if change.commentCount > 0 { count.stringValue = String(change.commentCount) }

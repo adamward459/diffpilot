@@ -12,6 +12,7 @@ struct ContentView: View {
                 Text(path)
                     .font(.system(.title3, design: .monospaced))
                     .textSelection(.enabled)
+                    .accessibilityIdentifier("detail-path")
             } else {
                 Text("Select a file")
                     .foregroundStyle(.secondary)

@@ -2,9 +2,6 @@
   "na": {
     "App": {
       "unit": "App only wires the window to the sidebar; the logic lives in features."
-    },
-    "Sidebar": {
-      "e2e": "Sidebar UI tests land in #2 (feat/sidebar-glass-e2e)."
     }
   }
 }
