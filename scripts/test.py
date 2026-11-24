@@ -19,6 +19,7 @@ and a change in it touches every feature.
 from __future__ import annotations
 
 import json
+import os
 import platform
 import re
 import shutil
@@ -250,9 +251,12 @@ def run_kind(kind: str, names: list[str]) -> int:
         return 0
 
     args = [f"-only-testing:{t}" for t in tests]
+    env = dict(os.environ)
     if kind == "hotpath":
         # Serial, so parallel test clones do not skew the numbers.
         args += ["-parallel-testing-enabled", "NO"]
+        # xcodebuild passes TEST_RUNNER_* to the test process without the prefix.
+        env["TEST_RUNNER_DIFFPILOT_HOTPATH"] = "1"
     bundle = Path(tempfile.mkdtemp(prefix=f"diffpilot-{kind}-")) / "result.xcresult"
     print(f"== {kind}: {' '.join(tests)}", file=sys.stderr)
     code = subprocess.run(
@@ -271,6 +275,7 @@ def run_kind(kind: str, names: list[str]) -> int:
             *args,
         ],
         cwd=ROOT,
+        env=env,
     ).returncode
     if code != 0:
         print(f"Failure details: xcrun xcresulttool get test-results tests --path {bundle}", file=sys.stderr)
