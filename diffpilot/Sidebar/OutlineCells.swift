@@ -13,15 +13,16 @@ enum Icons {
     static func file(named name: String) -> (image: NSImage, tint: NSColor) {
         let ext = name.lastIndex(of: ".").map { String(name[name.index(after: $0)...]).lowercased() } ?? ""
         if let cached = byExtension[ext] { return cached }
-        let entry: (String, NSColor) = switch ext {
-        case "ts": ("chevron.left.forwardslash.chevron.right", .systemBlue)
-        case "tsx": ("atom", .systemTeal)
-        case "swift": ("swift", .systemOrange)
-        case "md": ("doc.text", .secondaryLabelColor)
-        case "json": ("curlybraces", .systemYellow)
-        case "yaml", "yml": ("list.bullet.indent", .systemPurple)
-        default: ("doc", .secondaryLabelColor)
-        }
+        let entry: (String, NSColor) =
+            switch ext {
+            case "ts": ("chevron.left.forwardslash.chevron.right", .systemBlue)
+            case "tsx": ("atom", .systemTeal)
+            case "swift": ("swift", .systemOrange)
+            case "md": ("doc.text", .secondaryLabelColor)
+            case "json": ("curlybraces", .systemYellow)
+            case "yaml", "yml": ("list.bullet.indent", .systemPurple)
+            default: ("doc", .secondaryLabelColor)
+            }
         let value = (symbol(entry.0, size: 13), entry.1)
         byExtension[ext] = value
         return value
@@ -81,7 +82,9 @@ final class FolderCell: NSTableCellView {
     }
 
     override var backgroundStyle: NSView.BackgroundStyle {
-        didSet { icon.contentTintColor = backgroundStyle == .emphasized ? .alternateSelectedControlTextColor : folderTint }
+        didSet {
+            icon.contentTintColor = backgroundStyle == .emphasized ? .alternateSelectedControlTextColor : folderTint
+        }
     }
 }
 
@@ -215,7 +218,8 @@ final class FileCell: NSTableCellView {
         } else if isUncommitted {
             badge.set(text: badgeText, fill: NSColor.systemOrange.withAlphaComponent(0.16), textColor: .systemOrange)
         } else {
-            badge.set(text: badgeText, fill: NSColor.labelColor.withAlphaComponent(0.08), textColor: .secondaryLabelColor)
+            badge.set(
+                text: badgeText, fill: NSColor.labelColor.withAlphaComponent(0.08), textColor: .secondaryLabelColor)
         }
     }
 }

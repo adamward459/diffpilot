@@ -1,9 +1,12 @@
 import Foundation
 import Testing
+
 @testable import diffpilot
 
 private func change(_ path: String, viewed: Bool = false, uncommitted: Bool = false) -> FileChange {
-    FileChange(path: path, status: .modified, additions: 1, deletions: 0, isViewed: viewed, isUncommitted: uncommitted, commentCount: 0)
+    FileChange(
+        path: path, status: .modified, additions: 1, deletions: 0, isViewed: viewed, isUncommitted: uncommitted,
+        commentCount: 0)
 }
 
 private func names(_ node: FileNode) -> [String] { node.children.map(\.name) }
@@ -113,9 +116,11 @@ struct FileToggleTests {
 
 struct FileListTests {
     @Test func ranksFilenameAndContiguousMatchesFirst() {
-        let files = FileTree.files(in: FileTree.build([
-            change("src/archive/zzz.ts"), change("src/lib/a_r_c_h.ts"), change("docs/archive.md"), change("src/api/archive.ts"),
-        ]))
+        let files = FileTree.files(
+            in: FileTree.build([
+                change("src/archive/zzz.ts"), change("src/lib/a_r_c_h.ts"), change("docs/archive.md"),
+                change("src/api/archive.ts"),
+            ]))
         let result = FileTree.list(files, FileFilter(query: "archive")).map(\.path)
         #expect(Set(result.prefix(2)) == ["docs/archive.md", "src/api/archive.ts"])
         #expect(result.last == "src/archive/zzz.ts")
@@ -140,9 +145,9 @@ struct SampleChangesTests {
 struct FilePerformanceTests {
     @Test func buildAndFilterTenThousandFilesUnder50ms() {
         #if DEBUG
-        let budget = Duration.milliseconds(500)
+            let budget = Duration.milliseconds(500)
         #else
-        let budget = Duration.milliseconds(50)
+            let budget = Duration.milliseconds(50)
         #endif
         let changes = SampleChanges.generate(count: 10_000)
         let clock = ContinuousClock()
