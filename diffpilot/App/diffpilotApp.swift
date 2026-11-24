@@ -5,14 +5,14 @@
 //  Created by Trung Phạm on 24/11/26.
 //
 
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 @main
 struct diffpilotApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            Item.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
