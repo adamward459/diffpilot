@@ -1,2 +1,3 @@
 /.fixtures/
 /web/node_modules/
+__pycache__/
