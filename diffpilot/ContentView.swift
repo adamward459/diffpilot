@@ -1,59 +1,22 @@
-//
-//  ContentView.swift
-//  diffpilot
-//
-//  Created by Trung Phạm on 24/11/26.
-//
-
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @State private var model = SidebarModel()
 
     var body: some View {
         NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-            .toolbar {
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
+            FileSidebar(model: model)
+                .navigationSplitViewColumnWidth(min: 240, ideal: 272, max: 480)
         } detail: {
-            Text("Select an item")
-        }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+            if let path = model.selection {
+                Text(path)
+                    .font(.system(.title3, design: .monospaced))
+                    .textSelection(.enabled)
+            } else {
+                Text("Select a file")
+                    .foregroundStyle(.secondary)
             }
         }
+        .task { await model.load() }
     }
-}
-
-#Preview {
-    ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
 }
