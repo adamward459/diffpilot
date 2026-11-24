@@ -216,4 +216,22 @@ struct DiffPaneModelTests {
             return
         }
     }
+
+    @Test func aReloadedPageGetsTheDiffAndThreadsAgain() async throws {
+        let repo = try makeRepo(files: 2)
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let recorder = Recorder()
+        let model = makeModel(recorder, repo: repo)
+        await model.load()
+        model.handle(.ready)
+        model.handle(.createThread(.file(path: "f1.txt")))
+        recorder.commands.removeAll()
+
+        model.pageDidReload()
+        model.handle(.needMore)
+        #expect(recorder.loads.isEmpty)
+        model.handle(.ready)
+        #expect(recorder.loads == [["f0.txt", "f1.txt"]])
+        #expect(recorder.threads.map(\.anchor) == [.file(path: "f1.txt")])
+    }
 }

@@ -18,8 +18,8 @@ final class DiffPaneModel {
     private let base: String
     private let replier: any ClaudeReplier
     private let benchScrollDelay: Duration?
+    private var files: [FileDiff]?
     private var batches: DiffBatches?
-    private var isLoaded = false
     private var isPageReady = false
     private var hasSentFirstBatch = false
     private var inset = 0.0
@@ -56,9 +56,15 @@ final class DiffPaneModel {
             guard let repo, let text = try? Git.run(repo, UnifiedDiff.args + [base]) else { return [FileDiff]() }
             return UnifiedDiff.parse(text).inTreeOrder()
         }.value
+        self.files = files
         batches = DiffBatches(files, lineBudget: Self.lineBudget)
-        isLoaded = true
         sendFirstBatchIfReady()
+    }
+
+    func pageDidReload() {
+        isPageReady = false
+        hasSentFirstBatch = false
+        batches = files.map { DiffBatches($0, lineBudget: Self.lineBudget) }
     }
 
     func setInset(_ points: Double) {
@@ -115,13 +121,14 @@ final class DiffPaneModel {
     }
 
     private func sendFirstBatchIfReady() {
-        guard isPageReady, isLoaded, !hasSentFirstBatch else { return }
+        guard isPageReady, files != nil, !hasSentFirstBatch else { return }
         hasSentFirstBatch = true
         if let batch = batches?.next() {
             send(.load(files: batch.files, done: batch.done))
         } else {
             send(.load(files: [], done: true))
         }
+        for thread in threads.threads.values.sorted(by: { $0.id < $1.id }) { send(.thread(thread)) }
         if let path = pendingReveal {
             pendingReveal = nil
             reveal(path)

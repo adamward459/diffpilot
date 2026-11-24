@@ -58,7 +58,7 @@ final class PaneSchemeHandler: NSObject, WKURLSchemeHandler {
     func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {}
 }
 
-private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
+private final class PageBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     weak var model: DiffPaneModel?
 
     init(_ model: DiffPaneModel) { self.model = model }
@@ -66,6 +66,11 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let parsed = PageMessage(body: message.body) else { return }
         model?.handle(parsed)
+    }
+
+    func webViewWebContentProcessDidTerminate(_ web: WKWebView) {
+        model?.pageDidReload()
+        web.reload()
     }
 }
 
@@ -77,9 +82,11 @@ struct DiffWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.setURLSchemeHandler(PaneSchemeHandler(), forURLScheme: PaneSchemeHandler.scheme)
-        configuration.userContentController.add(WeakMessageHandler(model), name: Self.handlerName)
+        let bridge = PageBridge(model)
+        configuration.userContentController.add(bridge, name: Self.handlerName)
         WebKitFeatures.disable60FPSCap(configuration.preferences)
         let web = WKWebView(frame: .zero, configuration: configuration)
+        web.navigationDelegate = bridge
         WebKitFeatures.stopInsettingForToolbar(web)
         web.setValue(false, forKey: "drawsBackground")
         #if DEBUG
