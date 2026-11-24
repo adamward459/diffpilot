@@ -193,7 +193,7 @@ struct DiffPaneModelTests {
         model.handle(.createThread(.file(path: "a.ts")))
         model.handle(.askClaude(thread: 1))
         await settle { recorder.threads.last?.comments.last?.isStreaming == false }
-        #expect(model.accessibilitySummary == "top=a.ts; threads=1; scroll=; reply=one two three ")
+        #expect(model.accessibilitySummary == "top=a.ts; threads=1; viewed=0; scroll=; reply=one two three ")
     }
 
     @Test func summaryIncludesTheLatestScrollStats() {
