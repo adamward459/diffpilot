@@ -4,8 +4,8 @@
 A feature is a folder diffpilot/Features/<Feature>/. App/ and Shared/ sit next to
 Features/ and count as features too. Unit tests mirror the source path in diffpilotTests/
 (diffpilotTests/Features/<Feature>/) and e2e tests in diffpilotUITests/.
-Test types whose name contains "Performance" are hot path tests; features.json maps
-them to source globs. UI test types whose name contains "Screenshot" capture the
+Test types whose name contains "Performance" are hot path tests; they run under
+`hotpath` and never under `unit` or `e2e`. UI test types whose name contains "Screenshot" capture the
 feature's screenshots into screenshots/feature/<Feature>/. Shared/ is a feature too,
 and a change in it touches every feature.
 
@@ -28,7 +28,6 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
-from fnmatch import fnmatchcase
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -71,9 +70,6 @@ class TestType:
     @property
     def test_id(self) -> str:
         return f"{self.target}/{self.name}"
-
-    def has_method(self, method: str) -> bool:
-        return re.search(rf"\bfunc\s+{re.escape(method)}\b", self.body) is not None
 
 
 def git(*args: str) -> list[str]:
@@ -135,7 +131,6 @@ def test_types(files: list[str]) -> list[TestType]:
 def load_manifest() -> dict:
     manifest = json.loads(MANIFEST.read_text())
     manifest.setdefault("na", {})
-    manifest.setdefault("hotpaths", [])
     return manifest
 
 
@@ -151,16 +146,8 @@ def screenshot_tests(types: list[TestType], feature: str) -> list[str]:
     return sorted(t.test_id for t in types if t.feature == feature and t.is_screenshot)
 
 
-def hotpath_tests(manifest: dict, feature: str) -> list[str]:
-    return [t for h in manifest["hotpaths"] if h["feature"] == feature for t in h["tests"]]
-
-
-def resolve(types: list[TestType], test_id: str) -> TestType | None:
-    target, name, *method = test_id.split("/")
-    for t in types:
-        if t.target == target and t.name == name and (not method or t.has_method(method[0].removesuffix("()"))):
-            return t
-    return None
+def hotpath_tests(types: list[TestType], feature: str) -> list[str]:
+    return sorted(t.test_id for t in types if t.feature == feature and t.is_perf)
 
 
 def lint(manifest: dict, files: list[str], types: list[TestType]) -> None:
@@ -212,31 +199,10 @@ def lint(manifest: dict, files: list[str], types: list[TestType]) -> None:
         if t.is_screenshot and t.target != KIND_TARGETS["e2e"]:
             errors.append(f"{t.path}: {t.name} must live in {KIND_TARGETS['e2e']} to capture the app")
 
-    listed: set[str] = set()
-    for i, hot in enumerate(manifest["hotpaths"]):
-        where = f"features.json hotpaths[{i}]"
-        if hot.get("feature") not in feats:
-            errors.append(f'{where}: unknown feature "{hot.get("feature")}"')
-        if not any(fnmatchcase(f, hot.get("glob", "")) for f in files):
-            errors.append(f'{where}: glob "{hot.get("glob")}" matches no file')
-        if not hot.get("tests"):
-            errors.append(f"{where}: tests must not be empty")
-        for test_id in hot.get("tests", []):
-            t = resolve(types, test_id)
-            if t is None:
-                errors.append(f'{where}: test "{test_id}" not found')
-            elif not t.is_perf:
-                errors.append(
-                    f'{where}: "{test_id}" is not a hot path test; its type name must contain "{PERF_MARKER}"'
-                )
-            elif t.feature != hot.get("feature"):
-                errors.append(f'{where}: "{test_id}" lives in {t.path}, not in feature {hot.get("feature")}')
-            else:
-                listed.add(t.test_id)
-
-    for t in types:
-        if t.is_perf and t.test_id not in listed:
-            errors.append(f"{t.path}: {t.name} is a hot path test but no hotpaths entry in features.json lists it")
+    if "hotpaths" in manifest:
+        errors.append(
+            "features.json: remove hotpaths; hot path tests now come from *Performance* types in each feature"
+        )
 
     if errors:
         raise LintError("\n".join(errors))
@@ -252,7 +218,7 @@ def run_kind(kind: str, names: list[str]) -> int:
         raise LintError(f"unknown feature(s): {', '.join(unknown)}; features are {', '.join(feats)}")
     names = names or feats
     pickers = {
-        "hotpath": lambda n: hotpath_tests(manifest, n),
+        "hotpath": lambda n: hotpath_tests(types, n),
         "screenshot": lambda n: screenshot_tests(types, n),
     }
     pick = pickers.get(kind, lambda n: functional_tests(types, n, kind))
@@ -320,13 +286,10 @@ def attachment_name(attachment: dict) -> str:
     return re.sub(r"_\d+_[0-9A-F-]{36}\.png$", "", attachment["suggestedHumanReadableName"])
 
 
-def touched_features(base: str) -> tuple[set[str], set[str], list[str]]:
-    """Return (touched features, features with a touched hot path, files outside feature folders)."""
-    manifest, files = load_manifest(), swift_files()
-    types = test_types(files)
-    feats = set(features(files))
+def touched_features(base: str) -> tuple[set[str], list[str]]:
+    """Return (touched features, changed files outside feature folders)."""
+    feats = set(features(swift_files()))
     touched: set[str] = set()
-    hot: set[str] = set()
     misplaced: list[str] = []
     for f in changed_files(base):
         folder = folder_of(f)
@@ -335,16 +298,7 @@ def touched_features(base: str) -> tuple[set[str], set[str], list[str]]:
                 misplaced.append(f)
             continue
         touched |= feats if folder == SHARED else {folder} & feats
-        if f.startswith(SOURCE_DIR + "/"):
-            hot |= {h["feature"] for h in manifest["hotpaths"] if fnmatchcase(f, h["glob"])}
-        else:
-            changed_ids = {t.test_id for t in types if t.path == f}
-            hot |= {
-                h["feature"]
-                for h in manifest["hotpaths"]
-                if any("/".join(test.split("/")[:2]) in changed_ids for test in h["tests"])
-            }
-    return touched, hot, misplaced
+    return touched, misplaced
 
 
 def screenshot_features(manifest: dict, touched: set[str]) -> list[str]:
@@ -353,7 +307,8 @@ def screenshot_features(manifest: dict, touched: set[str]) -> list[str]:
 
 def related() -> None:
     manifest = load_manifest()
-    touched, hot, misplaced = touched_features(upstream())
+    types = test_types(swift_files())
+    touched, misplaced = touched_features(upstream())
     if not touched and not misplaced:
         print("No changes in source or test folders.")
         return
@@ -365,8 +320,9 @@ def related() -> None:
         for kind in KIND_TARGETS:
             reason = manifest["na"].get(feature, {}).get(kind)
             print(f"  # {kind} {feature}: n/a ({reason})" if reason else f"  scripts/test.py {kind} {feature}")
-    for feature in sorted(hot):
-        print(f"  scripts/test.py hotpath {feature}")
+    for feature in sorted(touched):
+        if hotpath_tests(types, feature):
+            print(f"  scripts/test.py hotpath {feature}")
     if screenshot_features(manifest, touched):
         print("After you open the PR:")
         print("  scripts/pr_screenshots.py")
