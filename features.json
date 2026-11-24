@@ -1,0 +1,10 @@
+{
+  "na": {},
+  "hotpaths": [
+    {
+      "feature": "App",
+      "glob": "diffpilot/App/diffpilotApp.swift",
+      "tests": ["diffpilotUITests/AppPerformanceUITests/testLaunchPerformance"]
+    }
+  ]
+}
