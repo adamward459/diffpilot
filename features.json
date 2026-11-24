@@ -15,7 +15,7 @@
     },
     {
       "feature": "Sidebar",
-      "glob": "diffpilot/Sidebar/FileTree.swift",
+      "glob": "diffpilot/Features/Sidebar/FileTree.swift",
       "tests": ["diffpilotTests/FilePerformanceTests"]
     }
   ]
