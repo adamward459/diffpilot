@@ -48,6 +48,7 @@ final class OutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewD
         outline.indentationPerLevel = 14
         outline.backgroundColor = .clear
         outline.allowsMultipleSelection = false
+        outline.setAccessibilityIdentifier("file-outline")
         outline.dataSource = self
         outline.delegate = self
 
@@ -81,6 +82,7 @@ final class OutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewD
     private func reload(expandAll: Bool) {
         isReloading = true
         isSelecting = true
+        SidebarMetrics.record { $0.reloads += 1 }
         outline.reloadData()
         if expandAll {
             outline.expandItem(nil, expandChildren: true)
@@ -147,7 +149,7 @@ final class OutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewD
             return cell
         }
         let cell = outlineView.makeView(withIdentifier: FolderCell.id, owner: self) as? FolderCell ?? FolderCell()
-        cell.configure(name: node.name)
+        cell.configure(name: node.name, path: node.path)
         return cell
     }
 

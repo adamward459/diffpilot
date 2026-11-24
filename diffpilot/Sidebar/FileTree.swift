@@ -72,37 +72,47 @@ nonisolated struct FileMatcher {
 
     func score(_ node: FileNode) -> Int? {
         var path = node.lowerPath
-        return path.withUTF8 { score($0, nameStart: node.nameStart) }
+        var compares = 0
+        let result = path.withUTF8 { score($0, nameStart: node.nameStart, compares: &compares) }
+        let total = compares
+        SidebarMetrics.record { $0.matcherByteCompares += total }
+        return result
     }
 
-    private func score(_ path: UnsafeBufferPointer<UInt8>, nameStart: Int) -> Int? {
+    private func score(_ path: UnsafeBufferPointer<UInt8>, nameStart: Int, compares: inout Int) -> Int? {
         let count = path.count
         guard needle.count <= count else { return nil }
-        if let index = find(in: path, from: nameStart) {
+        if let index = find(in: path, from: nameStart, compares: &compares) {
             return 3000 - (index - nameStart) + (index == nameStart ? 500 : 0) - count
         }
-        if let index = find(in: path, from: 0) {
+        if let index = find(in: path, from: 0, compares: &compares) {
             return 2000 - index - count
         }
-        return fuzzy(in: path, nameStart: nameStart)
+        return fuzzy(in: path, nameStart: nameStart, compares: &compares)
     }
 
-    private func find(in path: UnsafeBufferPointer<UInt8>, from start: Int) -> Int? {
+    private func find(in path: UnsafeBufferPointer<UInt8>, from start: Int, compares: inout Int) -> Int? {
         let last = path.count - needle.count
         guard start <= last else { return nil }
         for index in start...last {
             var offset = 0
-            while offset < needle.count && path[index + offset] == needle[offset] { offset += 1 }
+            while offset < needle.count {
+                compares += 1
+                if path[index + offset] != needle[offset] { break }
+                offset += 1
+            }
             if offset == needle.count { return index }
         }
         return nil
     }
 
-    private func fuzzy(in path: UnsafeBufferPointer<UInt8>, nameStart: Int) -> Int? {
+    private func fuzzy(in path: UnsafeBufferPointer<UInt8>, nameStart: Int, compares: inout Int) -> Int? {
         var matched = 0
         var previous = -2
         var score = 1000
-        for index in 0..<path.count where path[index] == needle[matched] {
+        for index in 0..<path.count {
+            compares += 1
+            guard path[index] == needle[matched] else { continue }
             if index == previous + 1 { score += 15 }
             if index >= nameStart { score += 5 }
             if index == 0 || Self.isSeparator(path[index - 1]) { score += 10 }
@@ -126,6 +136,7 @@ nonisolated enum FileTree {
 
     static func build(_ changes: [FileChange]) -> FileNode {
         let root = Builder()
+        SidebarMetrics.record { $0.nodesVisited += changes.count }
         for change in changes {
             var builder = root
             let parts = change.path.split(separator: "/")
@@ -156,7 +167,10 @@ nonisolated enum FileTree {
     static func filter(_ root: FileNode, _ filter: FileFilter) -> FileNode {
         guard filter.isActive else { return root }
         let matcher = FileMatcher(filter.query)
+        var visited = 0
+        defer { let total = visited; SidebarMetrics.record { $0.nodesVisited += total } }
         func prune(_ node: FileNode) -> FileNode? {
+            visited += 1
             guard let change = node.change else {
                 let kept = node.children.compactMap(prune)
                 return kept.isEmpty ? nil : FileNode(folder: node.name, path: node.path, children: kept)
@@ -169,6 +183,7 @@ nonisolated enum FileTree {
     static func list(_ files: [FileNode], _ filter: FileFilter) -> [FileNode] {
         guard filter.isActive else { return files }
         let matcher = FileMatcher(filter.query)
+        SidebarMetrics.record { $0.nodesVisited += files.count }
         var scored: [(score: Int, node: FileNode)] = []
         for node in files {
             if let change = node.change, let score = accepts(node, change, filter, matcher) {

@@ -12,10 +12,14 @@ struct ContentView: View {
                 Text(path)
                     .font(.system(.title3, design: .monospaced))
                     .textSelection(.enabled)
+                    .accessibilityIdentifier("detail-path")
             } else {
                 Text("Select a file")
                     .foregroundStyle(.secondary)
             }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if MetricsProbe.isEnabled { MetricsProbe().frame(width: 2, height: 2) }
         }
         .task { await model.load() }
     }
