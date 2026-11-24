@@ -41,4 +41,5 @@ On failure, the script prints an `xcresulttool` command that shows the failure m
 
 - The target is 120 FPS, so one frame has a budget of 8.33 ms. Code that runs on every frame must fit in that budget with room to spare.
 - A bare `measure {}` with no baseline never fails. A hot path test must fail when performance gets worse. Assert an explicit budget, or count deterministic work (cell reloads, layout passes, diff operations) against a recorded baseline.
+- `scripts/test.py hotpath` sets `DIFFPILOT_HOTPATH=1` in the test process. A slow or host-dependent test can call `XCTSkipUnless(ProcessInfo.processInfo.environment["DIFFPILOT_HOTPATH"] == "1")` so a plain Xcode test run skips it.
 - Wall-clock numbers depend on the host. Prefer deterministic counts for the gate. When you use time or frame metrics (`XCTOSSignpostMetric.scrollingAndDecelerationMetric`, `XCTClockMetric`), set a budget well above the noise.
