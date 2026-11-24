@@ -3,22 +3,5 @@
     "App": {
       "unit": "App only wires the window to the sidebar; the logic lives in features."
     }
-  },
-  "hotpaths": [
-    {
-      "feature": "App",
-      "glob": "diffpilot/App/diffpilotApp.swift",
-      "tests": ["diffpilotUITests/AppPerformanceUITests/testLaunchPerformance"]
-    },
-    {
-      "feature": "Sidebar",
-      "glob": "diffpilot/Features/Sidebar/FileTree.swift",
-      "tests": ["diffpilotTests/FilePerformanceTests"]
-    },
-    {
-      "feature": "Sidebar",
-      "glob": "diffpilot/Features/Sidebar/*Outline*.swift",
-      "tests": ["diffpilotTests/SidebarPerformanceBaselineTests", "diffpilotUITests/SidebarPerformanceUITests"]
-    }
-  ]
+  }
 }

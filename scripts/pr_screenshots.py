@@ -53,7 +53,7 @@ def main(argv: list[str]) -> int:
         names = argv
     else:
         sh("git", "fetch", "--quiet", "origin", pr["baseRefName"])
-        touched, _, _ = tests.touched_features(f"origin/{pr['baseRefName']}")
+        touched, _ = tests.touched_features(f"origin/{pr['baseRefName']}")
         names = tests.screenshot_features(manifest, touched)
     if not names:
         print("No touched feature has a screenshot test.", file=sys.stderr)
