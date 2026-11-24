@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build the git repo that UI tests open with DIFFPILOT_REPO=large.
+"""Build the git repo that UI tests pass to the app in DIFFPILOT_REPO.
 
-The repo lives in the app's sandbox container, the only folder the sandboxed app can read.
+The repo lives in .fixtures/ at the repo root. Xcode test builds give the sandboxed app read access to /.
 Branch `main` holds the base files; branch `feature` holds committed changes, and the
 working tree holds uncommitted ones. .git/diffpilot-review.json lists viewed files and
 comment counts, which git cannot store.
@@ -21,8 +21,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-CONTAINER = Path.home() / "Library/Containers/com.adamward459.diffpilot/Data"
-REPO = CONTAINER / "fixtures" / "large"
+REPO = Path(__file__).resolve().parent.parent / ".fixtures" / "large"
 STAMP = REPO / ".git" / "diffpilot-fixture-version"
 GENERATED_COUNT = 1988
 CONTEXT_LINES = 3

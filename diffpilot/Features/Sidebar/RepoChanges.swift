@@ -21,8 +21,7 @@ nonisolated enum RepoChanges {
 
     static func configuredRepo() -> URL? {
         guard let value = ProcessInfo.processInfo.environment["DIFFPILOT_REPO"], !value.isEmpty else { return nil }
-        if value.hasPrefix("/") { return URL(fileURLWithPath: value) }
-        return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("fixtures").appendingPathComponent(value)
+        return URL(fileURLWithPath: value)
     }
 
     static func load(repo: URL, base: String = "main") throws -> [FileChange] {

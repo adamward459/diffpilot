@@ -6,7 +6,7 @@ final class SidebarUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchEnvironment["DIFFPILOT_REPO"] = "large"
+        app.launchEnvironment["DIFFPILOT_REPO"] = Fixture.large
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         XCTAssertTrue(app.staticTexts["summary"].waitForExistence(timeout: 10))
