@@ -28,6 +28,41 @@
       "nodesVisited" : 10000,
       "reloads" : 0
     },
+    "outline-expand-all" : {
+      "cellsConfigured" : 29,
+      "cellsCreated" : 29,
+      "matcherByteCompares" : 105575,
+      "nodesVisited" : 5309,
+      "reloads" : 1
+    },
+    "outline-list-mode" : {
+      "cellsConfigured" : 31,
+      "cellsCreated" : 31,
+      "matcherByteCompares" : 0,
+      "nodesVisited" : 0,
+      "reloads" : 1
+    },
+    "outline-scroll" : {
+      "cellsConfigured" : 5280,
+      "cellsCreated" : 8,
+      "matcherByteCompares" : 0,
+      "nodesVisited" : 0,
+      "reloads" : 0
+    },
+    "outline-toggle-hide-viewed" : {
+      "cellsConfigured" : 34,
+      "cellsCreated" : 34,
+      "matcherByteCompares" : 187186,
+      "nodesVisited" : 5309,
+      "reloads" : 1
+    },
+    "outline-type-char" : {
+      "cellsConfigured" : 34,
+      "cellsCreated" : 34,
+      "matcherByteCompares" : 247772,
+      "nodesVisited" : 5309,
+      "reloads" : 1
+    },
     "toggle-hide-viewed" : {
       "cellsConfigured" : 0,
       "cellsCreated" : 0,

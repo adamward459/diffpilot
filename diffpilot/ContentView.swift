@@ -18,9 +18,6 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .overlay(alignment: .bottomTrailing) {
-            if MetricsProbe.isEnabled { MetricsProbe().frame(width: 2, height: 2) }
-        }
         .task { await model.load() }
     }
 }

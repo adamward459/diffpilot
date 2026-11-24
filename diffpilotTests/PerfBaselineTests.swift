@@ -1,7 +1,10 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import diffpilot
 
+@MainActor
 struct PerfBaselineTests {
     private static let baselineURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("PerfBaseline.json")
     private static let tolerance = 0.05
@@ -24,8 +27,64 @@ struct PerfBaselineTests {
         return result
     }
 
+    private static func outlineScenarios() -> (counts: [String: MetricCounts], visibleRows: Int) {
+        let changes = SampleChanges.generate(count: 5_000)
+        let root = FileTree.build(changes)
+        let files = FileTree.files(in: root)
+        let controller = OutlineController()
+        let scroll = controller.makeScrollView()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 272, height: 700), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = scroll
+        let outline = scroll.documentView as! NSOutlineView
+        func input(_ filter: FileFilter, _ mode: SidebarMode = .tree) -> FileOutline {
+            FileOutline(root: root, files: files, filter: filter, mode: mode, selection: .constant(nil))
+        }
+        var result: [String: MetricCounts] = [:]
+
+        result["outline-expand-all"] = SidebarMetrics.measure {
+            controller.update(input(FileFilter(query: "/")))
+            window.layoutIfNeeded()
+            scroll.layoutSubtreeIfNeeded()
+        }
+        let rows = outline.numberOfRows
+        let visible = outline.rows(in: scroll.contentView.bounds).length
+        result["outline-scroll"] = SidebarMetrics.measure {
+            var row = 0
+            while row < rows {
+                row = min(row + visible, rows - 1)
+                outline.scrollRowToVisible(row)
+                scroll.layoutSubtreeIfNeeded()
+                if row == rows - 1 { break }
+            }
+        }
+        result["outline-type-char"] = SidebarMetrics.measure {
+            controller.update(input(FileFilter(query: "/s")))
+            scroll.layoutSubtreeIfNeeded()
+        }
+        result["outline-toggle-hide-viewed"] = SidebarMetrics.measure {
+            controller.update(input(FileFilter(query: "/s", hideViewed: true)))
+            scroll.layoutSubtreeIfNeeded()
+        }
+        result["outline-list-mode"] = SidebarMetrics.measure {
+            controller.update(input(FileFilter(), .list))
+            scroll.layoutSubtreeIfNeeded()
+        }
+        return (result, visible)
+    }
+
+    @Test func outlineReusesCellsAndReloadsOncePerChange() {
+        let (counts, visible) = Self.outlineScenarios()
+        for name in ["outline-expand-all", "outline-scroll", "outline-type-char", "outline-toggle-hide-viewed", "outline-list-mode"] {
+            #expect(counts[name]?.cellsCreated ?? .max <= visible + 40, "\(name) created \(counts[name]?.cellsCreated ?? -1) cells for \(visible) visible rows")
+        }
+        for name in ["outline-expand-all", "outline-type-char", "outline-toggle-hide-viewed", "outline-list-mode"] {
+            #expect(counts[name]?.reloads == 1, "\(name) reloaded \(counts[name]?.reloads ?? -1) times")
+        }
+    }
+
     @Test func workCountsMatchCommittedBaseline() throws {
-        let actual = Self.scenarios()
+        var actual = Self.scenarios()
+        actual.merge(Self.outlineScenarios().counts) { $1 }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
@@ -45,8 +104,11 @@ struct PerfBaselineTests {
                 failures.append("\(name): missing from baseline")
                 continue
             }
+            if counts.reloads != old.reloads { failures.append("\(name).reloads: baseline \(old.reloads), now \(counts.reloads)") }
             for (field, oldValue, newValue) in [
                 ("nodesVisited", old.nodesVisited, counts.nodesVisited),
+                ("cellsCreated", old.cellsCreated + 5, counts.cellsCreated),
+                ("cellsConfigured", old.cellsConfigured, counts.cellsConfigured),
                 ("matcherByteCompares", old.matcherByteCompares, counts.matcherByteCompares),
             ] where Double(newValue) > Double(oldValue) * (1 + Self.tolerance) {
                 failures.append("\(name).\(field): baseline \(oldValue), now \(newValue)")
