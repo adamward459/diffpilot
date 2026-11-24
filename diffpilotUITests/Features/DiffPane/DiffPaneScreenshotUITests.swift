@@ -16,6 +16,7 @@ final class DiffPaneScreenshotUITests: XCTestCase {
         let pane = DiffPaneDriver(appearance: appearance)
         pane.app.launch()
         XCTAssertTrue(pane.state.waitForExistence(timeout: 10))
+        pane.moveToPrimaryScreen()
         XCTAssertTrue(pane.waitUntil { pane.recognizedText().contains("archive.md") })
         attach(pane.window, named: "diffpane-\(appearance)")
 

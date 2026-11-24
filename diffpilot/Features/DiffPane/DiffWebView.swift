@@ -104,12 +104,15 @@ struct DiffWebView: NSViewRepresentable {
 
 struct DiffPaneView: View {
     let model: DiffPaneModel
+    @State private var showsPage = false
 
     var body: some View {
         GeometryReader { proxy in
-            DiffWebView(model: model)
-                .ignoresSafeArea(.container, edges: .top)
-                .onChange(of: proxy.safeAreaInsets.top, initial: true) { _, top in model.setInset(top) }
+            if showsPage {
+                DiffWebView(model: model)
+                    .ignoresSafeArea(.container, edges: .top)
+            }
+            Color.clear.onChange(of: proxy.safeAreaInsets.top, initial: true) { _, top in model.setInset(top) }
         }
         .overlay {
             Color.clear
@@ -117,6 +120,11 @@ struct DiffPaneView: View {
                 .accessibilityElement()
                 .accessibilityLabel(model.accessibilitySummary)
                 .accessibilityIdentifier("diff-pane")
+        }
+        .task {
+            // Creating the web view after the first frame keeps launch time flat.
+            try? await Task.sleep(for: .milliseconds(1))
+            showsPage = true
         }
     }
 }

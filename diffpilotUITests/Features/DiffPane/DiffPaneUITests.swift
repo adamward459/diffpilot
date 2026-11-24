@@ -8,6 +8,7 @@ final class DiffPaneUITests: XCTestCase {
         pane = DiffPaneDriver()
         pane.app.launch()
         XCTAssertTrue(pane.state.waitForExistence(timeout: 10))
+        pane.moveToPrimaryScreen()
     }
 
     func testPaneShowsTheFirstFile() {
