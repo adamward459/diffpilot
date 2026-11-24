@@ -13,7 +13,7 @@ final class SidebarScreenshotUITests: XCTestCase {
         let filter = app.textFields.firstMatch
         XCTAssertTrue(filter.waitForExistence(timeout: 5))
         filter.click()
-        filter.typeText("model")
+        filter.typeText("archive")
         attach(window, named: "sidebar-filter")
     }
 
