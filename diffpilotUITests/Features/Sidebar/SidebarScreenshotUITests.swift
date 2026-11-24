@@ -14,7 +14,7 @@ final class SidebarScreenshotUITests: XCTestCase {
     @MainActor
     private func capture(appearance: String) throws {
         let app = XCUIApplication()
-        app.launchEnvironment["DIFFPILOT_FIXTURE"] = "design"
+        app.launchEnvironment["DIFFPILOT_REPO"] = "large"
         app.launchEnvironment["DIFFPILOT_APPEARANCE"] = appearance
         app.launch()
         let window = app.windows.firstMatch

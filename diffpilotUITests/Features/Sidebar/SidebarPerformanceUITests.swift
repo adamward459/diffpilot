@@ -17,14 +17,14 @@ final class SidebarPerformanceUITests: XCTestCase {
     func testLaunchTime() {
         measure(metrics: [XCTApplicationLaunchMetric()], options: options) {
             let app = XCUIApplication()
-            app.launchEnvironment["DIFFPILOT_SAMPLE_COUNT"] = "5000"
+            app.launchEnvironment["DIFFPILOT_REPO"] = "large"
             app.launch()
         }
     }
 
     func testScrollingHitches() {
         let app = XCUIApplication()
-        app.launchEnvironment["DIFFPILOT_SAMPLE_COUNT"] = "5000"
+        app.launchEnvironment["DIFFPILOT_REPO"] = "large"
         app.launch()
         app.typeText("/")
 

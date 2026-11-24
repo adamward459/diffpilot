@@ -6,7 +6,8 @@ final class SidebarUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchEnvironment["DIFFPILOT_FIXTURE"] = "design"
+        app.launchEnvironment["DIFFPILOT_REPO"] = "large"
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         XCTAssertTrue(app.staticTexts["summary"].waitForExistence(timeout: 10))
     }
@@ -35,16 +36,16 @@ final class SidebarUITests: XCTestCase {
 
     func testLaunchShowsSummaryAndTopFolders() {
         let summary = app.staticTexts["summary"].value as? String ?? ""
-        XCTAssertTrue(summary.contains("12 files"), summary)
-        XCTAssertTrue(summary.contains("3/12 viewed"), summary)
-        for name in ["docs", "src", "tests", "package.json", "pnpm-lock.yaml"] {
+        XCTAssertTrue(summary.contains("2,000 files"), summary)
+        XCTAssertTrue(summary.contains("493/2,000 viewed"), summary)
+        for name in ["docs", "packages", "scripts", "src", "tests"] {
             XCTAssertTrue(row(name).exists, name)
         }
         XCTAssertFalse(row("client.ts").exists)
     }
 
     func testFilterShowsMatchesAndHidesTheRest() {
-        filter("uau")
+        filter("useArchiveUndo")
         XCTAssertTrue(row("useArchiveUndo.ts").waitForExistence(timeout: 5))
         XCTAssertTrue(row("useArchiveUndo.test.ts").exists)
         XCTAssertFalse(row("package.json").exists)
@@ -53,32 +54,36 @@ final class SidebarUITests: XCTestCase {
     }
 
     func testClearingFilterRestoresEarlierExpansion() {
-        row("api").click()
-        row("api").typeKey(.rightArrow, modifierFlags: [])
-        XCTAssertTrue(row("client.ts").waitForExistence(timeout: 5))
+        filter("archive")
+        XCTAssertTrue(row("archive.md").waitForExistence(timeout: 5))
+        clearFilter()
+        row("docs").click()
+        row("docs").typeKey(.leftArrow, modifierFlags: [])
+        XCTAssertFalse(row("archive.md").waitForExistence(timeout: 2))
 
-        filter("uau")
-        XCTAssertTrue(row("useArchiveUndo.ts").waitForExistence(timeout: 5))
-        XCTAssertFalse(row("client.ts").exists)
+        filter("archive")
+        XCTAssertTrue(row("archive.md").waitForExistence(timeout: 5))
 
         clearFilter()
-        XCTAssertTrue(row("client.ts").waitForExistence(timeout: 5))
-        XCTAssertTrue(row("archive.ts").exists)
-        XCTAssertFalse(row("MessageRow.tsx").exists)
+        XCTAssertTrue(row("docs").waitForExistence(timeout: 5))
+        XCTAssertFalse(row("archive.md").exists)
+        XCTAssertTrue(row("src").exists)
     }
 
     func testHideViewedRemovesViewedFiles() {
-        XCTAssertTrue(row("archive.md").exists)
+        filter("archive")
+        XCTAssertTrue(row("archive.md").waitForExistence(timeout: 5))
         app.buttons["toggle-hide-viewed"].click()
         XCTAssertEqual(app.buttons["toggle-hide-viewed"].value as? String, "on")
         XCTAssertFalse(row("archive.md").waitForExistence(timeout: 2))
         XCTAssertFalse(row("docs").exists)
-        XCTAssertTrue(row("package.json").exists)
+        XCTAssertTrue(row("archive.ts").exists)
         let summary = app.staticTexts["summary"].value as? String ?? ""
-        XCTAssertTrue(summary.contains("3/12 viewed"), summary)
+        XCTAssertTrue(summary.contains("493/2,000 viewed"), summary)
     }
 
-    func testOnlyUncommittedShowsTwoFiles() {
+    func testOnlyUncommittedShowsTwoArchiveFiles() {
+        filter("archive")
         app.buttons["toggle-uncommitted"].click()
         XCTAssertFalse(row("package.json").waitForExistence(timeout: 2))
         expandEverything()
@@ -94,7 +99,8 @@ final class SidebarUITests: XCTestCase {
         XCTAssertTrue(row("ArchiveToast.tsx").waitForExistence(timeout: 5))
         XCTAssertFalse(row("docs").exists)
         XCTAssertFalse(row("src").exists)
-        XCTAssertEqual(outline.cells.count, 12)
+        filter("archive")
+        XCTAssertEqual(outline.cells.count, 6)
         XCTAssertTrue(outline.staticTexts["src/components/inbox"].exists)
     }
 
@@ -106,6 +112,8 @@ final class SidebarUITests: XCTestCase {
     }
 
     func testDownArrowMovesSelection() {
+        filter("archive")
+        XCTAssertTrue(row("archive.md").waitForExistence(timeout: 5))
         row("archive.md").click()
         XCTAssertTrue(row("archive.md").isSelected)
         row("archive.md").typeKey(.downArrow, modifierFlags: [])
