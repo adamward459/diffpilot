@@ -35,3 +35,26 @@ nonisolated struct DiffLine: Equatable, Sendable, Encodable {
         try container.encode(text)
     }
 }
+
+extension Array where Element == FileDiff {
+    // Same order as the sidebar tree: folders before files, each level sorted by lowercased name.
+    nonisolated func inTreeOrder() -> [FileDiff] {
+        let keys = map { file in
+            (
+                parts: file.path.split(separator: "/", omittingEmptySubsequences: false).map { $0.lowercased() },
+                path: file.path
+            )
+        }
+        let order = indices.sorted { a, b in
+            let (left, right) = (keys[a], keys[b])
+            for i in 0..<Swift.min(left.parts.count, right.parts.count) where left.parts[i] != right.parts[i] {
+                let leftIsFolder = i < left.parts.count - 1
+                let rightIsFolder = i < right.parts.count - 1
+                if leftIsFolder != rightIsFolder { return leftIsFolder }
+                return left.parts[i] < right.parts[i]
+            }
+            return left.path < right.path
+        }
+        return order.map { self[$0] }
+    }
+}

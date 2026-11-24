@@ -97,7 +97,7 @@ struct DiffPaneView: View {
     var body: some View {
         GeometryReader { proxy in
             DiffWebView(model: model)
-                .ignoresSafeArea()
+                .ignoresSafeArea(.container, edges: .top)
                 .onChange(of: proxy.safeAreaInsets.top, initial: true) { _, top in model.setInset(top) }
         }
         .accessibilityIdentifier("diff-pane")

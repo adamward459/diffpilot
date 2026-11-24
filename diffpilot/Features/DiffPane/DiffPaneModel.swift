@@ -34,7 +34,7 @@ final class DiffPaneModel {
         let base = base
         let files = await Task.detached(priority: .userInitiated) {
             guard let repo, let text = try? Git.run(repo, UnifiedDiff.args + [base]) else { return [FileDiff]() }
-            return UnifiedDiff.parse(text)
+            return UnifiedDiff.parse(text).inTreeOrder()
         }.value
         batches = DiffBatches(files, lineBudget: Self.lineBudget)
         isLoaded = true
