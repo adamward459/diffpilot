@@ -16,7 +16,7 @@ and a change in it touches every feature.
                                          (or REF) and fail on metrics more than 5% worse
   scripts/test.py screenshot [feature...] capture screenshots into screenshots/feature/<Feature>/
   scripts/test.py related                print the test commands that match the current changes
-  scripts/test.py lint                   check the folder layout and features.json
+  scripts/test.py lint                   check the folder layout, features.json, and that the committed web build is current
 """
 
 from __future__ import annotations
@@ -32,6 +32,9 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import web_stamp  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "features.json"
@@ -456,7 +459,10 @@ def main(argv: list[str]) -> int:
         if command == "lint":
             files = swift_files()
             lint(load_manifest(), files, test_types(files))
-            print("Layout and features.json OK", file=sys.stderr)
+            stale = web_stamp.problems()
+            if stale:
+                raise LintError("\n".join(stale))
+            print("Layout, features.json, and web build OK", file=sys.stderr)
             return 0
         if command == "related":
             related()
