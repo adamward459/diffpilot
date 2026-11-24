@@ -6,17 +6,5 @@
     "Sidebar": {
       "e2e": "Sidebar UI tests land in #2 (feat/sidebar-glass-e2e)."
     }
-  },
-  "hotpaths": [
-    {
-      "feature": "App",
-      "glob": "diffpilot/App/diffpilotApp.swift",
-      "tests": ["diffpilotUITests/AppPerformanceUITests/testLaunchPerformance"]
-    },
-    {
-      "feature": "Sidebar",
-      "glob": "diffpilot/Features/Sidebar/FileTree.swift",
-      "tests": ["diffpilotTests/FilePerformanceTests"]
-    }
-  ]
+  }
 }
