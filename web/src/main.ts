@@ -376,7 +376,7 @@ function load(batch: FileDiff[], done: boolean): void {
   S.pending = false;
   empty.hidden = S.files.length > 0;
   rebuild();
-  if (!firstPainted && S.files.length) {
+  if (!firstPainted) {
     firstPainted = true;
     requestAnimationFrame(() => requestAnimationFrame(() => send({ type: 'firstPaint' })));
   }

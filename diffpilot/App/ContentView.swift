@@ -10,7 +10,7 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 240, ideal: 272, max: 480)
         } detail: {
             DiffPaneView(model: diff)
-                .toolbar { PaneToolbar(model: diff) }
+                .toolbar { if diff.firstPaintAt != nil { PaneToolbar(model: diff) } }
         }
         .onChange(of: model.selection) { _, path in
             if let path { diff.reveal(path) }
