@@ -83,7 +83,7 @@ async fn the_request_carries_the_setup_the_popover_collected(cx: &mut TestAppCon
     assert_eq!(request.paths, ["src/a.ts"]);
     assert_eq!(request.model, ReviewModel::new(ModelName::Haiku, Effort::Low));
     assert_eq!(
-        f.settings.review_model(),
+        f.settings.reviews_model(),
         ReviewModel::new(ModelName::Haiku, Effort::Low)
     );
     assert_eq!(f.settings.review_focuses(&PathBuf::from("/repo")), ["Security"]);
