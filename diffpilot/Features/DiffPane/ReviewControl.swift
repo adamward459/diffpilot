@@ -40,7 +40,7 @@ struct ClaudePill: View {
                 HStack(spacing: 4) {
                     Image(systemName: "bubble.left")
                     let count = model.threads.threads.count
-                    if count > 0 { Text("\(count)").monospacedDigit() }
+                    Text("\(count)").monospacedDigit()
                 }
                 .padding(.horizontal, 10)
                 .frame(height: 28)

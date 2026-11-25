@@ -55,14 +55,11 @@ private struct RepoView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                HStack(spacing: 10) {
-                    if let session, session.diff.firstPaintAt != nil {
-                        ClaudePill(model: session.diff).glassEffect(.regular.interactive(), in: Capsule())
-                    }
-                    ComparisonControl(model: picker)
-                }
+            if let session, session.diff.firstPaintAt != nil {
+                ToolbarItem(placement: .principal) { ClaudePill(model: session.diff) }
+                ToolbarSpacer(.fixed, placement: .principal)
             }
+            ToolbarItem(placement: .principal) { ComparisonControl(model: picker) }
         }
         .onChange(of: session?.sidebar.selection) { _, path in
             if let path { session?.diff.reveal(path) }
