@@ -9,14 +9,15 @@ final class SidebarModel {
     var filter = FileFilter()
     var mode = SidebarMode.tree
     var selection: String?
-    var repo = RepoChanges.configuredRepo()
+    let repo: URL
     var isLoading = true
 
+    init(repo: URL) {
+        self.repo = repo
+    }
+
     func load() async {
-        guard let repo else {
-            isLoading = false
-            return
-        }
+        let repo = repo
         let loaded = await Task.detached(priority: .userInitiated) {
             let changes = (try? RepoChanges.load(repo: repo)) ?? []
             let root = FileTree.build(changes)

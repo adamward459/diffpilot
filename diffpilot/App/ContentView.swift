@@ -1,8 +1,38 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var model = SidebarModel()
-    @State private var diff = DiffPaneModel(repo: RepoChanges.configuredRepo())
+    let workspace: Workspace
+
+    var body: some View {
+        if let folder = workspace.folder {
+            RepoView(repo: folder)
+                .id(folder)
+                .navigationTitle(folder.lastPathComponent)
+        } else {
+            NavigationSplitView {
+                ContentUnavailableView {
+                    Label("No Folder", systemImage: "folder")
+                } description: {
+                    Text("Press ⌘O to open a Git repository.")
+                } actions: {
+                    Button("Open Folder…") { workspace.openFolder() }
+                }
+                .navigationSplitViewColumnWidth(min: 240, ideal: 272, max: 480)
+            } detail: {
+                Color.clear
+            }
+        }
+    }
+}
+
+private struct RepoView: View {
+    @State private var model: SidebarModel
+    @State private var diff: DiffPaneModel
+
+    init(repo: URL) {
+        _model = State(initialValue: SidebarModel(repo: repo))
+        _diff = State(initialValue: DiffPaneModel(repo: repo))
+    }
 
     var body: some View {
         NavigationSplitView {
