@@ -3,10 +3,13 @@ use crate::comparison_control::{Select, comparison_control};
 use crate::pane::{DiffPane, DiffPaneEvent};
 use crate::sidebar::{LoadedChanges, Sidebar, SidebarEvent};
 use diffpilot_core::changes;
-use diffpilot_core::claude::{ClaudeCliReplier, Replier, Reviewer, ScriptedReplier, reviewer_from_env};
+use diffpilot_core::claude::{
+    ClaudeCliReplier, ClaudeCliReviewer, Replier, Reviewer, ScriptedReplier, reviewer_from_env,
+};
 use diffpilot_core::comparison::{self, Comparison};
 use diffpilot_core::diff::{self, DiffMode, FileDiff};
 use diffpilot_core::refs::Refs;
+use diffpilot_core::run::RunKind;
 use diffpilot_core::settings::{self, Settings};
 use diffpilot_core::tree;
 use diffpilot_core::viewed::{ViewedFiles, ViewedKey, ViewedStore};
@@ -106,17 +109,26 @@ pub struct Claude {
 
 impl Claude {
     /// `DIFFPILOT_REVIEWER=scripted` swaps the `claude` command for canned answers.
-    pub fn from_env(repo: &std::path::Path) -> Self {
+    pub fn from_env(repo: &std::path::Path, settings: &Settings) -> Self {
         let scripted = std::env::var("DIFFPILOT_REVIEWER").is_ok_and(|kind| kind == "scripted");
         let replier: Arc<dyn Replier> = if scripted {
             Arc::new(ScriptedReplier::default())
         } else {
-            Arc::new(ClaudeCliReplier::new(repo))
+            Arc::new(ClaudeCliReplier {
+                binary: settings.claude_path(),
+                model: settings.model_for(RunKind::Reply).name.as_str(),
+                ..ClaudeCliReplier::new(repo)
+            })
         };
-        Self {
-            reviewer: Arc::from(reviewer_from_env()),
-            replier,
-        }
+        let reviewer: Arc<dyn Reviewer> = if scripted {
+            Arc::from(reviewer_from_env())
+        } else {
+            Arc::new(ClaudeCliReviewer {
+                binary: settings.claude_path(),
+                ..ClaudeCliReviewer::default()
+            })
+        };
+        Self { reviewer, replier }
     }
 }
 
