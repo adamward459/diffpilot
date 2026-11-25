@@ -1,6 +1,9 @@
-use crate::layout::{CODE_PADDING, GUTTER, Position, THREAD, Tops, cells, columns_for, position};
+use crate::layout::{
+    CODE_PADDING, GUTTER, Position, SPLIT_GUTTER, THREAD, Tops, cells, column_width, columns_for, position, shown_mode,
+    split_columns_for,
+};
 use crate::rows::{RowRef, Rows, ThreadSlot, Visibility, body_notice, build};
-use diffpilot_core::diff::FileDiff;
+use diffpilot_core::diff::{DiffMode, FileDiff};
 use diffpilot_core::threads::ThreadId;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -36,11 +39,13 @@ pub struct PaneState {
     pub threads: Vec<ThreadSlot>,
     thread_heights: Vec<f32>,
     wrap: bool,
+    mode: DiffMode,
     geometry: Geometry,
     scroll: f32,
     scroll_x: f32,
     widest: Option<usize>,
     reported: Option<String>,
+    reported_mode: DiffMode,
     index: HashMap<String, usize>,
 }
 
@@ -56,11 +61,13 @@ impl PaneState {
             threads: Vec::new(),
             thread_heights: Vec::new(),
             wrap: true,
+            mode: DiffMode::Unified,
             geometry,
             scroll: 0.0,
             scroll_x: 0.0,
             widest: None,
             reported: None,
+            reported_mode: DiffMode::Unified,
             index: HashMap::new(),
         }
     }
@@ -77,8 +84,32 @@ impl PaneState {
         self.scroll
     }
 
+    /// The mode that was asked for. A pane too narrow for two columns draws unified rows anyway.
+    pub fn mode(&self) -> DiffMode {
+        self.mode
+    }
+
+    pub fn shown_mode(&self) -> DiffMode {
+        shown_mode(self.mode, self.geometry.width)
+    }
+
+    /// The pane width when the rows on screen are split rows.
+    pub fn split_width(&self) -> Option<f32> {
+        (self.shown_mode() == DiffMode::Split).then_some(self.geometry.width)
+    }
+
+    /// The mode shown when it differs from the last one this returned.
+    pub fn take_shown_change(&mut self) -> Option<DiffMode> {
+        let current = self.shown_mode();
+        (current != std::mem::replace(&mut self.reported_mode, current)).then_some(current)
+    }
+
     pub fn wrap_cols(&self) -> Option<usize> {
-        self.wrap.then(|| columns_for(self.geometry.width, self.geometry.cell))
+        let Geometry { width, cell, .. } = self.geometry;
+        self.wrap.then(|| match self.shown_mode() {
+            DiffMode::Unified => columns_for(width, cell),
+            DiffMode::Split => split_columns_for(width, cell),
+        })
     }
 
     pub fn file_index(&self, path: &str) -> Option<usize> {
@@ -107,7 +138,11 @@ impl PaneState {
                 .unwrap_or(0)
         });
         let code = widest as f32 * self.geometry.cell + CODE_PADDING;
-        (code - (self.geometry.width - GUTTER + CODE_PADDING)).max(0.0)
+        let room = match self.split_width() {
+            Some(width) => column_width(width) - SPLIT_GUTTER,
+            None => self.geometry.width - GUTTER,
+        };
+        (code - (room + CODE_PADDING)).max(0.0)
     }
 
     pub fn scroll_x_by(&mut self, dx: f32) {
@@ -230,14 +265,27 @@ impl PaneState {
         }
     }
 
+    pub fn set_mode(&mut self, mode: DiffMode) {
+        if mode == self.mode {
+            return;
+        }
+        let (anchor, shown) = (self.anchor(), self.shown_mode());
+        self.mode = mode;
+        if self.shown_mode() != shown {
+            self.relayout(anchor);
+            self.scroll_x_by(0.0);
+        }
+    }
+
     pub fn set_geometry(&mut self, geometry: Geometry) {
         if geometry == self.geometry {
             return;
         }
-        let anchor = self.anchor();
-        let before = self.wrap_cols();
+        let (anchor, shown, before) = (self.anchor(), self.shown_mode(), self.wrap_cols());
         self.geometry = geometry;
-        if self.wrap_cols() == before {
+        if self.shown_mode() != shown {
+            self.relayout(anchor);
+        } else if self.wrap_cols() == before {
             self.scroll_to(self.scroll);
         } else {
             self.retop(anchor);
@@ -302,6 +350,7 @@ impl PaneState {
                 loaded: &self.loaded,
             },
             &self.threads,
+            self.shown_mode(),
         );
         self.retop(anchor);
     }
@@ -379,8 +428,8 @@ impl PaneState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::{FILE_HEADER, GAP, HUNK, LINE, NOTICE};
-    use crate::testing::{added, diff};
+    use crate::layout::{FILE_HEADER, GAP, HUNK, LINE, NOTICE, SPLIT_MIN_WIDTH};
+    use crate::testing::{added, diff, lines_with};
     use diffpilot_core::threads::{Side, ThreadAnchor};
 
     const GEOMETRY: Geometry = Geometry {
@@ -756,5 +805,221 @@ mod tests {
         state.toggle_collapsed("f1.ts");
         let header = state.tops.top(state.rows.header_index(1).unwrap());
         assert_eq!(state.scroll(), header);
+    }
+
+    const WIDE: Geometry = Geometry {
+        width: 1000.0,
+        height: 100.0,
+        cell: 7.0,
+    };
+
+    fn changes(path: &str, spec: &str, text: &str) -> FileDiff {
+        diff(path, lines_with(spec, text))
+    }
+
+    fn split_state(files: Vec<FileDiff>) -> PaneState {
+        let mut state = PaneState::new(WIDE);
+        state.replace_files(files);
+        state.set_mode(DiffMode::Split);
+        state
+    }
+
+    fn top_shows(state: &PaneState, hunk: u32, line: u32) -> bool {
+        let (row, _) = content_at_top(state);
+        state.rows.rows[row].shows_line(hunk, line)
+    }
+
+    fn two_changed_files() -> Vec<FileDiff> {
+        ["a.ts", "b.ts", "c.ts"]
+            .iter()
+            .map(|path| changes(path, "cdddddaaaaaccc", "x"))
+            .collect()
+    }
+
+    #[test]
+    fn split_rows_replace_the_line_rows_and_unified_brings_them_back() {
+        let mut state = PaneState::new(WIDE);
+        state.replace_files(vec![changes("a.ts", "cddaa", "x")]);
+        let unified = state.tops.total();
+        assert_eq!(state.rows.rows.len(), 1 + 1 + 5 + 1);
+        state.set_mode(DiffMode::Split);
+        assert_eq!(state.mode(), DiffMode::Split);
+        assert_eq!(state.rows.rows.len(), 1 + 1 + 3 + 1);
+        assert_eq!(state.tops.total(), unified - 2.0 * LINE);
+        state.set_mode(DiffMode::Unified);
+        assert_eq!(state.rows.rows.len(), 8);
+        assert_eq!(state.tops.total(), unified);
+    }
+
+    #[test]
+    fn a_narrow_pane_keeps_unified_rows_until_it_is_wide_enough() {
+        let mut state = state(vec![changes("a.ts", "cddaa", "x")]);
+        state.set_mode(DiffMode::Split);
+        assert_eq!((state.mode(), state.shown_mode()), (DiffMode::Split, DiffMode::Unified));
+        assert_eq!(state.rows.rows.len(), 8);
+        assert_eq!(state.split_width(), None);
+        state.set_geometry(Geometry {
+            width: SPLIT_MIN_WIDTH,
+            ..GEOMETRY
+        });
+        assert_eq!(state.shown_mode(), DiffMode::Split);
+        assert_eq!(state.rows.rows.len(), 6);
+        assert_eq!(state.split_width(), Some(SPLIT_MIN_WIDTH));
+        state.set_geometry(Geometry {
+            width: SPLIT_MIN_WIDTH - 1.0,
+            ..GEOMETRY
+        });
+        assert_eq!(state.shown_mode(), DiffMode::Unified);
+        assert_eq!(state.rows.rows.len(), 8);
+    }
+
+    #[test]
+    fn the_shown_mode_is_reported_once_per_change() {
+        let mut state = state(vec![changes("a.ts", "cddaa", "x")]);
+        assert_eq!(state.take_shown_change(), None);
+        state.set_mode(DiffMode::Split);
+        assert_eq!(state.take_shown_change(), None, "too narrow to show it");
+        state.set_geometry(WIDE);
+        assert_eq!(state.take_shown_change(), Some(DiffMode::Split));
+        assert_eq!(state.take_shown_change(), None);
+        state.set_mode(DiffMode::Unified);
+        assert_eq!(state.take_shown_change(), Some(DiffMode::Unified));
+    }
+
+    #[test]
+    fn toggling_keeps_the_line_at_the_top_and_how_far_into_it_the_view_is() {
+        let mut state = PaneState::new(WIDE);
+        state.replace_files(two_changed_files());
+        let third_added = state.rows.find(0, RowRef::Line(0, 8), &state.threads).unwrap();
+        state.scroll_to(state.tops.top(third_added) + 5.0);
+        assert!(top_shows(&state, 0, 8));
+        state.set_mode(DiffMode::Split);
+        assert!(top_shows(&state, 0, 8), "the added line is on the right of its row");
+        assert_eq!(content_at_top(&state).1, 5.0);
+        assert_eq!(state.visible_path(), Some("a.ts"));
+        state.set_mode(DiffMode::Unified);
+        assert!(
+            top_shows(&state, 0, 3),
+            "its row also holds the deleted line that pairs with it"
+        );
+    }
+
+    #[test]
+    fn toggling_twice_returns_to_a_context_line_exactly() {
+        let mut state = PaneState::new(WIDE);
+        state.replace_files(two_changed_files());
+        let context = state.rows.find(1, RowRef::Line(0, 12), &state.threads).unwrap();
+        state.scroll_to(state.tops.top(context) + 7.0);
+        let before = state.scroll();
+        state.set_mode(DiffMode::Split);
+        assert!(top_shows(&state, 0, 12));
+        assert_eq!(state.visible_path(), Some("b.ts"));
+        assert_ne!(state.scroll(), before, "the file above got shorter");
+        state.set_mode(DiffMode::Unified);
+        assert_eq!(state.scroll(), before);
+    }
+
+    #[test]
+    fn toggling_keeps_a_header_and_a_thread_where_they_are() {
+        let mut state = PaneState::new(WIDE);
+        state.replace_files(two_changed_files());
+        state.set_threads(vec![line_thread(1, "a.ts", 4)]);
+        state.reveal("b.ts");
+        let header = state.rows.header_index(1).unwrap();
+        state.set_mode(DiffMode::Split);
+        assert_eq!(state.scroll(), state.tops.top(state.rows.header_index(1).unwrap()));
+        assert_eq!(state.visible_path(), Some("b.ts"));
+        assert_ne!(header, state.rows.header_index(1).unwrap());
+
+        let top = state.thread_top(ThreadId(1)).unwrap();
+        state.scroll_to(top + 30.0);
+        state.set_mode(DiffMode::Unified);
+        let (row, offset) = content_at_top(&state);
+        assert_eq!(state.rows.row_ref(row, &state.threads), RowRef::Thread(ThreadId(1)));
+        assert_eq!(offset, 30.0);
+    }
+
+    #[test]
+    fn a_line_thread_follows_its_line_into_the_split_rows() {
+        let mut state = PaneState::new(WIDE);
+        state.replace_files(vec![changes("a.ts", "cddaa", "x")]);
+        state.set_threads(vec![
+            slot(1, ThreadAnchor::line("a.ts", Side::New, 3)),
+            slot(2, ThreadAnchor::line("a.ts", Side::Old, 2)),
+        ]);
+        let body = FILE_HEADER + HUNK;
+        assert_eq!(state.thread_top(ThreadId(1)), Some(body + 5.0 * LINE + THREAD));
+        assert_eq!(state.thread_top(ThreadId(2)), Some(body + 2.0 * LINE));
+        state.set_mode(DiffMode::Split);
+        assert_eq!(state.thread_top(ThreadId(1)), Some(body + 3.0 * LINE + THREAD));
+        assert_eq!(state.thread_top(ThreadId(2)), Some(body + 2.0 * LINE));
+    }
+
+    #[test]
+    fn wrapped_split_rows_use_the_width_of_one_column() {
+        let long = "x".repeat(100);
+        let mut state = PaneState::new(WIDE);
+        state.replace_files(vec![changes("a.ts", "da", &long)]);
+        assert_eq!(state.tops.height(2), LINE, "125 columns hold it in unified rows");
+        state.set_mode(DiffMode::Split);
+        assert_eq!(state.wrap_cols(), Some(63));
+        assert_eq!(state.tops.height(2), 2.0 * LINE);
+        state.set_wrap(false);
+        assert_eq!(state.tops.height(2), LINE);
+        state.set_wrap(true);
+        assert_eq!(state.tops.height(2), 2.0 * LINE);
+    }
+
+    #[test]
+    fn split_columns_scroll_sideways_to_the_longest_line() {
+        let mut state = PaneState::new(WIDE);
+        state.replace_files(vec![changes("a.ts", "da", &"x".repeat(200))]);
+        state.set_wrap(false);
+        let unified = state.max_scroll_x();
+        assert_eq!(unified, 200.0 * 7.0 + CODE_PADDING - (1000.0 - GUTTER + CODE_PADDING));
+        state.set_mode(DiffMode::Split);
+        let column = crate::layout::column_width(1000.0);
+        let split = 200.0 * 7.0 + CODE_PADDING - (column - SPLIT_GUTTER + CODE_PADDING);
+        assert_eq!(state.max_scroll_x(), split);
+        state.scroll_x_by(1e9);
+        assert_eq!(state.scroll_x(), split);
+        state.set_mode(DiffMode::Unified);
+        assert_eq!(state.scroll_x(), unified, "a smaller limit pulls the offset back");
+    }
+
+    #[test]
+    fn the_pinned_header_and_hunk_follow_split_rows() {
+        let mut state = split_state(two_changed_files());
+        state.scroll_to(state.tops.top(3) + 5.0);
+        let sticky = state.position().and_then(|position| position.sticky).unwrap();
+        assert_eq!((sticky.file, sticky.hunk), (0, Some(0)));
+        assert_eq!(state.visible_path(), Some("a.ts"));
+    }
+
+    #[test]
+    fn reveal_collapse_and_viewed_work_on_split_rows() {
+        let mut binary = FileDiff::new("logo.png", diffpilot_core::changes::FileStatus::Added);
+        binary.is_binary = true;
+        let files = vec![
+            changes("a.ts", "cdddddaaaaaccc", "x"),
+            changes("b.ts", "cdddddaaaaaccc", "x"),
+            binary,
+            changes("c.ts", "aaa", "x"),
+        ];
+        let mut state = split_state(files);
+        assert!(state.reveal("c.ts"));
+        assert_eq!(state.visible_path(), Some("c.ts"));
+        state.scroll_to(0.0);
+        state.toggle_collapsed("a.ts");
+        assert_eq!(state.rows.file_range(0).map(|range| range.len()), Some(2));
+        state.set_viewed(["b.ts".to_string()].into());
+        assert!(state.collapsed.contains("b.ts"));
+        assert_eq!(state.rows.file_range(1).map(|range| range.len()), Some(2));
+        assert_eq!(state.files_to_highlight(), [3]);
+        let binary_rows = state.rows.file_range(2).unwrap();
+        assert!(matches!(
+            state.rows.rows[binary_rows.start + 1].kind,
+            crate::rows::RowKind::Notice(_)
+        ));
     }
 }

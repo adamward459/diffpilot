@@ -312,7 +312,7 @@ impl DiffPane {
         let Some(slot) = self.state.threads.iter().find(|slot| slot.id == id) else {
             return;
         };
-        let frame = ThreadFrame::of(&slot.anchor);
+        let frame = ThreadFrame::of(&slot.anchor, self.state.split_width());
         let width = px(frame.card_width(self.state.geometry().width));
         let height = f32::from(card.read(cx).height(width, window, cx));
         self.state.set_thread_height(id, frame.row_height(height));
@@ -652,7 +652,7 @@ impl DiffPane {
     fn thread_row(&self, slot: u32, y: f32, height: f32) -> Option<Div> {
         let thread = &self.state.threads[slot as usize];
         let card = self.card(thread.id)?;
-        let frame = ThreadFrame::of(&thread.anchor);
+        let frame = ThreadFrame::of(&thread.anchor, self.state.split_width());
         let card_height = height - frame.top - frame.bottom - if frame.rule { 1.0 } else { 0.0 };
         let style = StyleRefinement::default().w_full().h(px(card_height));
         let mut row = Self::placed(y, height)
@@ -786,7 +786,7 @@ impl Render for DiffPane {
             let height = self.state.tops.height(index);
             let file = row.file as usize;
             let element = match row.kind {
-                RowKind::Line { .. } | RowKind::Gap => continue,
+                RowKind::Line { .. } | RowKind::Pair { .. } | RowKind::Gap => continue,
                 RowKind::Thread { slot } => match self.thread_row(slot, y, height) {
                     Some(thread) => thread,
                     None => continue,

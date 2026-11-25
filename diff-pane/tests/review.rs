@@ -136,7 +136,7 @@ fn card_height(opened: &Opened, cx: &mut VisualTestContext, id: ThreadId, anchor
         .pane
         .read_with(cx, |pane, _| pane.card(id).cloned().expect("a card"));
     let pane_width = opened.pane.read_with(cx, |pane, _| pane.state().geometry().width);
-    let width = px(ThreadFrame::of(anchor).card_width(pane_width));
+    let width = px(ThreadFrame::of(anchor, None).card_width(pane_width));
     f32::from(cx.update(|window, cx| card.read(cx).height(width, window, cx)))
 }
 
@@ -161,7 +161,7 @@ fn a_review_run_puts_its_findings_in_the_pane_with_the_height_of_their_cards(cx:
     let mut grown = 0.0;
     for thread in &threads {
         let measured = row_height(&opened, cx, thread.id);
-        let frame = ThreadFrame::of(&thread.anchor);
+        let frame = ThreadFrame::of(&thread.anchor, None);
         assert_eq!(
             measured,
             frame.row_height(card_height(&opened, cx, thread.id, &thread.anchor))
@@ -184,7 +184,7 @@ fn a_review_run_puts_its_findings_in_the_pane_with_the_height_of_their_cards(cx:
     let collapsed = 2.0 * metrics::BORDER + metrics::FINDING_HEADER;
     assert_eq!(
         row_height(&opened, cx, nit.id),
-        ThreadFrame::of(&nit.anchor).row_height(collapsed)
+        ThreadFrame::of(&nit.anchor, None).row_height(collapsed)
     );
 
     let change = threads.iter().filter(|t| t.anchor == ThreadAnchor::Change).count();
@@ -301,7 +301,7 @@ fn a_file_comment_opens_its_composer_in_view(cx: &mut TestAppContext) {
     });
     assert_eq!(
         row_height(&opened, cx, id),
-        ThreadFrame::of(&ThreadAnchor::file("c.ts")).row_height(card_height(
+        ThreadFrame::of(&ThreadAnchor::file("c.ts"), None).row_height(card_height(
             &opened,
             cx,
             id,
