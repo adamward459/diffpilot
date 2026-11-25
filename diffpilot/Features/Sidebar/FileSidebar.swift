@@ -2,6 +2,8 @@ import SwiftUI
 
 struct FileSidebar: View {
     @Bindable var model: SidebarModel
+    let comments: [String: Int]
+    let toggleViewed: (String) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -9,7 +11,8 @@ struct FileSidebar: View {
             FilterRow(model: model)
             FileOutline(
                 root: model.root, files: model.files, filter: model.filter, mode: model.mode,
-                selection: $model.selection)
+                marks: FileMarks(viewed: model.viewed.paths, comments: comments),
+                toggleViewed: toggleViewed, selection: $model.selection)
         }
     }
 }

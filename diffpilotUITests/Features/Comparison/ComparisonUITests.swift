@@ -21,6 +21,7 @@ final class ComparisonUITests: XCTestCase {
     private func launch() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["DIFFPILOT_REPO"] = Fixture.large
+        app.launchEnvironment["DIFFPILOT_VIEWED_SEED"] = Fixture.viewedSeed
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         XCTAssertTrue(app.staticTexts["summary"].waitForExistence(timeout: 10))

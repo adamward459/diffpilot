@@ -36,6 +36,10 @@ struct HostCommandTests {
         #expect(object["reduceTransparency"] as? Bool == true)
     }
 
+    @Test func resetCallsThePageReset() {
+        #expect(HostCommand.reset.call.script == "dp.reset()")
+    }
+
     @Test func fileStatePassesTheFlags() {
         let call = HostCommand.fileState(path: "a", viewed: true, collapsed: false).call
         #expect(call.script == "dp.fileState(path, viewed, collapsed)")

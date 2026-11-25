@@ -13,10 +13,10 @@ final class DiffPaneModel {
     private(set) var firstPaintAt: Date?
     private(set) var visiblePath: String?
     private(set) var scrollStats: ScrollStats?
-    private(set) var viewed: Set<String> = []
     private(set) var collapsed: Set<String> = []
     var mode = PaneMode.diff
 
+    let viewed: ViewedFiles
     private let repo: URL?
     private let comparison: Comparison
     private let replier: any ClaudeReplier
@@ -32,6 +32,7 @@ final class DiffPaneModel {
 
     init(
         repo: URL?, comparison: Comparison = .checkedOut(base: "main", includesUncommitted: true),
+        viewed: ViewedFiles = ViewedFiles(key: ViewedKey(repo: "", branch: ""), store: ViewedStore()),
         replier: any ClaudeReplier = ScriptedReplier(),
         benchScrollDelay: Duration? = ProcessInfo.processInfo.environment["DIFFPILOT_BENCH"].flatMap(Double.init).map {
             .seconds($0)
@@ -40,6 +41,8 @@ final class DiffPaneModel {
     ) {
         self.repo = repo
         self.comparison = comparison
+        self.viewed = viewed
+        collapsed = viewed.paths
         self.replier = replier
         self.benchScrollDelay = benchScrollDelay
         self.send = send
@@ -47,26 +50,66 @@ final class DiffPaneModel {
         SymbolImages.warmUp()
     }
 
+    var commentCounts: [String: Int] {
+        threads.threads.values.reduce(into: [:]) { counts, thread in counts[thread.anchor.path, default: 0] += 1 }
+    }
+
     var accessibilitySummary: String {
         let reply = threads.threads.values.flatMap(\.comments).last(where: { $0.author == ThreadStore.claudeName })
         let scroll =
             scrollStats.map { String(format: "%d/%.2f/%.2f/%.2f", $0.frames, $0.medianMs, $0.p95Ms, $0.maxMs) } ?? ""
         return
-            "top=\(visiblePath ?? ""); threads=\(threads.threads.count); viewed=\(viewed.count); scroll=\(scroll); reply=\(reply?.body ?? "")"
+            "top=\(visiblePath ?? ""); threads=\(threads.threads.count); viewed=\(viewed.paths.count); scroll=\(scroll); reply=\(reply?.body ?? "")"
     }
 
     func load() async {
+        let next = await readFiles()
+        files = next
+        batches = DiffBatches(next, lineBudget: Self.lineBudget)
+        sendFirstBatchIfReady()
+        await clearChangedViewed(next)
+    }
+
+    func reload() async {
+        let next = await readFiles()
+        guard next != files else { return }
+        files = next
+        await clearChangedViewed(next)
+        batches = DiffBatches(next, lineBudget: Self.lineBudget)
+        guard hasSentFirstBatch else {
+            sendFirstBatchIfReady()
+            return
+        }
+        send(.reset)
+        hasSentFirstBatch = false
+        sendFirstBatchIfReady()
+        if let path = visiblePath, let batch = batches?.through(path: path) {
+            send(.load(files: batch.files, done: batch.done))
+        }
+    }
+
+    private func readFiles() async -> [FileDiff] {
         let repo = repo
         let comparison = comparison
-        let files = await Task.detached(priority: .userInitiated) {
+        return await Task.detached(priority: .userInitiated) {
             guard let repo, let text = try? Git.run(repo, UnifiedDiff.args + comparison.revisions) else {
-                return [FileDiff]()
+                return []
             }
             return UnifiedDiff.parse(text).inTreeOrder()
         }.value
-        self.files = files
-        batches = DiffBatches(files, lineBudget: Self.lineBudget)
-        sendFirstBatchIfReady()
+    }
+
+    private func clearChangedViewed(_ files: [FileDiff]) async {
+        let viewed = viewed.paths
+        let fingerprints = await Task.detached(priority: .utility) {
+            Dictionary(
+                files.filter { viewed.contains($0.path) }.map { ($0.path, $0.fingerprint) },
+                uniquingKeysWith: { _, last in last })
+        }.value
+        for path in self.viewed.clearChanged(fingerprints) {
+            collapsed.remove(path)
+            if isPageReady { sendFileState(path) }
+        }
     }
 
     func pageDidReload() {
@@ -82,12 +125,9 @@ final class DiffPaneModel {
     }
 
     func toggleViewed(_ path: String) {
-        if viewed.remove(path) == nil {
-            viewed.insert(path)
-            collapsed.insert(path)
-        } else {
-            collapsed.remove(path)
-        }
+        let fingerprint = files?.first { $0.path == path }?.fingerprint
+        viewed.toggle(path, fingerprint: fingerprint ?? ViewedFiles.unknown)
+        if viewed.contains(path) { collapsed.insert(path) } else { collapsed.remove(path) }
         sendFileState(path)
     }
 
@@ -116,7 +156,7 @@ final class DiffPaneModel {
             isPageReady = true
             if let theme { send(.setTheme(theme)) }
             send(.setInset(inset))
-            for path in viewed.union(collapsed).sorted() { sendFileState(path) }
+            for path in viewed.paths.union(collapsed).sorted() { sendFileState(path) }
             sendFirstBatchIfReady()
         case .needMore:
             sendNextBatch()
@@ -134,6 +174,8 @@ final class DiffPaneModel {
             }
         case .visibleFile(let path):
             visiblePath = path
+        case .toggleViewed(let path):
+            toggleViewed(path)
         case .toggleCollapsed(let path):
             if collapsed.remove(path) == nil { collapsed.insert(path) }
             sendFileState(path)

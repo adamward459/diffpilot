@@ -32,6 +32,7 @@ const S = {
   pending: false,
   inset: 0,
   topFile: -1,
+  epoch: 0,
   threads: new Map<number, ReviewThread>(),
   byFile: new Map<string, ReviewThread[]>(),
   tokens: new Map<number, Tokens>(),
@@ -113,7 +114,7 @@ function fileHeaderHtml(f: number, pinned: boolean): string {
     <span class="inline-flex h-4 min-w-4 items-center justify-center rounded bg-cap px-[3px] font-mono text-[10.5px] font-semibold text-muted">${file.status}</span>
     <span class="font-mono text-[11.5px]"><span class="text-ok">+${file.additions}</span> <span class="text-err">−${file.deletions}</span></span>${minibar(file.additions, file.deletions)}
     ${count ? `<span class="ml-1 inline-flex items-center gap-0.5 text-[11px] text-muted">${I('bubble', 12)}${count}</span>` : ''}
-    ${file.viewed ? `<span class="ml-auto inline-flex items-center gap-1 text-[11px] text-muted" aria-label="Viewed">${I('check', 12)}Viewed</span>` : ''}
+    <button class="ml-auto inline-flex items-center gap-1.5 text-[11px] text-muted" data-act="viewed" role="checkbox" aria-checked="${file.viewed ? 'true' : 'false'}" aria-label="Viewed ${esc(file.path)}"><span class="inline-flex size-3.5 items-center justify-center rounded-[3px] border ${file.viewed ? 'border-accent bg-accent text-on-accent' : 'border-line'}">${file.viewed ? I('check', 10) : ''}</span>Viewed</button>
   </div>`;
 }
 function hunkHtml(text: string, pinned: boolean): string {
@@ -282,6 +283,10 @@ const hlQueue: number[] = [];
 let hlBusy = 0;
 worker.onmessage = ({ data }: MessageEvent<HighlightResult>) => {
   hlBusy--;
+  if (data.epoch !== S.epoch) {
+    pumpHighlight();
+    return;
+  }
   if (!data.none) {
     S.tokens.set(data.f, data);
     for (const r of S.fileRows[data.f] ?? []) if (r.k === 'ln') invalidate(r.key);
@@ -320,7 +325,7 @@ function pumpHighlight(): void {
       }
     }
     hlBusy++;
-    const request: HighlightRequest = { f, path: file.path, oldText: oldL.join('\n'), newText: newL.join('\n') };
+    const request: HighlightRequest = { epoch: S.epoch, f, path: file.path, oldText: oldL.join('\n'), newText: newL.join('\n') };
     worker.postMessage(request);
   }
 }
@@ -346,6 +351,9 @@ function onAct(e: Event): void {
     case 'collapse':
       send({ type: 'toggleCollapsed', path: file.path });
       break;
+    case 'viewed':
+      send({ type: 'toggleViewed', path: file.path });
+      break;
     case 'loadbig':
       file.expanded = true;
       rebuildFile(f);
@@ -366,6 +374,35 @@ function scrollToRow(key: string): void {
   if (item) root.scrollTop = item.start - S.inset;
 }
 
+let anchor: { path: string; offset: number } | null = null;
+function restoreAnchor(): void {
+  if (!anchor) return;
+  const f = fileIndex(anchor.path);
+  if (f < 0) return;
+  const item = v.measurementsCache[S.rows.findIndex((x) => x.key === `fh${f}`)];
+  if (item) root.scrollTop = item.start + anchor.offset - S.inset;
+  anchor = null;
+}
+
+function reset(): void {
+  const top = S.files[S.topFile];
+  const item = top && v.measurementsCache[S.rows.findIndex((x) => x.key === `fh${S.topFile}`)];
+  anchor = top && item ? { path: top.path, offset: Math.max(0, root.scrollTop + S.inset - item.start) } : null;
+  for (const k of [...S.nodes.keys()]) invalidate(k);
+  S.files = [];
+  S.fileRows = [];
+  S.rows = [];
+  S.tokens.clear();
+  S.hlQueued.clear();
+  hlQueue.length = 0;
+  S.epoch++;
+  S.topFile = -1;
+  S.done = true;
+  S.pending = false;
+  stickyKey = '';
+  rebuild();
+}
+
 let firstPainted = false;
 function load(batch: FileDiff[], done: boolean): void {
   for (const file of batch) {
@@ -377,6 +414,8 @@ function load(batch: FileDiff[], done: boolean): void {
   S.pending = false;
   empty.hidden = S.files.length > 0;
   rebuild();
+  restoreAnchor();
+  if (done) anchor = null;
   if (!firstPainted) {
     firstPainted = true;
     requestAnimationFrame(() => requestAnimationFrame(() => send({ type: 'firstPaint' })));
@@ -463,6 +502,6 @@ function benchScroll(): void {
   requestAnimationFrame(step);
 }
 
-const dp: HostApi = { load, thread, removeThread, reveal, setInset, setTheme, fileState, benchScroll };
+const dp: HostApi = { load, thread, removeThread, reveal, setInset, setTheme, fileState, reset, benchScroll };
 window.dp = dp;
 send({ type: 'ready' });

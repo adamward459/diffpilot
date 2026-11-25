@@ -7,6 +7,7 @@ final class SidebarUITests: XCTestCase {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchEnvironment["DIFFPILOT_REPO"] = Fixture.large
+        app.launchEnvironment["DIFFPILOT_VIEWED_SEED"] = Fixture.viewedSeed
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         XCTAssertTrue(app.staticTexts["summary"].waitForExistence(timeout: 10))
@@ -34,14 +35,15 @@ final class SidebarUITests: XCTestCase {
         while collapsed.count > 0 { collapsed.firstMatch.click() }
     }
 
-    func testLaunchShowsSummaryAndTopFolders() {
+    func testLaunchShowsSummaryAndEveryFolderExpanded() {
         let summary = app.staticTexts["summary"].value as? String ?? ""
         XCTAssertTrue(summary.contains("2,000 files"), summary)
         XCTAssertTrue(summary.contains("493/2,000 viewed"), summary)
         for name in ["docs", "packages", "scripts", "src", "tests"] {
             XCTAssertTrue(row(name).exists, name)
         }
-        XCTAssertFalse(row("client.ts").exists)
+        XCTAssertTrue(row("archive.md").exists)
+        XCTAssertTrue(row("Cache.md").exists)
     }
 
     func testFilterShowsMatchesAndHidesTheRest() {
@@ -75,9 +77,8 @@ final class SidebarUITests: XCTestCase {
         XCTAssertTrue(row("archive.md").waitForExistence(timeout: 5))
         app.buttons["toggle-hide-viewed"].click()
         XCTAssertEqual(app.buttons["toggle-hide-viewed"].value as? String, "on")
-        XCTAssertFalse(row("archive.md").waitForExistence(timeout: 2))
-        XCTAssertFalse(row("docs").exists)
-        XCTAssertTrue(row("archive.ts").exists)
+        XCTAssertFalse(row("archive.ts").waitForExistence(timeout: 2))
+        XCTAssertTrue(row("archive.md").exists)
         let summary = app.staticTexts["summary"].value as? String ?? ""
         XCTAssertTrue(summary.contains("493/2,000 viewed"), summary)
     }
@@ -129,5 +130,15 @@ final class SidebarUITests: XCTestCase {
         XCTAssertFalse(row("archive.md").waitForExistence(timeout: 2))
         row("docs").typeKey(.rightArrow, modifierFlags: [])
         XCTAssertTrue(row("archive.md").waitForExistence(timeout: 5))
+    }
+
+    func testMarkingAFileViewedFromThePageHeaderRaisesTheSidebarCount() {
+        let toggle = app.checkBoxes["Viewed docs/CacheConfig.md"].firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        toggle.click()
+        let summary = app.staticTexts["summary"]
+        let raised = NSPredicate(format: "value CONTAINS %@", "494/2,000 viewed")
+        expectation(for: raised, evaluatedWith: summary)
+        waitForExpectations(timeout: 10)
     }
 }

@@ -5,18 +5,22 @@ import Observation
 final class SidebarModel {
     var root = FileNode.empty
     var files: [FileNode] = []
-    var summary = ChangeSummary()
     var filter = FileFilter()
     var mode = SidebarMode.tree
     var selection: String?
     let repo: URL
     let comparison: Comparison
+    let viewed: ViewedFiles
     var isLoading = true
+    private var changes: [FileChange] = []
 
-    init(repo: URL, comparison: Comparison) {
+    init(repo: URL, comparison: Comparison, viewed: ViewedFiles) {
         self.repo = repo
         self.comparison = comparison
+        self.viewed = viewed
     }
+
+    var summary: ChangeSummary { ChangeSummary(changes, viewed: viewed.paths) }
 
     func load() async {
         let repo = repo
@@ -24,9 +28,10 @@ final class SidebarModel {
         let loaded = await Task.detached(priority: .userInitiated) {
             let changes = (try? RepoChanges.load(repo: repo, comparison: comparison)) ?? []
             let root = FileTree.build(changes)
-            return (root, FileTree.files(in: root), ChangeSummary(changes))
+            return (changes, root, FileTree.files(in: root))
         }.value
-        (root, files, summary) = loaded
         isLoading = false
+        guard loaded.0 != changes else { return }
+        (changes, root, files) = loaded
     }
 }

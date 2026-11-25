@@ -18,6 +18,7 @@ final class SidebarPerformanceUITests: XCTestCase {
         measure(metrics: [XCTApplicationLaunchMetric()], options: options) {
             let app = XCUIApplication()
             app.launchEnvironment["DIFFPILOT_REPO"] = Fixture.large
+            app.launchEnvironment["DIFFPILOT_VIEWED_SEED"] = Fixture.viewedSeed
             app.launch()
         }
     }
@@ -25,6 +26,7 @@ final class SidebarPerformanceUITests: XCTestCase {
     func testScrollingHitches() {
         let app = XCUIApplication()
         app.launchEnvironment["DIFFPILOT_REPO"] = Fixture.large
+        app.launchEnvironment["DIFFPILOT_VIEWED_SEED"] = Fixture.viewedSeed
         app.launch()
         let pane = app.otherElements["diff-pane"]
         XCTAssertTrue(pane.waitForExistence(timeout: 10))

@@ -3,7 +3,11 @@ import Foundation
 @testable import diffpilot
 
 nonisolated enum SampleChanges {
-    static func generate(count: Int) -> [FileChange] {
+    static func generate(count: Int) -> [FileChange] { sample(count: count).changes }
+
+    static func sample(count: Int) -> (changes: [FileChange], viewed: Set<String>, comments: [String: Int]) {
+        var viewed = Set<String>()
+        var comments: [String: Int] = [:]
         var rng = SplitMix(seed: 0x9E37_79B9_7F4A_7C15)
         var seen = Set<String>()
         var result: [FileChange] = []
@@ -46,18 +50,20 @@ nonisolated enum SampleChanges {
             let roll = rng.next(100)
             let status: FileStatus = roll < 60 ? .modified : roll < 82 ? .added : roll < 90 ? .deleted : .renamed
             let size = 1 + rng.next(40)
+            let deletions = status == .added ? 0 : rng.next(15)
+            if rng.next(100) < 25 { viewed.insert(path) }
+            let isUncommitted = rng.next(100) < 12
+            if rng.next(100) < 15 { comments[path] = 1 + rng.next(5) }
             result.append(
                 FileChange(
                     path: path,
                     status: status,
                     additions: status == .deleted ? 0 : size,
-                    deletions: status == .added ? 0 : rng.next(15),
-                    isViewed: rng.next(100) < 25,
-                    isUncommitted: rng.next(100) < 12,
-                    commentCount: rng.next(100) < 15 ? 1 + rng.next(5) : 0
+                    deletions: deletions,
+                    isUncommitted: isUncommitted
                 ))
         }
-        return result.sorted { $0.path < $1.path }
+        return (result.sorted { $0.path < $1.path }, viewed, comments)
     }
 }
 

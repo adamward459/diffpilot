@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 nonisolated extension FileStatus: Encodable {}
@@ -27,6 +28,27 @@ nonisolated struct FileDiff: Equatable, Sendable, Encodable {
         let icon = FileIcon.forFile(named: (path as NSString).lastPathComponent)
         try container.encode(icon.symbol, forKey: .symbol)
         try container.encode(icon.tint.rawValue, forKey: .tint)
+    }
+}
+
+nonisolated extension FileDiff {
+    var fingerprint: String {
+        var bytes: [UInt8] = []
+        func add(_ text: String) {
+            bytes.append(contentsOf: text.utf8)
+            bytes.append(0)
+        }
+        add(status.rawValue)
+        add(oldPath ?? "")
+        add(isBinary ? "binary" : "text")
+        for hunk in hunks {
+            add(hunk.header)
+            for line in hunk.lines {
+                add(line.kind.rawValue)
+                add(line.text)
+            }
+        }
+        return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
     }
 }
 

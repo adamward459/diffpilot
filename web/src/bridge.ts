@@ -50,6 +50,7 @@ export interface HostApi {
   setInset(points: number): void;
   setTheme(theme: Theme): void;
   fileState(path: string, viewed: boolean, collapsed: boolean): void;
+  reset(): void;
   benchScroll(): void;
 }
 
@@ -60,6 +61,7 @@ export type PageMessage =
   | { type: 'firstPaint' }
   | { type: 'visibleFile'; path: string }
   | { type: 'toggleCollapsed'; path: string }
+  | { type: 'toggleViewed'; path: string }
   | { type: 'scrollStats'; frames: number; p50: number; p95: number; max: number }
   | { type: 'createThread'; path: string; side?: Side; line?: number }
   | { type: 'post'; thread: number; text: string }
@@ -77,9 +79,12 @@ export const send = (message: PageMessage): void => window.webkit.messageHandler
 
 export type Token = [length: number, light: string, dark: string];
 export interface HighlightRequest {
+  epoch: number;
   f: number;
   path: string;
   oldText: string;
   newText: string;
 }
-export type HighlightResult = { f: number; none: true } | { f: number; none?: undefined; old: Token[][]; new: Token[][] };
+export type HighlightResult =
+  | { epoch: number; f: number; none: true }
+  | { epoch: number; f: number; none?: undefined; old: Token[][]; new: Token[][] };

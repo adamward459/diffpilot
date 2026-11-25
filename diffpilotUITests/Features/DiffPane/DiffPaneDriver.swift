@@ -13,6 +13,7 @@ struct DiffPaneDriver {
     init(appearance: String? = nil) {
         app = XCUIApplication()
         app.launchEnvironment["DIFFPILOT_REPO"] = Fixture.large
+        app.launchEnvironment["DIFFPILOT_VIEWED_SEED"] = Fixture.viewedSeed
         if let appearance { app.launchEnvironment["DIFFPILOT_APPEARANCE"] = appearance }
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
     }
