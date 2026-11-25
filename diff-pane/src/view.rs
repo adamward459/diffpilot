@@ -1,0 +1,784 @@
+use crate::chrome;
+use crate::highlight::{self, FileTokens};
+use crate::icons;
+use crate::layout::{FILE_HEADER, HUNK, LINE, NOTICE, Sticky, ThreadFrame};
+use crate::lines::{self, CODE_SIZE, Fonts, Frame, LineCache, LineKey, LineRequest, Style, Thumb};
+use crate::rows::{Notice, RowKind, ThreadSlot};
+use crate::state::{Geometry, PaneState};
+use crate::theme::{Palette, is_dark};
+use diffpilot_core::diff::{FileDiff, LineKind};
+use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
+use diffpilot_review_ui::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange};
+use gpui::{
+    AnyView, App, AppContext as _, ClickEvent, Context, Div, Entity, EventEmitter, InteractiveElement as _,
+    IntoElement, MouseMoveEvent, ParentElement as _, Pixels, Render, ScrollWheelEvent, SharedString, Stateful,
+    StatefulInteractiveElement as _, StyleRefinement, Styled as _, Subscription, Window, canvas, div, font, px,
+};
+use gpui_component::{ActiveTheme as _, Theme};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::time::Instant;
+
+const MAX_RUNNING_HIGHLIGHTS: usize = 3;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DiffPaneEvent {
+    VisibleFile(String),
+    ToggleViewed(String),
+    FirstPaint,
+}
+
+#[derive(Clone)]
+enum Highlight {
+    Missing,
+    Running,
+    Plain,
+    Ready(Arc<FileTokens>),
+}
+
+enum FirstPaint {
+    Waiting,
+    Scheduled,
+    Sent,
+}
+
+#[derive(Default)]
+pub struct Probe {
+    pub enabled: bool,
+    pub frames_ms: Vec<f32>,
+    pub lines_ms: Vec<f32>,
+    started: Option<Instant>,
+}
+
+impl Probe {
+    fn begin(&mut self) {
+        if self.enabled {
+            self.started = Some(Instant::now());
+        }
+    }
+
+    fn end(&mut self) {
+        if let Some(started) = self.started.take() {
+            self.frames_ms.push(started.elapsed().as_secs_f32() * 1000.0);
+        }
+    }
+}
+
+struct Card {
+    view: Entity<ThreadCard>,
+    _resized: Subscription,
+}
+
+struct Review {
+    session: Entity<ReviewSession>,
+    cards: HashMap<ThreadId, Card>,
+    _session: Subscription,
+}
+
+pub struct DiffPane {
+    state: PaneState,
+    review: Option<Review>,
+    pending_focus: Option<ThreadId>,
+    mouse_y: Option<Pixels>,
+    top: Pixels,
+    fonts: Fonts,
+    palette: Palette,
+    highlights: Vec<Highlight>,
+    running: usize,
+    lines: LineCache,
+    first_paint: FirstPaint,
+    last_scroll: Option<Instant>,
+    dark: Option<bool>,
+    pub probe: Probe,
+}
+
+impl EventEmitter<DiffPaneEvent> for DiffPane {}
+
+fn load_fonts(window: &Window) -> Fonts {
+    let system = window.text_system();
+    let names = system.all_font_names();
+    let family = ["SF Mono", "Menlo"]
+        .into_iter()
+        .find(|name| names.iter().any(|known| known == name))
+        .unwrap_or("Menlo");
+    let mono = font(family);
+    let cell = system
+        .ch_advance(system.resolve_font(&mono), px(CODE_SIZE))
+        .map_or(7.2, f32::from);
+    Fonts {
+        ui: font(".SystemUIFont"),
+        mono,
+        cell,
+    }
+}
+
+impl DiffPane {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let fonts = load_fonts(window);
+        let viewport = window.viewport_size();
+        let geometry = Geometry {
+            width: f32::from(viewport.width),
+            height: f32::from(viewport.height),
+            cell: fonts.cell,
+        };
+        cx.background_spawn(async {
+            highlight::engine();
+        })
+        .detach();
+        cx.observe_window_appearance(window, |_, _, cx| cx.notify()).detach();
+        Self {
+            state: PaneState::new(geometry),
+            review: None,
+            pending_focus: None,
+            mouse_y: None,
+            top: px(0.0),
+            fonts,
+            palette: Palette::new(false),
+            highlights: Vec::new(),
+            running: 0,
+            lines: LineCache::default(),
+            first_paint: FirstPaint::Waiting,
+            last_scroll: None,
+            dark: None,
+            probe: Probe::default(),
+        }
+    }
+
+    pub fn set_files(&mut self, files: Vec<FileDiff>, cx: &mut Context<Self>) {
+        let reused = self.state.replace_files(files);
+        let old = std::mem::take(&mut self.highlights);
+        self.highlights = reused
+            .iter()
+            .map(|from| {
+                from.and_then(|index| old.get(index).cloned())
+                    .unwrap_or(Highlight::Missing)
+            })
+            .collect();
+        self.lines.clear();
+        self.share_files(cx);
+        self.sync(cx);
+    }
+
+    pub fn set_viewed(&mut self, viewed: HashSet<String>, cx: &mut Context<Self>) {
+        self.state.set_viewed(viewed);
+        self.sync(cx);
+    }
+
+    pub fn reveal(&mut self, path: &str, cx: &mut Context<Self>) {
+        if self.state.reveal(path) {
+            self.sync(cx);
+        }
+    }
+
+    pub fn set_wrap(&mut self, wrap: bool, cx: &mut Context<Self>) {
+        self.state.set_wrap(wrap);
+        self.sync(cx);
+    }
+
+    /// `None` follows the gpui-component theme when the app installed one, else the window appearance.
+    pub fn set_dark(&mut self, dark: Option<bool>, cx: &mut Context<Self>) {
+        self.dark = dark;
+        cx.notify();
+    }
+
+    pub fn scroll_by(&mut self, dy: f32, dx: f32, cx: &mut Context<Self>) {
+        self.state.scroll_by(dy);
+        self.state.scroll_x_by(dx);
+        self.last_scroll = Some(Instant::now());
+        self.sync(cx);
+    }
+
+    pub fn scroll_to(&mut self, y: f32, cx: &mut Context<Self>) {
+        self.state.scroll_to(y);
+        self.last_scroll = Some(Instant::now());
+        self.sync(cx);
+    }
+
+    pub fn state(&self) -> &PaneState {
+        &self.state
+    }
+
+    /// Shows the session's threads in the pane and keeps it told which files are open and which one is on top.
+    pub fn set_review(&mut self, session: Entity<ReviewSession>, window: &mut Window, cx: &mut Context<Self>) {
+        let subscription = cx.subscribe_in(&session, window, |this, _, event: &ReviewEvent, window, cx| {
+            if let ReviewEvent::ThreadsChanged(change) = event {
+                this.threads_changed(*change, window, cx);
+            }
+        });
+        self.review = Some(Review {
+            session,
+            cards: HashMap::new(),
+            _session: subscription,
+        });
+        self.share_files(cx);
+        self.share_visible(self.state.visible_path().map(str::to_owned), cx);
+        self.rebuild_threads(window, cx);
+    }
+
+    pub fn review(&self) -> Option<&Entity<ReviewSession>> {
+        Some(&self.review.as_ref()?.session)
+    }
+
+    pub fn card(&self, id: ThreadId) -> Option<&Entity<ThreadCard>> {
+        Some(&self.review.as_ref()?.cards.get(&id)?.view)
+    }
+
+    /// Scrolls the thread into view and puts the cursor in its composer.
+    pub fn focus_thread(&mut self, id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(card) = self.card(id).cloned() else {
+            self.pending_focus = Some(id);
+            return;
+        };
+        card.update(cx, |card, cx| card.focus_composer(window, cx));
+        self.measure(id, window, cx);
+        self.state.reveal_thread(id, FILE_HEADER + HUNK);
+        self.sync(cx);
+    }
+
+    fn share_files(&mut self, cx: &mut Context<Self>) {
+        let Some(review) = &self.review else { return };
+        let files: Arc<[Arc<FileDiff>]> = self.state.files.clone().into();
+        review.session.update(cx, |session, cx| session.set_files(files, cx));
+        if self.state.files.is_empty() {
+            self.share_visible(None, cx);
+        }
+    }
+
+    fn share_visible(&mut self, path: Option<String>, cx: &mut Context<Self>) {
+        if let Some(review) = &self.review {
+            review
+                .session
+                .update(cx, |session, cx| session.set_visible_path(path, cx));
+        }
+    }
+
+    fn threads_changed(&mut self, change: ThreadChange, window: &mut Window, cx: &mut Context<Self>) {
+        match change {
+            ThreadChange::Added(_) | ThreadChange::Removed(_) => self.rebuild_threads(window, cx),
+            ThreadChange::Updated(id) => {
+                self.measure(id, window, cx);
+                self.sync(cx);
+            }
+        }
+    }
+
+    fn rebuild_threads(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(review) = &self.review else { return };
+        let slots: Vec<ThreadSlot> = review
+            .session
+            .read(cx)
+            .threads()
+            .map(|thread| ThreadSlot {
+                id: thread.id,
+                anchor: thread.anchor.clone(),
+            })
+            .collect();
+        let session = review.session.clone();
+        let mut added = Vec::new();
+        if let Some(review) = &mut self.review {
+            review.cards.retain(|id, _| slots.iter().any(|slot| slot.id == *id));
+            for slot in &slots {
+                if review.cards.contains_key(&slot.id) {
+                    continue;
+                }
+                let id = slot.id;
+                let view = cx.new(|cx| ThreadCard::new(session.clone(), id, cx));
+                let resized = cx.subscribe_in(&view, window, move |this, _, CardEvent::Resized, window, cx| {
+                    this.measure(id, window, cx);
+                    this.sync(cx);
+                });
+                review.cards.insert(
+                    id,
+                    Card {
+                        view,
+                        _resized: resized,
+                    },
+                );
+                added.push(id);
+            }
+        }
+        self.state.set_threads(slots);
+        for id in added {
+            self.measure(id, window, cx);
+        }
+        if let Some(id) = self.pending_focus
+            && self.card(id).is_some()
+        {
+            self.pending_focus = None;
+            self.focus_thread(id, window, cx);
+        }
+        self.sync(cx);
+    }
+
+    fn measure(&mut self, id: ThreadId, window: &Window, cx: &mut Context<Self>) {
+        let Some(card) = self.card(id).cloned() else { return };
+        let Some(slot) = self.state.threads.iter().find(|slot| slot.id == id) else {
+            return;
+        };
+        let frame = ThreadFrame::of(&slot.anchor);
+        let width = px(frame.card_width(self.state.geometry().width));
+        let height = f32::from(card.read(cx).height(width, window, cx));
+        self.state.set_thread_height(id, frame.row_height(height));
+    }
+
+    fn measure_all(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let ids: Vec<ThreadId> = self.state.threads.iter().map(|slot| slot.id).collect();
+        for id in ids {
+            self.measure(id, window, cx);
+        }
+    }
+
+    fn hovered_line(&self) -> Option<usize> {
+        self.review.as_ref()?;
+        let index = self.state.tops.row_at(self.state.scroll() + f32::from(self.mouse_y?))?;
+        matches!(self.state.rows.rows[index].kind, RowKind::Line { .. }).then_some(index)
+    }
+
+    fn add_comment(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let row = self.state.rows.rows[index];
+        let RowKind::Line { hunk, line } = row.kind else { return };
+        let file = &self.state.files[row.file as usize];
+        let diff_line = &file.hunks[hunk as usize].lines[line as usize];
+        let (side, number) = match diff_line.kind {
+            LineKind::Deleted => (Side::Old, diff_line.old),
+            _ => (Side::New, diff_line.new),
+        };
+        let (Some(number), Some(review)) = (number, &self.review) else {
+            return;
+        };
+        let anchor = ThreadAnchor::line(&file.path, side, number);
+        let id = review
+            .session
+            .update(cx, |session, cx| session.create_thread(anchor, cx));
+        self.focus_thread(id, window, cx);
+    }
+
+    pub fn highlighted_files(&self) -> usize {
+        self.highlights
+            .iter()
+            .filter(|highlight| matches!(highlight, Highlight::Ready(_)))
+            .count()
+    }
+
+    pub fn is_highlighting(&self) -> bool {
+        self.running > 0
+    }
+
+    fn sync(&mut self, cx: &mut Context<Self>) {
+        if let Some(path) = self.state.take_visible_change() {
+            self.share_visible(Some(path.clone()), cx);
+            cx.emit(DiffPaneEvent::VisibleFile(path));
+        }
+        self.pump_highlights(cx);
+        cx.notify();
+    }
+
+    fn pump_highlights(&mut self, cx: &mut Context<Self>) {
+        for index in self.state.files_to_highlight() {
+            if self.running >= MAX_RUNNING_HIGHLIGHTS {
+                break;
+            }
+            if !matches!(self.highlights.get(index), Some(Highlight::Missing)) {
+                continue;
+            }
+            self.highlights[index] = Highlight::Running;
+            self.running += 1;
+            let file = Arc::clone(&self.state.files[index]);
+            let task = cx.background_spawn({
+                let file = Arc::clone(&file);
+                async move { highlight::engine().highlight(&file) }
+            });
+            cx.spawn(async move |this, cx| {
+                let tokens = task.await;
+                this.update(cx, |this, cx| this.finish_highlight(&file, tokens, cx))
+                    .ok();
+            })
+            .detach();
+        }
+    }
+
+    fn finish_highlight(&mut self, file: &Arc<FileDiff>, tokens: Option<FileTokens>, cx: &mut Context<Self>) {
+        self.running = self.running.saturating_sub(1);
+        if let Some(index) = self.state.file_index(&file.path)
+            && Arc::ptr_eq(&self.state.files[index], file)
+        {
+            self.highlights[index] = tokens.map_or(Highlight::Plain, |tokens| Highlight::Ready(Arc::new(tokens)));
+            self.lines.invalidate_file(index as u32);
+        }
+        self.pump_highlights(cx);
+        cx.notify();
+    }
+
+    fn toggle_collapsed(&mut self, path: &str, cx: &mut Context<Self>) {
+        self.state.toggle_collapsed(path);
+        self.sync(cx);
+    }
+
+    fn load_diff(&mut self, path: &str, cx: &mut Context<Self>) {
+        self.state.load_diff(path);
+        self.lines.clear();
+        self.sync(cx);
+    }
+
+    fn prepare_lines(
+        &mut self,
+        bounds: gpui::Bounds<gpui::Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Frame {
+        let started = self.probe.enabled.then(Instant::now);
+        let geometry = Geometry {
+            width: f32::from(bounds.size.width),
+            height: f32::from(bounds.size.height),
+            cell: self.fonts.cell,
+        };
+        self.top = bounds.origin.y;
+        if geometry != self.state.geometry() {
+            let narrower_or_wider = geometry.width != self.state.geometry().width;
+            self.state.set_geometry(geometry);
+            if narrower_or_wider {
+                self.measure_all(window, cx);
+            }
+            self.sync(cx);
+        }
+        let style = Style {
+            fonts: &self.fonts,
+            palette: &self.palette,
+            wrap: self.state.wrap_cols(),
+        };
+        self.lines.begin_frame(&style);
+        let scroll = self.state.scroll();
+        let viewport = geometry.height;
+        let mut painted = Vec::new();
+        for index in self.state.visible_rows() {
+            let row = self.state.rows.rows[index];
+            let RowKind::Line { hunk, line } = row.kind else {
+                continue;
+            };
+            let file = &self.state.files[row.file as usize];
+            let spans = match self.highlights.get(row.file as usize) {
+                Some(Highlight::Ready(tokens)) => tokens.line(hunk as usize, line as usize),
+                _ => &[],
+            };
+            let request = LineRequest {
+                key: LineKey {
+                    file: row.file,
+                    hunk,
+                    line,
+                },
+                hunk: &file.hunks[hunk as usize],
+                spans,
+                y: self.state.tops.top(index) - scroll,
+                height: self.state.tops.height(index),
+            };
+            painted.push(self.lines.line(&style, window, request, viewport));
+        }
+        if let Some(started) = started {
+            self.probe.lines_ms.push(started.elapsed().as_secs_f32() * 1000.0);
+        }
+        Frame {
+            scroll_x: self.state.scroll_x(),
+            palette: self.palette,
+            lines: painted,
+            thumb: self.thumb(window),
+        }
+    }
+
+    fn thumb(&self, window: &mut Window) -> Option<Thumb> {
+        const VISIBLE_SECONDS: f32 = 1.0;
+        const FADE_SECONDS: f32 = 0.3;
+        let elapsed = self.last_scroll?.elapsed().as_secs_f32();
+        let max = self.state.max_scroll();
+        if elapsed >= VISIBLE_SECONDS || max <= 0.0 {
+            return None;
+        }
+        window.request_animation_frame();
+        let viewport = self.state.geometry().height;
+        let height = (viewport * viewport / self.state.tops.total()).clamp(32.0, viewport);
+        let faded = (VISIBLE_SECONDS - elapsed) / FADE_SECONDS;
+        Some(Thumb {
+            top: self.state.scroll() / max * (viewport - height),
+            height,
+            opacity: 0.6 * faded.min(1.0),
+        })
+    }
+
+    fn finish_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.probe.end();
+        if matches!(self.first_paint, FirstPaint::Waiting) && !self.state.rows.rows.is_empty() {
+            self.first_paint = FirstPaint::Scheduled;
+            let pane = cx.entity();
+            window.on_next_frame(move |_, cx| {
+                pane.update(cx, |pane, cx| {
+                    pane.first_paint = FirstPaint::Sent;
+                    cx.emit(DiffPaneEvent::FirstPaint);
+                });
+            });
+            window.request_animation_frame();
+        }
+    }
+
+    fn placed(y: f32, height: f32) -> Div {
+        div().absolute().top(px(y)).left_0().w_full().h(px(height))
+    }
+
+    fn file_header(&self, file: usize, pinned: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+        let palette = &self.palette;
+        let diff = &self.state.files[file];
+        let collapsed = self.state.collapsed.contains(&diff.path);
+        let viewed = self.state.viewed.contains(&diff.path);
+        let collapse_path = diff.path.clone();
+        let viewed_path = diff.path.clone();
+        let threads = self
+            .state
+            .threads
+            .iter()
+            .filter(|slot| slot.anchor.path() == diff.path)
+            .count();
+        let chevron = div()
+            .id((if pinned { "pinned-collapse" } else { "collapse" }, file))
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .size(px(20.0))
+            .mx(px(-4.0))
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle_collapsed(&collapse_path, cx)))
+            .child(icons::chevron(!collapsed, 12.0, palette.muted));
+        let id = if pinned { "pinned-header" } else { "file-header" };
+        let bar = div()
+            .id((id, file))
+            .flex()
+            .items_center()
+            .gap(px(7.0))
+            .h(px(FILE_HEADER))
+            .w_full()
+            .pl(px(10.0))
+            .pr(px(12.0))
+            .whitespace_nowrap()
+            .child(chevron)
+            .child(icons::document(14.0, chrome::tint(palette, diff)))
+            .child(chrome::path_text(palette, diff))
+            .child(chrome::status_badge(palette, diff.status))
+            .child(chrome::counts(palette, diff.additions, diff.deletions))
+            .child(chrome::minibar(palette, diff.additions, diff.deletions))
+            .children((threads > 0).then(|| chrome::thread_count(palette, threads)))
+            .child(
+                chrome::viewed_toggle(palette, (if pinned { "pinned-viewed" } else { "viewed" }, file), viewed)
+                    .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                        cx.emit(DiffPaneEvent::ToggleViewed(viewed_path.clone()))
+                    })),
+            );
+        if pinned {
+            bar.border_b_1().border_color(palette.line).bg(palette.pinned)
+        } else {
+            bar.border_y_1().border_color(palette.line).bg(palette.editor)
+        }
+    }
+
+    fn hunk_bar(&self, file: usize, hunk: usize, pinned: bool) -> Div {
+        let palette = &self.palette;
+        let header = self.state.files[file].hunks[hunk].header.clone();
+        let bar = div()
+            .flex()
+            .items_center()
+            .h(px(HUNK))
+            .w_full()
+            .pl(px(12.0))
+            .pr(px(8.0))
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .font(self.fonts.mono.clone())
+            .text_size(px(11.5))
+            .text_color(palette.muted)
+            .child(header);
+        if pinned {
+            bar.border_b_1().border_color(palette.line).bg(palette.pinned)
+        } else {
+            bar.border_y_1().border_color(palette.line).bg(palette.hunk)
+        }
+    }
+
+    fn notice(&self, file: usize, notice: Notice, cx: &mut Context<Self>) -> Div {
+        let palette = &self.palette;
+        let path = self.state.files[file].path.clone();
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(px(8.0))
+            .h(px(NOTICE))
+            .w_full()
+            .border_b_1()
+            .border_color(palette.line)
+            .text_size(px(12.5))
+            .text_color(palette.muted)
+            .child(SharedString::from(notice.text()));
+        if notice.can_load() {
+            body = body.child(
+                div()
+                    .id(("load-diff", file))
+                    .flex()
+                    .items_center()
+                    .h(px(22.0))
+                    .px(px(8.0))
+                    .rounded(px(5.0))
+                    .border_1()
+                    .border_color(palette.line)
+                    .bg(palette.cap)
+                    .cursor_pointer()
+                    .text_size(px(12.0))
+                    .text_color(palette.text)
+                    .child("Load diff")
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.load_diff(&path, cx))),
+            );
+        }
+        body
+    }
+
+    fn thread_row(&self, slot: u32, y: f32, height: f32) -> Option<Div> {
+        let thread = &self.state.threads[slot as usize];
+        let card = self.card(thread.id)?;
+        let frame = ThreadFrame::of(&thread.anchor);
+        let card_height = height - frame.top - frame.bottom - if frame.rule { 1.0 } else { 0.0 };
+        let style = StyleRefinement::default().w_full().h(px(card_height));
+        let mut row = Self::placed(y, height)
+            .overflow_hidden()
+            .pl(px(frame.left))
+            .pr(px(frame.right))
+            .pt(px(frame.top))
+            .pb(px(frame.bottom));
+        if frame.rule {
+            row = row.border_b_1().border_color(self.palette.line);
+        }
+        Some(row.child(AnyView::from(card.clone()).cached(style)))
+    }
+
+    fn add_comment_button(&self, index: usize, y: f32, cx: &mut Context<Self>) -> Stateful<Div> {
+        let palette = &self.palette;
+        div()
+            .id(("add-comment", index))
+            .absolute()
+            .top(px(y + 1.0))
+            .left(px(62.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .size(px(18.0))
+            .rounded(px(4.0))
+            .bg(palette.accent)
+            .cursor_pointer()
+            .child(icons::plus(12.0, palette.on_accent))
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.add_comment(index, window, cx)))
+    }
+
+    fn sticky(&self, sticky: Sticky, cx: &mut Context<Self>) -> Div {
+        let file = sticky.file as usize;
+        let mut group = div()
+            .absolute()
+            .top(px(sticky.push))
+            .left_0()
+            .w_full()
+            .flex()
+            .flex_col();
+        group = group.child(self.file_header(file, true, cx));
+        if let Some(hunk) = sticky.hunk {
+            group = group.child(self.hunk_bar(file, hunk as usize, true));
+        }
+        group
+    }
+}
+
+impl Render for DiffPane {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.probe.begin();
+        let dark = self.dark.unwrap_or_else(|| {
+            if cx.has_global::<Theme>() {
+                cx.theme().is_dark()
+            } else {
+                is_dark(window.appearance())
+            }
+        });
+        if self.palette.dark != dark {
+            self.palette = Palette::new(dark);
+            self.lines.clear();
+        }
+        let palette = self.palette;
+        let scroll = self.state.scroll();
+        let mut root = div()
+            .id("diff-pane")
+            .relative()
+            .size_full()
+            .overflow_hidden()
+            .bg(palette.editor)
+            .text_color(palette.text)
+            .font(self.fonts.ui.clone())
+            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
+                let delta = event.delta.pixel_delta(px(LINE));
+                this.scroll_by(-f32::from(delta.y), -f32::from(delta.x), cx);
+            }))
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                let before = this.hovered_line();
+                this.mouse_y = Some(event.position.y - this.top);
+                if this.hovered_line() != before {
+                    cx.notify();
+                }
+            }))
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if !hovered && this.mouse_y.take().is_some() {
+                    cx.notify();
+                }
+            }));
+        if self.state.files.is_empty() {
+            return root
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(13.0))
+                .text_color(palette.muted)
+                .child("No changes");
+        }
+        let pane = cx.entity();
+        let painter = pane.clone();
+        root = root.child(
+            canvas(
+                move |bounds, window, cx| pane.update(cx, |pane, cx| pane.prepare_lines(bounds, window, cx)),
+                move |bounds, frame, window, cx: &mut App| {
+                    lines::paint(&frame, bounds, window, cx);
+                    painter.update(cx, |pane, cx| pane.finish_frame(window, cx));
+                },
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+        );
+        for index in self.state.visible_rows() {
+            let row = self.state.rows.rows[index];
+            let y = self.state.tops.top(index) - scroll;
+            let height = self.state.tops.height(index);
+            let file = row.file as usize;
+            let element = match row.kind {
+                RowKind::Line { .. } | RowKind::Gap => continue,
+                RowKind::Thread { slot } => match self.thread_row(slot, y, height) {
+                    Some(thread) => thread,
+                    None => continue,
+                },
+                RowKind::FileHeader => Self::placed(y, height).child(self.file_header(file, false, cx)),
+                RowKind::Hunk { hunk } => Self::placed(y, height).child(self.hunk_bar(file, hunk as usize, false)),
+                RowKind::Notice(notice) => Self::placed(y, height).child(self.notice(file, notice, cx)),
+            };
+            root = root.child(element);
+        }
+        if let Some(index) = self.hovered_line() {
+            let y = self.state.tops.top(index) - scroll;
+            root = root.child(self.add_comment_button(index, y, cx));
+        }
+        if let Some(sticky) = self.state.position().and_then(|position| position.sticky) {
+            root = root.child(self.sticky(sticky, cx));
+        }
+        root
+    }
+}

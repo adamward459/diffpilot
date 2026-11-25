@@ -1,0 +1,556 @@
+use diffpilot_core::changes::FileStatus;
+use diffpilot_core::diff::{FileDiff, LineKind};
+use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+pub const BIG_LINES: u32 = 1500;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Notice {
+    Binary,
+    Generated,
+    Large { lines: u32 },
+    Renamed,
+    Empty,
+}
+
+impl Notice {
+    pub fn can_load(self) -> bool {
+        matches!(self, Self::Generated | Self::Large { .. })
+    }
+
+    pub fn text(self) -> String {
+        match self {
+            Self::Binary => "Binary file not shown.".into(),
+            Self::Generated => "Generated file. Hidden by default.".into(),
+            Self::Large { lines } => format!("Large diff ({} lines). Hidden by default.", group_thousands(lines)),
+            Self::Renamed => "Renamed without changes.".into(),
+            Self::Empty => "No content changes.".into(),
+        }
+    }
+}
+
+fn group_thousands(value: u32) -> String {
+    let digits = value.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RowKind {
+    FileHeader,
+    Notice(Notice),
+    Hunk { hunk: u32 },
+    Line { hunk: u32, line: u32 },
+    Thread { slot: u32 },
+    Gap,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Row {
+    pub file: u32,
+    pub kind: RowKind,
+}
+
+impl Row {
+    pub fn hunk(self) -> Option<u32> {
+        match self.kind {
+            RowKind::Hunk { hunk } | RowKind::Line { hunk, .. } => Some(hunk),
+            _ => None,
+        }
+    }
+
+    pub fn is_header(self) -> bool {
+        self.kind == RowKind::FileHeader
+    }
+}
+
+/// A review thread the pane places in the row list. The pane never creates these itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThreadSlot {
+    pub id: ThreadId,
+    pub anchor: ThreadAnchor,
+}
+
+/// A row named by what it shows, so it can be found again after the rows are rebuilt.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RowRef {
+    Header,
+    Notice,
+    Gap,
+    Hunk(u32),
+    Line(u32, u32),
+    Thread(ThreadId),
+}
+
+#[derive(Default)]
+pub struct Rows {
+    pub rows: Vec<Row>,
+    pub file_start: Vec<usize>,
+    pub thread_rows: Vec<Option<usize>>,
+}
+
+impl Rows {
+    /// Rows before the first file header: the threads on the whole change.
+    pub fn lead(&self) -> usize {
+        self.file_start.first().copied().unwrap_or(0)
+    }
+
+    pub fn header_index(&self, file: usize) -> Option<usize> {
+        (file + 1 < self.file_start.len()).then(|| self.file_start[file])
+    }
+
+    pub fn thread_row(&self, slot: u32) -> Option<usize> {
+        self.thread_rows.get(slot as usize).copied().flatten()
+    }
+
+    pub fn row_ref(&self, index: usize, threads: &[ThreadSlot]) -> RowRef {
+        match self.rows[index].kind {
+            RowKind::FileHeader => RowRef::Header,
+            RowKind::Notice(_) => RowRef::Notice,
+            RowKind::Gap => RowRef::Gap,
+            RowKind::Hunk { hunk } => RowRef::Hunk(hunk),
+            RowKind::Line { hunk, line } => RowRef::Line(hunk, line),
+            RowKind::Thread { slot } => RowRef::Thread(threads[slot as usize].id),
+        }
+    }
+
+    pub fn find(&self, file: usize, target: RowRef, threads: &[ThreadSlot]) -> Option<usize> {
+        if let RowRef::Thread(id) = target {
+            let slot = threads.iter().position(|thread| thread.id == id)?;
+            return self.thread_row(slot as u32);
+        }
+        self.file_range(file)?
+            .find(|&index| self.row_ref(index, threads) == target)
+    }
+
+    pub fn file_range(&self, file: usize) -> Option<std::ops::Range<usize>> {
+        self.header_index(file).map(|start| start..self.file_start[file + 1])
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct Visibility<'a> {
+    pub collapsed: &'a HashSet<String>,
+    pub loaded: &'a HashSet<String>,
+}
+
+pub fn is_generated(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    matches!(
+        name,
+        "yarn.lock" | "package-lock.json" | "pnpm-lock.yaml" | "Podfile.lock"
+    ) || name.ends_with(".pbxproj")
+        || name.ends_with(".snap")
+}
+
+pub fn body_notice(file: &FileDiff, loaded: bool) -> Option<Notice> {
+    if file.is_binary {
+        return Some(Notice::Binary);
+    }
+    if !loaded {
+        let generated = is_generated(&file.path);
+        let lines = file.additions + file.deletions;
+        if generated {
+            return Some(Notice::Generated);
+        }
+        if lines > BIG_LINES {
+            return Some(Notice::Large { lines });
+        }
+    }
+    if file.hunks.is_empty() {
+        return Some(if file.status == FileStatus::Renamed {
+            Notice::Renamed
+        } else {
+            Notice::Empty
+        });
+    }
+    None
+}
+
+pub fn build(files: &[Arc<FileDiff>], visibility: Visibility, threads: &[ThreadSlot]) -> Rows {
+    let mut by_path: HashMap<&str, Vec<(u32, &ThreadSlot)>> = HashMap::new();
+    for (slot, thread) in threads.iter().enumerate() {
+        by_path
+            .entry(thread.anchor.path())
+            .or_default()
+            .push((slot as u32, thread));
+    }
+    let capacity = files
+        .iter()
+        .map(|file| 2 + file.hunks.iter().map(|hunk| 1 + hunk.lines.len()).sum::<usize>())
+        .sum();
+    let mut out = Rows {
+        rows: Vec::with_capacity(capacity),
+        file_start: Vec::with_capacity(files.len() + 1),
+        thread_rows: vec![None; threads.len()],
+    };
+    if !files.is_empty() {
+        for (slot, thread) in threads.iter().enumerate() {
+            if thread.anchor == ThreadAnchor::Change {
+                out.rows.push(Row {
+                    file: 0,
+                    kind: RowKind::Thread { slot: slot as u32 },
+                });
+            }
+        }
+    }
+    let no_threads = Vec::new();
+    for (index, file) in files.iter().enumerate() {
+        let f = index as u32;
+        out.file_start.push(out.rows.len());
+        out.rows.push(Row {
+            file: f,
+            kind: RowKind::FileHeader,
+        });
+        let file_threads = by_path.get(file.path.as_str()).unwrap_or(&no_threads);
+        for (slot, thread) in file_threads {
+            if matches!(thread.anchor, ThreadAnchor::File { .. }) {
+                out.rows.push(Row {
+                    file: f,
+                    kind: RowKind::Thread { slot: *slot },
+                });
+            }
+        }
+        if !visibility.collapsed.contains(&file.path) {
+            push_body(
+                &mut out.rows,
+                f,
+                file,
+                visibility.loaded.contains(&file.path),
+                file_threads,
+            );
+        }
+        out.rows.push(Row {
+            file: f,
+            kind: RowKind::Gap,
+        });
+    }
+    out.file_start.push(out.rows.len());
+    for (index, row) in out.rows.iter().enumerate() {
+        if let RowKind::Thread { slot } = row.kind {
+            out.thread_rows[slot as usize] = Some(index);
+        }
+    }
+    out
+}
+
+fn push_body(rows: &mut Vec<Row>, f: u32, file: &FileDiff, loaded: bool, threads: &[(u32, &ThreadSlot)]) {
+    if let Some(notice) = body_notice(file, loaded) {
+        rows.push(Row {
+            file: f,
+            kind: RowKind::Notice(notice),
+        });
+        return;
+    }
+    for (h, hunk) in file.hunks.iter().enumerate() {
+        let hunk_index = h as u32;
+        rows.push(Row {
+            file: f,
+            kind: RowKind::Hunk { hunk: hunk_index },
+        });
+        for (l, line) in hunk.lines.iter().enumerate() {
+            rows.push(Row {
+                file: f,
+                kind: RowKind::Line {
+                    hunk: hunk_index,
+                    line: l as u32,
+                },
+            });
+            if threads.is_empty() {
+                continue;
+            }
+            let (side, number) = match line.kind {
+                LineKind::Deleted => (Side::Old, line.old),
+                _ => (Side::New, line.new),
+            };
+            for (slot, thread) in threads {
+                if let ThreadAnchor::Line {
+                    side: anchor_side,
+                    line: anchor_line,
+                    ..
+                } = &thread.anchor
+                    && *anchor_side == side
+                    && Some(*anchor_line) == number
+                {
+                    rows.push(Row {
+                        file: f,
+                        kind: RowKind::Thread { slot: *slot },
+                    });
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::{diff_hunks, line};
+    use diffpilot_core::diff::DiffLine;
+
+    fn file(path: &str, hunks: Vec<Vec<DiffLine>>) -> Arc<FileDiff> {
+        Arc::new(diff_hunks(path, hunks))
+    }
+
+    fn sample() -> Vec<Arc<FileDiff>> {
+        vec![
+            file(
+                "a.ts",
+                vec![
+                    vec![
+                        line(LineKind::Context, Some(1), Some(1), "keep"),
+                        line(LineKind::Deleted, Some(2), None, "gone"),
+                        line(LineKind::Added, None, Some(2), "new"),
+                    ],
+                    vec![line(LineKind::Added, None, Some(9), "tail")],
+                ],
+            ),
+            file("b.ts", vec![vec![line(LineKind::Added, None, Some(1), "x")]]),
+        ]
+    }
+
+    fn rows_of(files: &[Arc<FileDiff>], collapsed: &[&str]) -> Rows {
+        let collapsed: HashSet<String> = collapsed.iter().map(|path| path.to_string()).collect();
+        let loaded = HashSet::new();
+        build(
+            files,
+            Visibility {
+                collapsed: &collapsed,
+                loaded: &loaded,
+            },
+            &[],
+        )
+    }
+
+    fn kinds(rows: &Rows) -> Vec<(u32, RowKind)> {
+        rows.rows.iter().map(|row| (row.file, row.kind)).collect()
+    }
+
+    #[test]
+    fn builds_header_hunks_lines_and_gap_per_file() {
+        let rows = rows_of(&sample(), &[]);
+        use RowKind::*;
+        assert_eq!(
+            kinds(&rows),
+            [
+                (0, FileHeader),
+                (0, Hunk { hunk: 0 }),
+                (0, Line { hunk: 0, line: 0 }),
+                (0, Line { hunk: 0, line: 1 }),
+                (0, Line { hunk: 0, line: 2 }),
+                (0, Hunk { hunk: 1 }),
+                (0, Line { hunk: 1, line: 0 }),
+                (0, Gap),
+                (1, FileHeader),
+                (1, Hunk { hunk: 0 }),
+                (1, Line { hunk: 0, line: 0 }),
+                (1, Gap),
+            ]
+        );
+        assert_eq!(rows.file_start, [0, 8, 12]);
+        assert_eq!(rows.file_range(1), Some(8..12));
+        assert_eq!(rows.header_index(2), None);
+    }
+
+    #[test]
+    fn collapsed_file_keeps_only_header_and_gap() {
+        let rows = rows_of(&sample(), &["a.ts"]);
+        use RowKind::*;
+        assert_eq!(kinds(&rows)[..3], [(0, FileHeader), (0, Gap), (1, FileHeader)]);
+        assert_eq!(rows.file_start, [0, 2, 6]);
+    }
+
+    #[test]
+    fn hunk_of_a_row_is_known_for_hunks_and_lines_only() {
+        let rows = rows_of(&sample(), &[]);
+        let hunks: Vec<_> = rows.rows.iter().map(|row| row.hunk()).collect();
+        assert_eq!(
+            hunks[..8],
+            [None, Some(0), Some(0), Some(0), Some(0), Some(1), Some(1), None]
+        );
+    }
+
+    #[test]
+    fn binary_file_shows_a_notice_instead_of_hunks() {
+        let mut diff = FileDiff::new("logo.png", FileStatus::Added);
+        diff.is_binary = true;
+        let rows = rows_of(&[Arc::new(diff)], &[]);
+        assert_eq!(rows.rows[1].kind, RowKind::Notice(Notice::Binary));
+        assert_eq!(rows.rows.len(), 3);
+    }
+
+    #[test]
+    fn generated_and_large_files_wait_for_a_load_request() {
+        let mut lock = (*file("pnpm-lock.yaml", vec![vec![line(LineKind::Added, None, Some(1), "x")]])).clone();
+        lock.additions = 1;
+        let mut big = (*file("big.ts", vec![vec![line(LineKind::Added, None, Some(1), "x")]])).clone();
+        big.additions = 1600;
+        let files = vec![Arc::new(lock), Arc::new(big)];
+        let none = HashSet::new();
+        let rows = build(
+            &files,
+            Visibility {
+                collapsed: &none,
+                loaded: &none,
+            },
+            &[],
+        );
+        assert_eq!(rows.rows[1].kind, RowKind::Notice(Notice::Generated));
+        assert_eq!(rows.rows[4].kind, RowKind::Notice(Notice::Large { lines: 1600 }));
+        let loaded: HashSet<String> = ["pnpm-lock.yaml".into(), "big.ts".into()].into();
+        let rows = build(
+            &files,
+            Visibility {
+                collapsed: &none,
+                loaded: &loaded,
+            },
+            &[],
+        );
+        assert_eq!(rows.rows[1].kind, RowKind::Hunk { hunk: 0 });
+    }
+
+    #[test]
+    fn notice_text_matches_the_web_page() {
+        assert_eq!(
+            Notice::Large { lines: 12_345 }.text(),
+            "Large diff (12,345 lines). Hidden by default."
+        );
+        assert_eq!(
+            Notice::Large { lines: 1_600 }.text(),
+            "Large diff (1,600 lines). Hidden by default."
+        );
+        assert!(Notice::Generated.can_load());
+        assert!(!Notice::Binary.can_load());
+    }
+
+    #[test]
+    fn file_without_hunks_says_why() {
+        let mut renamed = FileDiff::new("b.txt", FileStatus::Renamed);
+        renamed.old_path = Some("a.txt".into());
+        let empty = FileDiff::new("c.txt", FileStatus::Modified);
+        let rows = rows_of(&[Arc::new(renamed), Arc::new(empty)], &[]);
+        assert_eq!(rows.rows[1].kind, RowKind::Notice(Notice::Renamed));
+        assert_eq!(rows.rows[4].kind, RowKind::Notice(Notice::Empty));
+    }
+
+    #[test]
+    fn detects_generated_files_by_name() {
+        assert!(is_generated("pnpm-lock.yaml"));
+        assert!(is_generated("app/Podfile.lock"));
+        assert!(is_generated("x.xcodeproj/project.pbxproj"));
+        assert!(is_generated("tests/__snapshots__/a.snap"));
+        assert!(!is_generated("src/lock.ts"));
+        assert!(!is_generated("my-package-lock.json.md"));
+    }
+
+    #[test]
+    fn thread_rows_follow_their_anchor() {
+        let files = sample();
+        let threads = vec![
+            ThreadSlot {
+                id: ThreadId(1),
+                anchor: ThreadAnchor::file("a.ts"),
+            },
+            ThreadSlot {
+                id: ThreadId(2),
+                anchor: ThreadAnchor::line("a.ts", Side::Old, 2),
+            },
+            ThreadSlot {
+                id: ThreadId(3),
+                anchor: ThreadAnchor::line("a.ts", Side::New, 2),
+            },
+            ThreadSlot {
+                id: ThreadId(4),
+                anchor: ThreadAnchor::line("a.ts", Side::Old, 1),
+            },
+            ThreadSlot {
+                id: ThreadId(5),
+                anchor: ThreadAnchor::file("elsewhere.ts"),
+            },
+        ];
+        let none = HashSet::new();
+        let rows = build(
+            &files,
+            Visibility {
+                collapsed: &none,
+                loaded: &none,
+            },
+            &threads,
+        );
+        use RowKind::*;
+        assert_eq!(
+            kinds(&rows)[..8],
+            [
+                (0, FileHeader),
+                (0, Thread { slot: 0 }),
+                (0, Hunk { hunk: 0 }),
+                (0, Line { hunk: 0, line: 0 }),
+                (0, Line { hunk: 0, line: 1 }),
+                (0, Thread { slot: 1 }),
+                (0, Line { hunk: 0, line: 2 }),
+                (0, Thread { slot: 2 }),
+            ]
+        );
+        assert!(!kinds(&rows).contains(&(0, Thread { slot: 3 })));
+    }
+
+    #[test]
+    fn change_threads_lead_the_rows_and_every_thread_row_is_indexed() {
+        let files = sample();
+        let threads = vec![
+            ThreadSlot {
+                id: ThreadId(7),
+                anchor: ThreadAnchor::line("a.ts", Side::New, 2),
+            },
+            ThreadSlot {
+                id: ThreadId(8),
+                anchor: ThreadAnchor::Change,
+            },
+        ];
+        let none = HashSet::new();
+        let rows = build(
+            &files,
+            Visibility {
+                collapsed: &none,
+                loaded: &none,
+            },
+            &threads,
+        );
+        assert_eq!(rows.rows[0].kind, RowKind::Thread { slot: 1 });
+        assert_eq!(rows.lead(), 1);
+        assert_eq!(rows.header_index(0), Some(1));
+        assert_eq!(rows.thread_row(1), Some(0));
+        let line = rows.thread_row(0).expect("the line thread is placed");
+        assert_eq!(rows.rows[line - 1].kind, RowKind::Line { hunk: 0, line: 2 });
+        assert_eq!(rows.find(0, RowRef::Thread(ThreadId(7)), &threads), Some(line));
+        assert_eq!(rows.find(1, RowRef::Line(0, 0), &threads), Some(rows.file_start[1] + 2));
+        assert_eq!(rows.find(1, RowRef::Line(5, 5), &threads), None);
+    }
+
+    #[test]
+    fn a_pane_without_files_has_no_change_rows() {
+        let threads = vec![ThreadSlot {
+            id: ThreadId(1),
+            anchor: ThreadAnchor::Change,
+        }];
+        let none = HashSet::new();
+        let rows = build(
+            &[],
+            Visibility {
+                collapsed: &none,
+                loaded: &none,
+            },
+            &threads,
+        );
+        assert!(rows.rows.is_empty());
+        assert_eq!(rows.thread_row(0), None);
+    }
+}

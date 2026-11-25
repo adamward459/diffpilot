@@ -1,8 +1,0 @@
-{
-  "na": {
-    "Shared": {
-      "e2e": "Shared holds the git runner and the viewed store; the features that use it have the e2e tests.",
-      "screenshot": "Shared has no UI."
-    }
-  }
-}

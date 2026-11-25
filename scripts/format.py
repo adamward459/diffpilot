@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Format all Swift and Python code.
+"""Format all Rust and Python code.
 
 scripts/format.py             format every file
 scripts/format.py --restage   also re-add staged files after formatting (used by the pre-commit hook)
@@ -12,7 +12,6 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SWIFT_DIRS = ["diffpilot", "diffpilotTests", "diffpilotUITests"]
 PYTHON_PATHS = ["scripts", ".githooks"]
 
 
@@ -23,15 +22,7 @@ def run(*cmd: str) -> str:
 def main(argv: list[str]) -> int:
     staged = run("git", "diff", "--cached", "--name-only", "--diff-filter=ACMR").split()
     try:
-        run(
-            "xcrun",
-            "swift-format",
-            "format",
-            "--in-place",
-            "--recursive",
-            "--parallel",
-            *SWIFT_DIRS,
-        )
+        run("cargo", "fmt", "--all")
         run("uvx", "ruff", "format", "--quiet", *PYTHON_PATHS)
     except subprocess.CalledProcessError as e:
         print(f"format: {' '.join(e.cmd)} failed\n{e.stderr}", file=sys.stderr)
