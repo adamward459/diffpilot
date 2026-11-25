@@ -14,10 +14,10 @@ struct ViewedStoreTests {
         let url = makeURL()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let key = ViewedKey(repo: "/r", branch: "main")
-        ViewedStore(url: url).save(key, ["b.ts", "a.ts"])
-        #expect(ViewedStore(url: url).load(key) == ["a.ts", "b.ts"])
-        let raw = try? JSONDecoder().decode([String: [String]].self, from: Data(contentsOf: url))
-        #expect(raw == ["/r\nmain": ["a.ts", "b.ts"]])
+        ViewedStore(url: url).save(key, ["b.ts": "2", "a.ts": "1"])
+        #expect(ViewedStore(url: url).load(key) == ["a.ts": "1", "b.ts": "2"])
+        let raw = try? JSONDecoder().decode([String: [String: String]].self, from: Data(contentsOf: url))
+        #expect(raw == ["/r\nmain": ["a.ts": "1", "b.ts": "2"]])
     }
 
     @Test func keepsBranchesOfOneRepoSeparate() {
@@ -27,12 +27,12 @@ struct ViewedStoreTests {
         let main = ViewedKey(repo: "/r", branch: "main")
         let feature = ViewedKey(repo: "/r", branch: "feature")
         let other = ViewedKey(repo: "/other", branch: "main")
-        store.save(main, ["a.ts"])
-        store.save(feature, ["b.ts"])
-        store.save(other, ["c.ts"])
-        #expect(store.load(main) == ["a.ts"])
-        #expect(store.load(feature) == ["b.ts"])
-        #expect(store.load(other) == ["c.ts"])
+        store.save(main, ["a.ts": "1"])
+        store.save(feature, ["b.ts": "2"])
+        store.save(other, ["c.ts": "3"])
+        #expect(store.load(main) == ["a.ts": "1"])
+        #expect(store.load(feature) == ["b.ts": "2"])
+        #expect(store.load(other) == ["c.ts": "3"])
     }
 
     @Test func savingAnEmptySetRemovesOnlyThatEntry() {
@@ -41,11 +41,11 @@ struct ViewedStoreTests {
         let store = ViewedStore(url: url)
         let main = ViewedKey(repo: "/r", branch: "main")
         let feature = ViewedKey(repo: "/r", branch: "feature")
-        store.save(main, ["a.ts"])
-        store.save(feature, ["b.ts"])
-        store.save(main, [])
-        let raw = try? JSONDecoder().decode([String: [String]].self, from: Data(contentsOf: url))
-        #expect(raw == ["/r\nfeature": ["b.ts"]])
+        store.save(main, ["a.ts": "1"])
+        store.save(feature, ["b.ts": "2"])
+        store.save(main, [:])
+        let raw = try? JSONDecoder().decode([String: [String: String]].self, from: Data(contentsOf: url))
+        #expect(raw == ["/r\nfeature": ["b.ts": "2"]])
         #expect(store.load(main).isEmpty)
     }
 
@@ -62,8 +62,8 @@ struct ViewedStoreTests {
     @Test func aStoreWithoutAnURLKeepsEverythingInMemory() {
         let store = ViewedStore()
         let key = ViewedKey(repo: "/r", branch: "main")
-        store.save(key, ["a.ts"])
-        #expect(store.load(key) == ["a.ts"])
+        store.save(key, ["a.ts": "1"])
+        #expect(store.load(key) == ["a.ts": "1"])
         #expect(ViewedStore().load(key).isEmpty)
     }
 
@@ -71,11 +71,11 @@ struct ViewedStoreTests {
         let store = ViewedStore(seed: ["a.ts", "b.ts"])
         let one = ViewedKey(repo: "/r", branch: "main")
         let two = ViewedKey(repo: "/s", branch: "dev")
-        #expect(store.load(one) == ["a.ts", "b.ts"])
-        #expect(store.load(two) == ["a.ts", "b.ts"])
-        store.save(one, [])
+        #expect(store.load(one) == ["a.ts": "", "b.ts": ""])
+        #expect(store.load(two) == ["a.ts": "", "b.ts": ""])
+        store.save(one, [:])
         #expect(store.load(one).isEmpty)
-        #expect(store.load(two) == ["a.ts", "b.ts"])
+        #expect(store.load(two) == ["a.ts": "", "b.ts": ""])
     }
 
     @Test func readsTheSeedFromTheEnvironmentWithoutTouchingDisk() throws {
@@ -84,7 +84,7 @@ struct ViewedStoreTests {
         try JSONEncoder().encode(["a.ts"]).write(to: file)
         let store = ViewedStore.fromEnvironment(["DIFFPILOT_VIEWED_SEED": file.path])
         #expect(store.url == nil)
-        #expect(store.load(ViewedKey(repo: "/r", branch: "main")) == ["a.ts"])
+        #expect(store.load(ViewedKey(repo: "/r", branch: "main")) == ["a.ts": ""])
     }
 
     @Test func buildsTheKeyFromTheComparisonBranchThenTheCheckedOutBranch() {
@@ -106,7 +106,7 @@ struct ViewedFilesTests {
         let viewed = ViewedFiles(key: key, store: store)
         viewed.toggle("a.ts")
         #expect(viewed.contains("a.ts"))
-        #expect(store.load(key) == ["a.ts"])
+        #expect(store.load(key) == ["a.ts": ""])
         viewed.toggle("a.ts")
         #expect(!viewed.contains("a.ts"))
         #expect(store.load(key).isEmpty)
@@ -114,8 +114,44 @@ struct ViewedFilesTests {
 
     @Test func loadsTheStoredSetForItsKeyOnly() {
         let store = ViewedStore()
-        store.save(ViewedKey(repo: "/r", branch: "main"), ["a.ts"])
+        store.save(ViewedKey(repo: "/r", branch: "main"), ["a.ts": "1"])
         #expect(ViewedFiles(key: ViewedKey(repo: "/r", branch: "main"), store: store).paths == ["a.ts"])
         #expect(ViewedFiles(key: ViewedKey(repo: "/r", branch: "other"), store: store).paths.isEmpty)
+    }
+
+    @Test func keepsAMarkWhoseDiffIsTheSame() {
+        let store = ViewedStore()
+        let key = ViewedKey(repo: "/r", branch: "main")
+        let viewed = ViewedFiles(key: key, store: store)
+        viewed.toggle("a.ts", fingerprint: "1")
+        #expect(viewed.clearChanged(["a.ts": "1"]).isEmpty)
+        #expect(viewed.contains("a.ts"))
+    }
+
+    @Test func clearsAMarkWhoseDiffChangedAndSavesIt() {
+        let store = ViewedStore()
+        let key = ViewedKey(repo: "/r", branch: "main")
+        let viewed = ViewedFiles(key: key, store: store)
+        viewed.toggle("a.ts", fingerprint: "1")
+        viewed.toggle("b.ts", fingerprint: "2")
+        #expect(viewed.clearChanged(["a.ts": "changed", "b.ts": "2"]) == ["a.ts"])
+        #expect(viewed.paths == ["b.ts"])
+        #expect(store.load(key) == ["b.ts": "2"])
+    }
+
+    @Test func aMarkWithoutAFingerprintTakesTheCurrentOne() {
+        let store = ViewedStore(seed: ["a.ts"])
+        let key = ViewedKey(repo: "/r", branch: "main")
+        let viewed = ViewedFiles(key: key, store: store)
+        #expect(viewed.clearChanged(["a.ts": "1"]).isEmpty)
+        #expect(store.load(key) == ["a.ts": "1"])
+        #expect(viewed.clearChanged(["a.ts": "2"]) == ["a.ts"])
+    }
+
+    @Test func keepsMarksForFilesThatLeftTheDiff() {
+        let viewed = ViewedFiles(key: ViewedKey(repo: "/r", branch: "main"), store: ViewedStore())
+        viewed.toggle("gone.ts", fingerprint: "1")
+        #expect(viewed.clearChanged([:]).isEmpty)
+        #expect(viewed.contains("gone.ts"))
     }
 }

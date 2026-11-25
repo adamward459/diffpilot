@@ -23,7 +23,7 @@ nonisolated final class ViewedStore: @unchecked Sendable {
 
     let url: URL?
     private let lock = NSLock()
-    private var memory: [String: [String]] = [:]
+    private var memory: [String: [String: String]] = [:]
     private let seed: Set<String>
 
     init(url: URL? = nil, seed: Set<String> = []) {
@@ -49,22 +49,24 @@ nonisolated final class ViewedStore: @unchecked Sendable {
         return ViewedStore(url: nil, seed: Set(paths ?? []))
     }
 
-    func load(_ key: ViewedKey) -> Set<String> {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let url else { return Set(memory[key.storageKey] ?? Array(seed)) }
-        return Set(readFile(url)[key.storageKey] ?? [])
-    }
-
-    func save(_ key: ViewedKey, _ paths: Set<String>) {
+    func load(_ key: ViewedKey) -> [String: String] {
         lock.lock()
         defer { lock.unlock() }
         guard let url else {
-            memory[key.storageKey] = paths.sorted()
+            return memory[key.storageKey] ?? Dictionary(uniqueKeysWithValues: seed.map { ($0, ViewedFiles.unknown) })
+        }
+        return readFile(url)[key.storageKey] ?? [:]
+    }
+
+    func save(_ key: ViewedKey, _ paths: [String: String]) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let url else {
+            memory[key.storageKey] = paths
             return
         }
         var all = readFile(url)
-        if paths.isEmpty { all[key.storageKey] = nil } else { all[key.storageKey] = paths.sorted() }
+        all[key.storageKey] = paths.isEmpty ? nil : paths
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(all) else { return }
@@ -73,27 +75,50 @@ nonisolated final class ViewedStore: @unchecked Sendable {
         try? data.write(to: url, options: .atomic)
     }
 
-    private func readFile(_ url: URL) -> [String: [String]] {
-        (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode([String: [String]].self, from: $0) } ?? [:]
+    private func readFile(_ url: URL) -> [String: [String: String]] {
+        (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode([String: [String: String]].self, from: $0) }
+            ?? [:]
     }
 }
 
 @Observable
 final class ViewedFiles {
-    private(set) var paths: Set<String>
+    static let unknown = ""
+
+    private(set) var fingerprints: [String: String]
     private let key: ViewedKey
     private let store: ViewedStore
 
     init(key: ViewedKey, store: ViewedStore = .shared) {
         self.key = key
         self.store = store
-        paths = store.load(key)
+        fingerprints = store.load(key)
     }
 
-    func toggle(_ path: String) {
-        if paths.remove(path) == nil { paths.insert(path) }
-        store.save(key, paths)
+    var paths: Set<String> { Set(fingerprints.keys) }
+
+    func contains(_ path: String) -> Bool { fingerprints[path] != nil }
+
+    func toggle(_ path: String, fingerprint: String = unknown) {
+        if fingerprints.removeValue(forKey: path) == nil { fingerprints[path] = fingerprint }
+        store.save(key, fingerprints)
     }
 
-    func contains(_ path: String) -> Bool { paths.contains(path) }
+    func clearChanged(_ current: [String: String]) -> [String] {
+        var next = fingerprints
+        var cleared: [String] = []
+        for (path, saved) in fingerprints {
+            guard let now = current[path], saved != now else { continue }
+            if saved == Self.unknown {
+                next[path] = now
+            } else {
+                next[path] = nil
+                cleared.append(path)
+            }
+        }
+        guard next != fingerprints else { return [] }
+        fingerprints = next
+        store.save(key, next)
+        return cleared.sorted()
+    }
 }

@@ -284,7 +284,7 @@ struct DiffPaneModelTests {
         let model = DiffPaneModel(
             repo: nil, viewed: ViewedFiles(key: key, store: store), send: { recorder.commands.append($0) })
         model.handle(.toggleViewed("a.ts"))
-        #expect(store.load(key) == ["a.ts"])
+        #expect(store.load(key).keys.sorted() == ["a.ts"])
         #expect(recorder.fileStates == ["a.ts true true"])
     }
 
@@ -292,7 +292,7 @@ struct DiffPaneModelTests {
         let recorder = Recorder()
         let store = ViewedStore()
         let key = ViewedKey(repo: "/r", branch: "b")
-        store.save(key, ["a.ts"])
+        store.save(key, ["a.ts": ViewedFiles.unknown])
         let model = DiffPaneModel(
             repo: nil, viewed: ViewedFiles(key: key, store: store), send: { recorder.commands.append($0) })
         model.handle(.ready)
@@ -394,5 +394,34 @@ struct DiffPaneModelTests {
         model.handle(.ready)
         #expect(recorder.resets == 0)
         #expect(recorder.loads == [["f0.txt"]])
+    }
+
+    @Test func reloadClearsAViewedFileWhoseDiffChangedAndExpandsIt() async throws {
+        let repo = try makeRepo(files: 2)
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let recorder = Recorder()
+        let model = makeModel(recorder, repo: repo)
+        await model.load()
+        model.handle(.ready)
+        model.toggleViewed("f0.txt")
+        model.toggleViewed("f1.txt")
+        try "base\nagain\n".write(to: repo.appendingPathComponent("f1.txt"), atomically: true, encoding: .utf8)
+        await model.reload()
+        #expect(model.viewed.paths == ["f0.txt"])
+        #expect(!model.collapsed.contains("f1.txt"))
+        #expect(recorder.fileStates.last == "f1.txt false false")
+    }
+
+    @Test func loadClearsAStoredMarkWhoseDiffChangedSinceItWasSaved() async throws {
+        let repo = try makeRepo(files: 1)
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let store = ViewedStore()
+        let key = ViewedKey(repo: "/r", branch: "b")
+        store.save(key, ["f0.txt": "an older diff"])
+        let model = DiffPaneModel(repo: repo, viewed: ViewedFiles(key: key, store: store))
+        await model.load()
+        #expect(model.viewed.paths.isEmpty)
+        #expect(model.collapsed.isEmpty)
+        #expect(store.load(key).isEmpty)
     }
 }

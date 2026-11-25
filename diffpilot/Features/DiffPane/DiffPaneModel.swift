@@ -22,6 +22,7 @@ final class DiffPaneModel {
     private let replier: any ClaudeReplier
     private let benchScrollDelay: Duration?
     private var files: [FileDiff]?
+    private var fingerprints: [String: String] = [:]
     private var batches: DiffBatches?
     private var isPageReady = false
     private var hasSentFirstBatch = false
@@ -63,15 +64,20 @@ final class DiffPaneModel {
     }
 
     func load() async {
-        files = await readFiles()
-        batches = files.map { DiffBatches($0, lineBudget: Self.lineBudget) }
+        let (next, prints) = await readFiles()
+        files = next
+        fingerprints = prints
+        clearChangedViewed()
+        batches = DiffBatches(next, lineBudget: Self.lineBudget)
         sendFirstBatchIfReady()
     }
 
     func reload() async {
-        let next = await readFiles()
+        let (next, prints) = await readFiles()
         guard next != files else { return }
         files = next
+        fingerprints = prints
+        clearChangedViewed()
         batches = DiffBatches(next, lineBudget: Self.lineBudget)
         guard hasSentFirstBatch else {
             sendFirstBatchIfReady()
@@ -85,15 +91,23 @@ final class DiffPaneModel {
         }
     }
 
-    private func readFiles() async -> [FileDiff] {
+    private func readFiles() async -> ([FileDiff], [String: String]) {
         let repo = repo
         let comparison = comparison
         return await Task.detached(priority: .userInitiated) {
             guard let repo, let text = try? Git.run(repo, UnifiedDiff.args + comparison.revisions) else {
-                return [FileDiff]()
+                return ([], [:])
             }
-            return UnifiedDiff.parse(text).inTreeOrder()
+            let files = UnifiedDiff.parse(text).inTreeOrder()
+            return (files, Dictionary(files.map { ($0.path, $0.fingerprint) }, uniquingKeysWith: { _, last in last }))
         }.value
+    }
+
+    private func clearChangedViewed() {
+        for path in viewed.clearChanged(fingerprints) {
+            collapsed.remove(path)
+            if isPageReady { sendFileState(path) }
+        }
     }
 
     func pageDidReload() {
@@ -109,7 +123,7 @@ final class DiffPaneModel {
     }
 
     func toggleViewed(_ path: String) {
-        viewed.toggle(path)
+        viewed.toggle(path, fingerprint: fingerprints[path] ?? ViewedFiles.unknown)
         if viewed.contains(path) { collapsed.insert(path) } else { collapsed.remove(path) }
         sendFileState(path)
     }
