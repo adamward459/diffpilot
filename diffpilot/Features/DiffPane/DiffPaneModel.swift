@@ -20,6 +20,15 @@ final class DiffPaneModel {
     var reviewScope = ReviewScope.all
     var reviewModel = ReviewModel.standard
     var branchName: String?
+    var showsReviewResult = false
+
+    var reviewNeedsRoom: Bool {
+        switch review {
+        case .running: true
+        case .done: showsReviewResult
+        default: false
+        }
+    }
     var mode = PaneMode.diff
 
     let viewed: ViewedFiles

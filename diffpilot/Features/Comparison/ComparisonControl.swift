@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ComparisonControl: View {
     let model: ComparisonModel
+    var compact = false
     @Environment(\.appearsActive) private var appearsActive
 
     var body: some View {
@@ -16,8 +17,10 @@ struct ComparisonControl: View {
                 }
                 .help(comparison.branch == nil ? "Checked-out branch" : "Read only. This branch is not checked out.")
                 .accessibilityIdentifier("comparison-branch")
-                Text("compared to")
-                    .foregroundStyle(appearsActive ? .secondary : .tertiary)
+                if !compact {
+                    Text("compared to")
+                        .foregroundStyle(appearsActive ? .secondary : .tertiary)
+                }
                 Menu {
                     BaseMenu(refs: refs, comparison: comparison, select: model.select)
                 } label: {

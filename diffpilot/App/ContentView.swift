@@ -59,7 +59,9 @@ private struct RepoView: View {
                 ToolbarItem(placement: .principal) { ClaudePill(model: session.diff) }
                 ToolbarSpacer(.fixed, placement: .principal)
             }
-            ToolbarItem(placement: .principal) { ComparisonControl(model: picker) }
+            ToolbarItem(placement: .principal) {
+                ComparisonControl(model: picker, compact: session?.diff.reviewNeedsRoom ?? false)
+            }
         }
         .onChange(of: session?.sidebar.selection) { _, path in
             if let path { session?.diff.reveal(path) }
@@ -96,8 +98,13 @@ private struct RepoSession {
     let diff: DiffPaneModel
 
     private static func reviewer() -> any ClaudeReviewer {
-        ProcessInfo.processInfo.environment["DIFFPILOT_REVIEWER"] == "scripted"
-            ? ScriptedReviewer() : ClaudeCLIReviewer()
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["DIFFPILOT_REVIEWER"] == "scripted" else { return ClaudeCLIReviewer() }
+        var reviewer = ScriptedReviewer()
+        if let seconds = environment["DIFFPILOT_REVIEW_SECONDS"].flatMap(Double.init) {
+            reviewer.delay = .seconds(seconds)
+        }
+        return reviewer
     }
 
     init(repo: URL, comparison: Comparison, refs: Refs?) {

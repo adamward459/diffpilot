@@ -15,6 +15,7 @@ struct DiffPaneDriver {
         app.launchEnvironment["DIFFPILOT_REPO"] = Fixture.large
         app.launchEnvironment["DIFFPILOT_VIEWED_SEED"] = Fixture.viewedSeed
         app.launchEnvironment["DIFFPILOT_REVIEWER"] = "scripted"
+        app.launchEnvironment["DIFFPILOT_REVIEW_SECONDS"] = "4"
         if let appearance { app.launchEnvironment["DIFFPILOT_APPEARANCE"] = appearance }
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
     }

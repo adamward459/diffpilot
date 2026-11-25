@@ -32,7 +32,6 @@ extension Severity {
 struct ClaudePill: View {
     @Bindable var model: DiffPaneModel
     @State private var showsPopover = false
-    @State private var showsResult = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -53,14 +52,15 @@ struct ClaudePill: View {
             .accessibilityLabel("Comment on file")
             .accessibilityIdentifier("comment-on-file")
         }
+        .accessibilityElement(children: .contain)
         .onChange(of: model.review) { _, run in
             if case .failed = run { showsPopover = true }
-            showsResult = if case .done = run { true } else { false }
+            model.showsReviewResult = if case .done = run { true } else { false }
         }
-        .task(id: showsResult) {
-            guard showsResult else { return }
+        .task(id: model.showsReviewResult) {
+            guard model.showsReviewResult else { return }
             try? await Task.sleep(for: .seconds(5))
-            showsResult = false
+            model.showsReviewResult = false
         }
     }
 
@@ -68,7 +68,11 @@ struct ClaudePill: View {
         switch model.review {
         case .running(let since):
             HStack(spacing: 7) {
-                ProgressView().controlSize(.small)
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .controlSize(.small)
+                    .frame(width: 16, height: 16)
+                    .fixedSize()
                 HStack(spacing: 4) {
                     Text("Reviewing").fontWeight(.semibold)
                     TimelineView(.periodic(from: since, by: 1)) { context in
@@ -81,14 +85,20 @@ struct ClaudePill: View {
                 Button {
                     model.stopReview()
                 } label: {
-                    Image(systemName: "stop.fill").foregroundStyle(.red)
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.red)
                 }
                 .keyboardShortcut(".", modifiers: .command)
                 .help("Stop Claude (⌘.)")
                 .accessibilityLabel("Stop")
                 .accessibilityIdentifier("stop-review")
             }
-        case .done(let counts) where showsResult:
+            .padding(.leading, 10)
+            .padding(.trailing, 4)
+            .fixedSize()
+            .accessibilityElement(children: .contain)
+        case .done(let counts) where model.showsReviewResult:
             pillButton {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                 Text("Review done")

@@ -14,6 +14,7 @@ final class DiffPaneScreenshotUITests: XCTestCase {
     @MainActor
     private func capture(appearance: String) throws {
         let pane = DiffPaneDriver(appearance: appearance)
+        pane.app.launchEnvironment["DIFFPILOT_REVIEW_SECONDS"] = "6"
         pane.app.launch()
         XCTAssertTrue(pane.state.waitForExistence(timeout: 10))
         pane.moveToPrimaryScreen()
@@ -37,7 +38,12 @@ final class DiffPaneScreenshotUITests: XCTestCase {
         try attach(pane.window, named: "diffpane-thread-\(appearance)")
 
         pane.startReview()
+        XCTAssertTrue(pane.waitUntil { pane.review == "running" })
+        Thread.sleep(forTimeInterval: 1.5)
+        try attach(pane.window, named: "diffpane-reviewing-\(appearance)")
         XCTAssertTrue(pane.waitUntil(timeout: 20) { pane.review.hasPrefix("done") })
+        // The pill shows the result for 5 s only, so capture it before the page scrolls.
+        try attach(pane.window, named: "diffpane-review-done-\(appearance)")
         pane.app.typeKey(.home, modifierFlags: [])
         XCTAssertTrue(pane.waitUntil { pane.recognizedText().contains("Review summary") })
         try attach(pane.window, named: "diffpane-review-\(appearance)")
