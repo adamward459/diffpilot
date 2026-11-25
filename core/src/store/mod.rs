@@ -4,6 +4,7 @@
 //! THIRD_PARTY_NOTICES). A session is one review: repo + branch + base.
 
 mod rows;
+mod runs;
 mod schema;
 
 pub use rows::{NewComment, NewThread, Written};
@@ -32,7 +33,8 @@ pub enum StoreError {
 
 pub type Result<T> = std::result::Result<T, StoreError>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
 pub struct SessionId(pub i64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]

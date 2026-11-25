@@ -1,7 +1,8 @@
 use super::{Result, StoreError};
 use rusqlite::Connection;
 
-const MIGRATIONS: &[&str] = &["
+const MIGRATIONS: &[&str] = &[
+    "
     CREATE TABLE sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       repo TEXT NOT NULL,
@@ -45,7 +46,23 @@ const MIGRATIONS: &[&str] = &["
       created_at INTEGER NOT NULL,
       UNIQUE (thread_id, seq)
     );
-    "];
+    ",
+    "
+    CREATE TABLE runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      state TEXT NOT NULL,
+      model TEXT NOT NULL,
+      queued_at INTEGER NOT NULL,
+      started_at INTEGER,
+      finished_at INTEGER,
+      data TEXT NOT NULL
+    );
+    CREATE INDEX idx_runs_session ON runs (session_id);
+    ",
+];
 
 /// Each entry of `MIGRATIONS` runs once, in order, and `user_version` counts the ones done.
 pub(super) fn migrate(conn: &Connection) -> Result<()> {

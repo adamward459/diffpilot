@@ -25,6 +25,19 @@ pub(crate) fn find_executable(candidates: &[PathBuf], name: &str) -> Option<Path
     })
 }
 
+/// A binary built next to the running executable. In `cargo test` the test binary sits in `deps/`, one level down.
+pub(crate) fn sibling_binary(name: &str) -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let in_deps = dir.file_name().is_some_and(|name| name == "deps");
+    let candidates = [Some(dir), in_deps.then(|| dir.parent()).flatten()];
+    candidates
+        .into_iter()
+        .flatten()
+        .map(|dir| dir.join(name))
+        .find(|path| is_executable(path))
+}
+
 fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     path.metadata()

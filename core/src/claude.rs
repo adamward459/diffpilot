@@ -194,7 +194,7 @@ pub fn claude_binary() -> Option<PathBuf> {
     find_executable(&candidates, "claude")
 }
 
-fn claude_command(binary: &Path, repo: &Path) -> Command {
+pub(crate) fn claude_command(binary: &Path, repo: &Path) -> Command {
     let mut command = Command::new(binary);
     command.current_dir(repo);
     let home = binary.parent().map(|dir| dir.to_string_lossy().into_owned());
@@ -241,14 +241,14 @@ impl Reviewer for ClaudeCliReviewer {
     }
 }
 
-struct Finished {
-    status: ExitStatus,
-    stderr: Vec<u8>,
+pub(crate) struct Finished {
+    pub status: ExitStatus,
+    pub stderr: Vec<u8>,
 }
 
 /// `on_stdout` returns false to stop the process early, which reports `Cancelled`.
 /// On cancel the child's process group is stopped and its pipe threads are left to end on their own.
-fn run_process(
+pub(crate) fn run_process(
     mut command: Command,
     cancel: &CancelToken,
     mut on_stdout: impl FnMut(&[u8]) -> bool + Send + 'static,

@@ -1,0 +1,666 @@
+//! Starts, queues, stops and records Claude runs. UI-free: the UI subscribes to `RunEvent`s and reads `Run`s.
+//!
+//! One run goes at a time in a repo. Others wait in a queue. Each run is `claude -p --output-format
+//! stream-json --verbose` in the repo folder, with the deny list and the PreToolUse hook from `policy`. A
+//! stop sends SIGTERM to the process group, then SIGKILL (see `claude::run_process`).
+
+use crate::cancel::CancelToken;
+use crate::claude::{self, ReviewError};
+use crate::diff::FileDiff;
+use crate::paths::{sibling_binary, standardized};
+use crate::policy::{EditPermission, PolicyError, ToolPolicy, hook_settings};
+use crate::review::{ReviewModel, ReviewRequest};
+use crate::run::{Progress, Run, RunId, RunKind, RunState, RunSummary};
+use crate::settings::app_support_dir;
+use crate::snapshot::{self, SnapshotError, UndoReport, Until};
+use crate::store::{SessionId, SessionKey, Store, StoreError, now_ms};
+use crate::stream::{self, LineBuffer, StreamEvent};
+use crate::threads::ThreadId;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex, OnceLock};
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RunEvent {
+    Queued {
+        run: RunId,
+    },
+    Started {
+        run: RunId,
+    },
+    Log {
+        run: RunId,
+        entry: crate::run::LogEntry,
+    },
+    /// The plan, progress or activity of the run changed. Read it with `RunEngine::run`.
+    Updated {
+        run: RunId,
+    },
+    /// The run wrote to the threads of this session, so a `ThreadStore` there should `refresh()`.
+    ThreadsChanged {
+        run: RunId,
+        session: SessionId,
+    },
+    Finished {
+        run: RunId,
+        state: RunState,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum EngineError {
+    #[error("The claude command was not found. Install Claude Code, then try again.")]
+    ClaudeNotFound,
+    #[error("The safety hook {0} is missing or does not block a push, so runs are off.")]
+    GuardMissing(PathBuf),
+    #[error(transparent)]
+    Policy(#[from] PolicyError),
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ChangeError {
+    #[error("That run was not found.")]
+    UnknownRun,
+    #[error("That run took no snapshot, so it has no change to show.")]
+    NoSnapshot,
+    #[error(transparent)]
+    Snapshot(#[from] SnapshotError),
+}
+
+fn until_of(taken: &snapshot::Snapshot) -> Until {
+    if taken.after_tree.is_some() {
+        Until::RunEnd
+    } else {
+        Until::Now
+    }
+}
+
+pub const KEEP_SNAPSHOTS: usize = 30;
+
+#[derive(Debug, Clone)]
+pub struct RunRequest {
+    pub repo: PathBuf,
+    pub session: SessionKey,
+    pub kind: RunKind,
+    pub title: String,
+    pub prompt: String,
+    pub model: ReviewModel,
+    /// Threads the run is to answer. The pill counts them as "2 of 4".
+    pub threads: Vec<ThreadId>,
+    /// The `git diff` revisions of the comparison under review, for the `get_diff` tool.
+    pub revisions: Vec<String>,
+    pub json_schema: Option<String>,
+    pub edit_permission: EditPermission,
+    pub extra_arguments: Vec<String>,
+}
+
+impl RunRequest {
+    pub fn new(repo: &Path, session: SessionKey, kind: RunKind, title: &str, prompt: &str, model: ReviewModel) -> Self {
+        Self {
+            repo: repo.to_path_buf(),
+            session,
+            kind,
+            title: title.to_string(),
+            prompt: prompt.to_string(),
+            model,
+            threads: Vec::new(),
+            revisions: Vec::new(),
+            json_schema: None,
+            edit_permission: EditPermission::default(),
+            extra_arguments: Vec::new(),
+        }
+    }
+
+    /// A review that returns its findings as structured output.
+    pub fn review(request: &ReviewRequest, session: SessionKey, title: &str) -> Self {
+        let mut run = Self::new(
+            &request.repo,
+            session,
+            RunKind::Review,
+            title,
+            &crate::prompt::render(request),
+            request.model,
+        );
+        run.revisions = request.revisions.clone();
+        run.json_schema = Some(claude::SCHEMA.to_string());
+        run
+    }
+}
+
+pub struct EngineConfig {
+    pub store: Arc<Store>,
+    pub claude_binary: Option<PathBuf>,
+    pub guard_binary: PathBuf,
+    /// Where each run puts its generated settings file.
+    pub run_dir: PathBuf,
+    /// How many editing runs per review keep their snapshot, and so can still show a change or be undone.
+    pub keep_snapshots: usize,
+}
+
+impl EngineConfig {
+    pub fn new(store: Arc<Store>) -> Self {
+        let base = app_support_dir().unwrap_or_else(|| std::env::temp_dir().join("diffpilot"));
+        Self {
+            store,
+            claude_binary: None,
+            guard_binary: sibling_binary("diffpilot-guard").unwrap_or_else(|| PathBuf::from("diffpilot-guard")),
+            run_dir: base.join("runs"),
+            keep_snapshots: KEEP_SNAPSHOTS,
+        }
+    }
+}
+
+struct Live {
+    run: Run,
+    request: RunRequest,
+    /// The repo as the process sees it. macOS reports `/private/var/...` for a repo opened as `/var/...`.
+    repo_real: PathBuf,
+    cancel: CancelToken,
+    saw_result: bool,
+    answered: HashSet<ThreadId>,
+}
+
+#[derive(Default)]
+struct State {
+    live: HashMap<RunId, Live>,
+    queues: HashMap<PathBuf, VecDeque<RunId>>,
+    running: HashMap<PathBuf, RunId>,
+}
+
+struct Inner {
+    config: EngineConfig,
+    state: Mutex<State>,
+    subscribers: Mutex<Vec<async_channel::Sender<RunEvent>>>,
+    guard_checked: OnceLock<bool>,
+}
+
+#[derive(Clone)]
+pub struct RunEngine {
+    inner: Arc<Inner>,
+}
+
+enum Ending {
+    Done,
+    Stopped,
+    Failed(String),
+}
+
+impl RunEngine {
+    pub fn new(config: EngineConfig) -> Self {
+        let _ = config.store.fail_stale_runs();
+        Self {
+            inner: Arc::new(Inner {
+                config,
+                state: Mutex::default(),
+                subscribers: Mutex::default(),
+                guard_checked: OnceLock::new(),
+            }),
+        }
+    }
+
+    pub fn store(&self) -> &Arc<Store> {
+        &self.inner.config.store
+    }
+
+    /// Every subscriber gets every event from now on.
+    pub fn subscribe(&self) -> async_channel::Receiver<RunEvent> {
+        let (sender, receiver) = async_channel::unbounded();
+        self.inner.subscribers.lock().unwrap().push(sender);
+        receiver
+    }
+
+    /// Queues the run, and starts it right away when the repo has no run going.
+    pub fn submit(&self, request: RunRequest) -> Result<RunId, EngineError> {
+        let inner = &self.inner;
+        if inner.claude().is_none() {
+            return Err(EngineError::ClaudeNotFound);
+        }
+        inner.check_guard()?;
+        ToolPolicy::new(request.kind, request.edit_permission, inner.has_mcp())?;
+        let session = inner.config.store.session(&request.session)?;
+        let id = inner.config.store.insert_run(session, request.kind, &request.title)?;
+        let mut run = Run::new(
+            id,
+            session,
+            &request.repo,
+            request.kind,
+            &request.title,
+            request.model,
+            now_ms(),
+        );
+        if !request.threads.is_empty() {
+            run.units = Some(Progress {
+                done: 0,
+                total: request.threads.len() as u32,
+            });
+        }
+        inner.config.store.save_run(&run)?;
+        let repo = standardized(&request.repo);
+        let start_now = {
+            let mut state = inner.state.lock().unwrap();
+            state.live.insert(
+                id,
+                Live {
+                    run,
+                    repo_real: std::fs::canonicalize(&request.repo).unwrap_or_else(|_| request.repo.clone()),
+                    request,
+                    cancel: CancelToken::new(),
+                    saw_result: false,
+                    answered: HashSet::new(),
+                },
+            );
+            match state.running.entry(repo.clone()) {
+                Entry::Occupied(_) => {
+                    state.queues.entry(repo).or_default().push_back(id);
+                    false
+                }
+                Entry::Vacant(slot) => {
+                    slot.insert(id);
+                    true
+                }
+            }
+        };
+        inner.emit(RunEvent::Queued { run: id });
+        if start_now {
+            Inner::spawn(inner.clone(), id);
+        }
+        Ok(id)
+    }
+
+    /// Stops a running run, or takes a queued one out of the queue. Returns false for an unknown or finished run.
+    pub fn stop(&self, id: RunId) -> bool {
+        let queued = {
+            let mut state = self.inner.state.lock().unwrap();
+            let Some(live) = state.live.get(&id) else { return false };
+            match live.run.state {
+                RunState::Running => {
+                    live.cancel.cancel();
+                    return true;
+                }
+                RunState::Queued => {
+                    for queue in state.queues.values_mut() {
+                        queue.retain(|queued| *queued != id);
+                    }
+                    true
+                }
+                _ => false,
+            }
+        };
+        if queued {
+            self.inner.finish(id, &Ending::Stopped);
+        }
+        queued
+    }
+
+    /// The run now going in `repo`, if any.
+    pub fn active(&self, repo: &Path) -> Option<Run> {
+        let state = self.inner.state.lock().unwrap();
+        let id = state.running.get(&standardized(repo))?;
+        state.live.get(id).map(|live| live.run.clone())
+    }
+
+    /// The runs waiting in `repo`, first to start first.
+    pub fn queued(&self, repo: &Path) -> Vec<Run> {
+        let state = self.inner.state.lock().unwrap();
+        state
+            .queues
+            .get(&standardized(repo))
+            .into_iter()
+            .flatten()
+            .filter_map(|id| state.live.get(id).map(|live| live.run.clone()))
+            .collect()
+    }
+
+    /// A run that is going or waiting, or a finished one from the database.
+    pub fn run(&self, id: RunId) -> Option<Run> {
+        if let Some(live) = self.inner.state.lock().unwrap().live.get(&id) {
+            return Some(live.run.clone());
+        }
+        self.inner.config.store.load_run(id).ok().flatten()
+    }
+
+    /// Past Runs of one review, newest first.
+    pub fn past_runs(&self, key: &SessionKey, limit: usize) -> Result<Vec<RunSummary>, StoreError> {
+        let session = self.inner.config.store.session(key)?;
+        self.inner.config.store.run_summaries(session, limit)
+    }
+
+    /// What the run changed, as a diff from the snapshot taken before it. `paths` limits it to those files.
+    pub fn show_change(&self, id: RunId, paths: &[String]) -> Result<Vec<FileDiff>, ChangeError> {
+        let (run, taken) = self.snapshot_of(id)?;
+        Ok(snapshot::diff(&run.repo, &taken, until_of(&taken), paths)?)
+    }
+
+    /// Puts the files of a finished run back as they were before it. A file edited since stays unless `force`.
+    pub fn undo_run(&self, id: RunId, force: bool) -> Result<UndoReport, ChangeError> {
+        let (mut run, taken) = self.snapshot_of(id)?;
+        let report = snapshot::undo(&run.repo, &taken, force)?;
+        if report.conflicts.is_empty() {
+            run.undone_at_ms = Some(now_ms());
+            let _ = self.inner.config.store.save_run(&run);
+            self.inner.with_run(id, |live| live.run.undone_at_ms = run.undone_at_ms);
+        }
+        Ok(report)
+    }
+
+    fn snapshot_of(&self, id: RunId) -> Result<(Run, snapshot::Snapshot), ChangeError> {
+        let run = self.run(id).ok_or(ChangeError::UnknownRun)?;
+        let taken = run.snapshot.clone().ok_or(ChangeError::NoSnapshot)?;
+        Ok((run, taken))
+    }
+
+    /// Counts a thread as answered for the "2 of 4" progress. Called when Claude replies to it or marks it addressed.
+    pub fn note_thread_answered(&self, run: RunId, thread: ThreadId) {
+        let changed = {
+            let mut state = self.inner.state.lock().unwrap();
+            let Some(live) = state.live.get_mut(&run) else { return };
+            if !live.request.threads.contains(&thread) || !live.answered.insert(thread) {
+                false
+            } else {
+                live.run.units = Some(Progress {
+                    done: live.answered.len() as u32,
+                    total: live.request.threads.len() as u32,
+                });
+                true
+            }
+        };
+        if changed {
+            self.inner.emit(RunEvent::Updated { run });
+        }
+    }
+}
+
+impl Inner {
+    fn emit(&self, event: RunEvent) {
+        self.subscribers
+            .lock()
+            .unwrap()
+            .retain(|subscriber| subscriber.try_send(event.clone()).is_ok());
+    }
+
+    fn claude(&self) -> Option<PathBuf> {
+        self.config.claude_binary.clone().or_else(claude::claude_binary)
+    }
+
+    fn has_mcp(&self) -> bool {
+        false
+    }
+
+    /// A run with no working hook would be allowed to push, so it never starts without one.
+    fn check_guard(&self) -> Result<(), EngineError> {
+        let works = *self
+            .guard_checked
+            .get_or_init(|| guard_blocks_a_push(&self.config.guard_binary));
+        if works {
+            Ok(())
+        } else {
+            Err(EngineError::GuardMissing(self.config.guard_binary.clone()))
+        }
+    }
+
+    fn spawn(this: Arc<Self>, id: RunId) {
+        let _ = std::thread::Builder::new()
+            .name(format!("diffpilot-run-{}", id.0))
+            .spawn(move || this.execute(id));
+    }
+
+    fn execute(self: Arc<Self>, id: RunId) {
+        let Some((request, cancel)) = self.begin(id) else {
+            return;
+        };
+        let ending = self.drive(id, &request, &cancel);
+        self.finish(id, &ending);
+    }
+
+    fn begin(&self, id: RunId) -> Option<(RunRequest, CancelToken)> {
+        let (request, cancel, run) = {
+            let mut state = self.state.lock().unwrap();
+            let live = state
+                .live
+                .get_mut(&id)
+                .filter(|live| live.run.state == RunState::Queued)?;
+            live.run.state = RunState::Running;
+            live.run.started_at_ms = Some(now_ms());
+            (live.request.clone(), live.cancel.clone(), live.run.clone())
+        };
+        let _ = self.config.store.save_run(&run);
+        self.emit(RunEvent::Started { run: id });
+        Some((request, cancel))
+    }
+
+    fn with_run<T>(&self, id: RunId, change: impl FnOnce(&mut Live) -> T) -> Option<T> {
+        self.state.lock().unwrap().live.get_mut(&id).map(change)
+    }
+
+    fn drive(self: &Arc<Self>, id: RunId, request: &RunRequest, cancel: &CancelToken) -> Ending {
+        let Some(binary) = self.claude() else {
+            return Ending::Failed(EngineError::ClaudeNotFound.to_string());
+        };
+        let policy = match ToolPolicy::new(request.kind, request.edit_permission, self.has_mcp()) {
+            Ok(policy) => policy,
+            Err(error) => return Ending::Failed(error.to_string()),
+        };
+        let dir = self.config.run_dir.join(format!("run-{}", id.0));
+        let settings = dir.join("settings.json");
+        let prepared = std::fs::create_dir_all(&dir).and_then(|()| {
+            std::fs::write(
+                &settings,
+                serde_json::to_vec_pretty(&hook_settings(&self.config.guard_binary)).unwrap_or_default(),
+            )
+        });
+        if let Err(error) = prepared {
+            return Ending::Failed(format!("Could not prepare the run: {error}"));
+        }
+        if request.kind.edits() {
+            match snapshot::take(&request.repo, id) {
+                Ok(taken) => {
+                    self.with_run(id, |live| live.run.snapshot = Some(taken));
+                }
+                Err(error) => {
+                    let _ = std::fs::remove_dir_all(&dir);
+                    return Ending::Failed(error.to_string());
+                }
+            }
+        }
+
+        let mut command = claude::claude_command(&binary, &request.repo);
+        command.args([
+            "-p",
+            &request.prompt,
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--no-session-persistence",
+            "--strict-mcp-config",
+            "--model",
+            request.model.name.as_str(),
+            "--effort",
+            request.model.effort.as_str(),
+            "--settings",
+        ]);
+        command.arg(&settings);
+        if let Some(schema) = &request.json_schema {
+            command.args(["--json-schema", schema]);
+        }
+        command.args(policy.arguments()).args(&request.extra_arguments);
+
+        let lines = Arc::new(Mutex::new(LineBuffer::default()));
+        let (feed, engine) = (lines.clone(), Arc::clone(self));
+        let result = claude::run_process(command, cancel, move |chunk| {
+            let complete = feed.lock().unwrap().push(chunk);
+            for line in complete {
+                engine.apply_line(id, &line);
+            }
+            true
+        });
+        if let Some(tail) = lines.lock().unwrap().finish() {
+            self.apply_line(id, &tail);
+        }
+        let ending = self.ending_of(id, result);
+        if request.kind.edits() {
+            self.record_changes(id, &request.repo);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        ending
+    }
+
+    /// The run that just fell out of the newest `keep_snapshots` gives up its refs.
+    fn forget_old_snapshots(&self, id: RunId, repo: &Path) {
+        let Some(session) = self.with_run(id, |live| live.run.session) else {
+            return;
+        };
+        let keep = self.config.keep_snapshots;
+        let Ok(past) = self.config.store.run_summaries(session, keep + 1) else {
+            return;
+        };
+        if let Some(old) = past.get(keep) {
+            let _ = snapshot::forget(repo, old.id);
+        }
+    }
+
+    fn ending_of(&self, id: RunId, result: Result<claude::Finished, ReviewError>) -> Ending {
+        match result {
+            Err(ReviewError::Cancelled) => Ending::Stopped,
+            Err(error) => Ending::Failed(error.to_string()),
+            Ok(finished) => {
+                let (error, saw_result, review_missing) = self
+                    .with_run(id, |live| {
+                        (
+                            live.run.error.clone(),
+                            live.saw_result,
+                            live.run.kind == RunKind::Review && live.run.outcome.is_none(),
+                        )
+                    })
+                    .unwrap_or_default();
+                if let Some(error) = error {
+                    Ending::Failed(error)
+                } else if !finished.status.success() {
+                    let message = String::from_utf8_lossy(&finished.stderr).trim().to_string();
+                    Ending::Failed(if message.is_empty() {
+                        match finished.status.code() {
+                            Some(code) => format!("claude exited with status {code}."),
+                            None => "claude was stopped by a signal.".into(),
+                        }
+                    } else {
+                        message
+                    })
+                } else if !saw_result {
+                    Ending::Failed("Claude ended without a result.".into())
+                } else if review_missing {
+                    Ending::Failed("Claude returned no review.".into())
+                } else {
+                    Ending::Done
+                }
+            }
+        }
+    }
+
+    fn record_changes(&self, id: RunId, repo: &Path) {
+        let Some(Some(mut taken)) = self.with_run(id, |live| live.run.snapshot.clone()) else {
+            return;
+        };
+        let outcome = snapshot::finish(repo, &mut taken)
+            .and_then(|()| snapshot::changed_files(repo, &taken, snapshot::Until::RunEnd));
+        self.forget_old_snapshots(id, repo);
+        self.with_run(id, |live| {
+            live.run.snapshot = Some(taken);
+            match outcome {
+                Ok(files) => live.run.changed_files = files,
+                Err(error) => live.run.error = live.run.error.take().or(Some(error.to_string())),
+            }
+        });
+    }
+
+    fn apply_line(&self, id: RunId, line: &str) {
+        let events = stream::parse_line(line);
+        if events.is_empty() {
+            return;
+        }
+        let entries = {
+            let mut state = self.state.lock().unwrap();
+            let Some(live) = state
+                .live
+                .get_mut(&id)
+                .filter(|live| live.run.state == RunState::Running)
+            else {
+                return;
+            };
+            let mut entries = Vec::new();
+            for event in &events {
+                if matches!(event, StreamEvent::Result(_)) {
+                    live.saw_result = true;
+                }
+                entries.extend(live.run.apply(event, &live.repo_real, now_ms()));
+            }
+            entries
+        };
+        for entry in entries {
+            self.emit(RunEvent::Log { run: id, entry });
+        }
+        self.emit(RunEvent::Updated { run: id });
+    }
+
+    /// Records how the run ended, tells subscribers, and starts the next queued run of the repo.
+    fn finish(self: &Arc<Self>, id: RunId, ending: &Ending) {
+        let (run, next) = {
+            let mut state = self.state.lock().unwrap();
+            let Some(live) = state.live.get_mut(&id) else { return };
+            let (final_state, error) = match ending {
+                Ending::Done => (RunState::Done, None),
+                Ending::Stopped => (RunState::Stopped, None),
+                Ending::Failed(message) => (RunState::Failed, Some(message.clone())),
+            };
+            live.run.state = final_state;
+            live.run.finished_at_ms = Some(now_ms());
+            if error.is_some() {
+                live.run.error = error;
+            }
+            live.run.activity = None;
+            let run = live.run.clone();
+            let repo = standardized(&live.request.repo);
+            let was_running = state.running.get(&repo) == Some(&id);
+            let next = if was_running {
+                state.running.remove(&repo);
+                let next = state.queues.get_mut(&repo).and_then(VecDeque::pop_front);
+                if let Some(next) = next {
+                    state.running.insert(repo, next);
+                }
+                next
+            } else {
+                None
+            };
+            (run, next)
+        };
+        let _ = self.config.store.save_run(&run);
+        self.emit(RunEvent::Finished {
+            run: id,
+            state: run.state,
+        });
+        if let Some(next) = next {
+            Self::spawn(self.clone(), next);
+        }
+    }
+}
+
+fn guard_blocks_a_push(guard: &Path) -> bool {
+    use std::io::Write;
+    let probe = r#"{"tool_name":"Bash","tool_input":{"command":"git push"}}"#;
+    let Ok(mut child) = Command::new(guard)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+    else {
+        return false;
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(probe.as_bytes());
+    }
+    child.wait_with_output().is_ok_and(|output| {
+        output.status.code() == Some(2) && String::from_utf8_lossy(&output.stderr).contains(crate::guard::BLOCK_MARKER)
+    })
+}

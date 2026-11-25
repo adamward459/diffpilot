@@ -1,4 +1,5 @@
 use crate::comparison::Comparison;
+use crate::policy::EditPermission;
 use crate::review::ReviewModel;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -15,6 +16,7 @@ struct Data {
     comparisons: BTreeMap<String, Comparison>,
     review_model: Option<ReviewModel>,
     review_focuses: BTreeMap<String, Vec<String>>,
+    edit_permission: Option<EditPermission>,
 }
 
 pub struct Settings {
@@ -106,6 +108,14 @@ impl Settings {
         });
     }
 
+    pub fn edit_permission(&self) -> EditPermission {
+        self.read(|data| data.edit_permission).unwrap_or_default()
+    }
+
+    pub fn set_edit_permission(&self, permission: EditPermission) {
+        self.write(|data| data.edit_permission = Some(permission));
+    }
+
     fn read<T>(&self, get: impl FnOnce(&Data) -> T) -> T {
         get(&self.data.lock().unwrap())
     }
@@ -134,6 +144,7 @@ impl Data {
             comparisons: entries(take("comparisons")),
             review_model: serde_json::from_value(take("reviewModel")).ok().flatten(),
             review_focuses: entries(take("reviewFocuses")),
+            edit_permission: serde_json::from_value(take("editPermission")).ok().flatten(),
         }
     }
 }
@@ -244,6 +255,19 @@ mod tests {
         assert_eq!(again.review_model().name, crate::review::ModelName::Haiku);
         assert_eq!(again.review_focuses(Path::new("/r")), ["Tests"]);
         assert!(again.review_focuses(Path::new("/other")).is_empty());
+    }
+
+    #[test]
+    fn the_edit_permission_defaults_to_dont_ask_and_is_saved() {
+        let (_dir, file) = temp_file();
+        let settings = Settings::at(file.clone());
+        assert_eq!(settings.edit_permission(), EditPermission::DontAsk);
+        settings.set_edit_permission(EditPermission::AskEach);
+        assert_eq!(Settings::at(file.clone()).edit_permission(), EditPermission::AskEach);
+        std::fs::write(&file, r#"{"editPermission": "somethingNew", "recentFolder": "/x"}"#).unwrap();
+        let unknown = Settings::at(file);
+        assert_eq!(unknown.edit_permission(), EditPermission::DontAsk);
+        assert_eq!(unknown.recent_folder_with(None), Some(PathBuf::from("/x")));
     }
 
     #[test]
