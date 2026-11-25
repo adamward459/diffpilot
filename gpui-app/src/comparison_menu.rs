@@ -1,6 +1,6 @@
-use crate::glyph::Glyph;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::refs::Refs;
+use diffpilot_ui_kit::Glyph;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MenuItem {

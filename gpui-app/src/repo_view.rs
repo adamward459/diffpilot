@@ -1,6 +1,5 @@
 use crate::bench::{Bench, Mark};
 use crate::comparison_control::{Select, comparison_control};
-use crate::glyph::Glyph;
 use crate::pane::{DiffPane, DiffPaneEvent};
 use crate::sidebar::{LoadedChanges, Sidebar, SidebarEvent};
 use crate::theme::{glass_shadow, palette};
@@ -15,6 +14,7 @@ use diffpilot_core::tree;
 use diffpilot_core::viewed::{ViewedFiles, ViewedKey, ViewedStore};
 use diffpilot_core::watcher::{self, WatchGuard};
 use diffpilot_review_ui::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
+use diffpilot_ui_kit::Glyph;
 use gpui::prelude::*;
 use gpui::{
     Context, Entity, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render,
@@ -917,7 +917,7 @@ mod tests {
     }
 
     fn open(cx: &mut TestAppContext) -> (Opened, &mut gpui::VisualTestContext) {
-        cx.update(gpui_component::init);
+        cx.update(diffpilot_ui_kit::init);
         let dir = fixture();
         let repo = dir.path().to_path_buf();
         let store = Arc::new(ViewedStore::in_memory());

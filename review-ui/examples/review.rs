@@ -11,15 +11,13 @@ use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{DiffLine, FileDiff, Hunk, LineKind};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
-use diffpilot_review_ui::{
-    PillEvent, ReviewAssets, ReviewEvent, ReviewHost, ReviewPill, ReviewSession, ThreadCard, ThreadChange,
-};
+use diffpilot_review_ui::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession, ThreadCard, ThreadChange};
 use gpui::{
-    App, AppContext, Application, AsyncApp, Bounds, Context, Entity, Hsla, InteractiveElement, IntoElement,
-    ParentElement, Pixels, Render, StatefulInteractiveElement, Styled, Subscription, Window, WindowBounds,
-    WindowOptions, canvas, div, point, px, rgb, size,
+    App, AppContext, Application, AsyncApp, Bounds, Context, Entity, InteractiveElement, IntoElement, ParentElement,
+    Pixels, Render, StatefulInteractiveElement, Styled, Subscription, Window, WindowBounds, WindowOptions, canvas, div,
+    point, px, size,
 };
-use gpui_component::{ActiveTheme, Root, Theme, ThemeMode, h_flex, v_flex};
+use gpui_component::{ActiveTheme, Root, h_flex, v_flex};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -157,30 +155,6 @@ fn session(cx: &mut App, reviewer: Arc<dyn Reviewer>, replier: Arc<dyn Replier>)
     cx.new(|_| ReviewSession::new(host, Arc::new(Settings::in_memory()), reviewer, replier))
 }
 
-fn apply_appearance(cx: &mut App) {
-    match std::env::var("DIFFPILOT_APPEARANCE").as_deref() {
-        Ok("dark") => Theme::change(ThemeMode::Dark, None, cx),
-        Ok("light") => Theme::change(ThemeMode::Light, None, cx),
-        _ => Theme::sync_system_appearance(None, cx),
-    }
-    let dark = cx.theme().is_dark();
-    let pick = |light: u32, dark_value: u32| -> Hsla { rgb(if dark { dark_value } else { light }).into() };
-    let theme = Theme::global_mut(cx);
-    theme.font_size = px(13.);
-    theme.radius = px(6.);
-    theme.background = pick(0xffffff, 0x1e1e1e);
-    theme.foreground = pick(0x1d1d1f, 0xf2f2f7);
-    theme.border = pick(0xe3e3e6, 0x3a3a3c);
-    theme.input = pick(0xdcdce0, 0x48484a);
-    theme.muted_foreground = pick(0x6e6e73, 0x98989d);
-    theme.popover = pick(0xfbfbfc, 0x2a2a2c);
-    theme.popover_foreground = pick(0x1d1d1f, 0xf2f2f7);
-    theme.primary = pick(0x0a7aff, 0x0a84ff);
-    theme.primary_hover = pick(0x0066d6, 0x3a9bff);
-    theme.primary_active = pick(0x0058b8, 0x0070e0);
-    theme.ring = pick(0x0a7aff, 0x0a84ff);
-}
-
 fn open_gallery(
     cx: &mut App,
     hidden: bool,
@@ -198,6 +172,7 @@ fn open_gallery(
     let mut made = None;
     let window = cx
         .open_window(options, |window, cx| {
+            diffpilot_ui_kit::theme::install(window, cx);
             let gallery = cx.new(|cx| Gallery::new(session, window, cx));
             made = Some(gallery.clone());
             cx.new(|cx| Root::new(gallery, window, cx))
@@ -386,14 +361,15 @@ fn serde_like(pairs: &[(&str, f64)]) -> String {
 
 fn main() {
     let benching = std::env::var("DIFFPILOT_BENCH").is_ok_and(|value| value == "1");
-    Application::new().with_assets(ReviewAssets).run(move |cx: &mut App| {
-        gpui_component::init(cx);
-        diffpilot_review_ui::init(cx);
-        apply_appearance(cx);
-        if benching {
-            cx.spawn(async move |cx| bench(cx).await).detach();
-        } else {
-            run_demo(cx);
-        }
-    });
+    Application::new()
+        .with_assets(diffpilot_ui_kit::Assets)
+        .run(move |cx: &mut App| {
+            diffpilot_ui_kit::init(cx);
+            diffpilot_review_ui::init(cx);
+            if benching {
+                cx.spawn(async move |cx| bench(cx).await).detach();
+            } else {
+                run_demo(cx);
+            }
+        });
 }

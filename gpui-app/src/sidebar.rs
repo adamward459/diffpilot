@@ -1,6 +1,5 @@
 use crate::bench::{Bench, Mark};
 use crate::format::{compact, file_count, grouped};
-use crate::glyph::Glyph;
 use crate::sidebar_rows::{
     Arrow, ArrowOutcome, Row, RowInput, RowKind, arrow, build_rows, index_of, scroll_target, step,
 };
@@ -9,6 +8,7 @@ use crate::ui::{BadgeTone, filter_field, glass_button, status_badge, viewed_chec
 use diffpilot_core::changes::{ChangeSummary, FileChange};
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::tree::{FileEntry, FileFilter, Folder, SidebarMode};
+use diffpilot_ui_kit::Glyph;
 use gpui::{
     AnyElement, App, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
     IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
@@ -656,7 +656,7 @@ mod tests {
 
     fn setup(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            diffpilot_ui_kit::init(cx);
             bind_keys(cx);
         });
     }

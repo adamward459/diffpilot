@@ -1,5 +1,5 @@
-use crate::glyph::Glyph;
 use crate::theme::{Palette, glass_shadow};
+use diffpilot_ui_kit::Glyph;
 use gpui::prelude::*;
 use gpui::{App, ClickEvent, Div, ElementId, Hsla, IntoElement, SharedString, Stateful, Styled, Window, div, px};
 use gpui_component::tooltip::Tooltip;

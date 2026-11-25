@@ -1,8 +1,8 @@
 use crate::bench::{self, Bench, Mark};
-use crate::glyph::Glyph;
 use crate::repo_view::{Claude, RepoView};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::viewed::ViewedStore;
+use diffpilot_ui_kit::Glyph;
 use gpui::prelude::*;
 use gpui::{
     App, Context, Entity, IntoElement, Menu, MenuItem, ParentElement, PathPromptOptions, Render, Styled, Window,

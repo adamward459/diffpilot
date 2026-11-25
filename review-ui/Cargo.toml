@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 async-channel = "2"
 diffpilot-core = { version = "0.1.0", path = "../core" }
+diffpilot-ui-kit = { version = "0.1.0", path = "../ui-kit" }
 gpui = { version = "0.2.2", features = ["runtime_shaders"] }
 gpui-component = "=0.5.1"
 
