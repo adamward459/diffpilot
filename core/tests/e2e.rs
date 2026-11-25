@@ -1,6 +1,7 @@
 mod common;
 
 use common::*;
+use diffpilot_core::fix::{self, Skip, Target};
 use diffpilot_core::mcp::McpBridge;
 use diffpilot_core::policy::EditPermission;
 use diffpilot_core::review::{Effort, ModelName, ReviewModel, ReviewRequest};
@@ -91,11 +92,15 @@ fn world(claude: impl FnOnce(&Path) -> PathBuf) -> World {
 
 impl World {
     fn comment(&self, line: u32, body: &str) -> ThreadId {
+        self.comment_in("a.ts", line, body)
+    }
+
+    fn comment_in(&self, path: &str, line: u32, body: &str) -> ThreadId {
         self.store
             .insert_thread(
                 self.session,
                 &NewThread {
-                    anchor: ThreadAnchor::line("a.ts", Side::New, line),
+                    anchor: ThreadAnchor::line(path, Side::New, line),
                     end_line: None,
                     anchor_text: None,
                     finding: None,
@@ -111,6 +116,20 @@ impl World {
             .unwrap()
             .value
             .id
+    }
+
+    fn target(&self, edit_permission: EditPermission) -> Target {
+        Target {
+            repo: self.repo.path().to_path_buf(),
+            session: key(self.repo.path()),
+            revisions: vec!["HEAD".into()],
+            model: ReviewModel::new(ModelName::Sonnet, Effort::Low),
+            edit_permission,
+        }
+    }
+
+    fn threads(&self) -> Vec<diffpilot_core::threads::ReviewThread> {
+        self.store.load_threads(self.session).unwrap().value
     }
 
     fn request(&self, kind: RunKind, threads: Vec<ThreadId>) -> RunRequest {
@@ -448,4 +467,173 @@ fn stopping_a_run_that_waits_for_permission_ends_it() {
     let (state, _) = wait_finished(&rx, id, WITHIN);
     assert_eq!(state, RunState::Stopped);
     assert!(!world.engine.answer_permission(permission_in(&seen).unwrap().id, true));
+}
+
+#[test]
+fn a_planned_fix_run_fills_in_the_files_that_claude_did_not_name() {
+    let world = world(|work| {
+        mcp_claude(
+            work,
+            "printf 'const count = 1;\\nexport { count };\\n' > a.ts",
+            &[
+                call(
+                    "resolve",
+                    json!({ "threadId": "1", "summary": "Fixed: renamed x to count." }),
+                ),
+                call(
+                    "resolve",
+                    json!({ "threadId": "2", "summary": "Fixed: nothing to change." }),
+                ),
+            ],
+            "",
+        )
+    });
+    let first = world.comment_in("a.ts", 1, "Rename x to count.");
+    let second = world.comment_in("b.ts", 1, "Export it as default.");
+    let closed = world.comment_in("a.ts", 2, "Old note.");
+    world.store.set_status(closed, ThreadStatus::Resolved).unwrap();
+    let plan = fix::fix_comments(&world.target(EditPermission::DontAsk), &world.threads(), &[]).unwrap();
+    assert_eq!(plan.skipped, [(closed, Skip::Resolved)]);
+    let rx = world.engine.subscribe();
+
+    let id = world.engine.submit(plan.request).unwrap();
+    let (state, events) = wait_finished(&rx, id, WITHIN);
+    assert_eq!(state, RunState::Done, "{:?}", world.engine.run(id).unwrap().error);
+
+    let run = world.engine.run(id).unwrap();
+    assert_eq!(run.threads, [first, second]);
+    assert_eq!(run.progress(), Some(Progress { done: 2, total: 2 }));
+    let one = world.thread(first).addressed.unwrap();
+    assert_eq!((one.run, one.files.as_slice()), (id, ["a.ts".to_string()].as_slice()));
+    assert!(
+        world.thread(second).addressed.unwrap().files.is_empty(),
+        "b.ts did not change"
+    );
+    assert!(world.thread(closed).addressed.is_none());
+    assert_eq!(
+        run.changed_files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>(),
+        ["a.ts"]
+    );
+
+    let last_change = events
+        .iter()
+        .rposition(|event| matches!(event, RunEvent::ThreadsChanged { .. }))
+        .unwrap();
+    let finished = events
+        .iter()
+        .position(|event| matches!(event, RunEvent::Finished { .. }))
+        .unwrap();
+    assert!(
+        last_change < finished,
+        "the thread files are known before the run is reported finished"
+    );
+
+    let args = std::fs::read_to_string(out(world.work.path()).join("args.txt")).unwrap();
+    assert!(args.contains("- Thread `1`: `a.ts:1`"));
+    assert!(args.contains("- Thread `2`: `b.ts:1`"));
+    assert!(!args.contains("Thread `3`"));
+}
+
+#[test]
+fn after_a_refused_edit_claude_cannot_resolve_the_thread() {
+    let world = world(|work| {
+        mcp_claude(
+            work,
+            "",
+            &[
+                call(
+                    "approve",
+                    json!({ "tool_name": "Edit", "input": { "file_path": "a.ts" } }),
+                ),
+                call("resolve", json!({ "threadId": "1", "summary": "Fixed: renamed x." })),
+                call(
+                    "reply",
+                    json!({ "threadId": "1", "body": "You refused the edit. I would rename x to count." }),
+                ),
+            ],
+            "",
+        )
+    });
+    let thread = world.comment(1, "Rename x to count.");
+    let plan = fix::fix_comments(&world.target(EditPermission::AskEach), &world.threads(), &[]).unwrap();
+    let rx = world.engine.subscribe();
+    let id = world.engine.submit(plan.request).unwrap();
+    answer_next_permission(&world, &rx, false);
+    let (state, _) = wait_finished(&rx, id, WITHIN);
+    assert_eq!(state, RunState::Done);
+
+    let answers = world.mcp_out();
+    assert_eq!(answers[3]["result"]["isError"], true);
+    assert!(
+        answers[3]["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("edit_rejected")
+    );
+    assert!(world.thread(thread).addressed.is_none());
+    let comments = world.thread(thread).comments;
+    assert_eq!(comments.len(), 2);
+    assert!(comments[1].body.contains("refused"));
+    assert_eq!(
+        world.engine.run(id).unwrap().progress(),
+        Some(Progress { done: 1, total: 1 }),
+        "a reply counts as an answer"
+    );
+    assert!(world.engine.run(id).unwrap().changed_files.is_empty());
+}
+
+#[test]
+fn a_reply_run_answers_one_thread_without_marking_it_fixed() {
+    let world = world(|work| {
+        mcp_claude(
+            work,
+            "",
+            &[call(
+                "reply",
+                json!({ "threadId": "1", "body": "It keeps the old name for callers." }),
+            )],
+            "",
+        )
+    });
+    let thread = world.comment(1, "Why is x not renamed?");
+    let target = world.target(EditPermission::DontAsk);
+    let request = fix::reply_to(&target, &world.threads()[0]).unwrap();
+    let rx = world.engine.subscribe();
+    let id = world.engine.submit(request).unwrap();
+    let (state, _) = wait_finished(&rx, id, WITHIN);
+    assert_eq!(state, RunState::Done);
+    assert_eq!(world.thread(thread).comments[1].author, "Claude");
+    assert!(world.thread(thread).addressed.is_none(), "an answer is not a fix");
+    assert_eq!(world.engine.run(id).unwrap().kind, RunKind::Reply);
+}
+
+#[test]
+fn a_change_run_edits_files_with_no_thread_and_can_be_undone() {
+    let world = world(|work| mcp_claude(work, "printf 'export const y = 1;\\n' > c.ts", &[], ""));
+    let request = fix::make_changes(&world.target(EditPermission::DontAsk), "Add c.ts that exports y.").unwrap();
+    let rx = world.engine.subscribe();
+    let id = world.engine.submit(request).unwrap();
+    let (state, _) = wait_finished(&rx, id, WITHIN);
+    assert_eq!(state, RunState::Done);
+
+    let run = world.engine.run(id).unwrap();
+    assert!(run.threads.is_empty());
+    assert_eq!(
+        run.changed_files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>(),
+        ["c.ts"]
+    );
+    let args = std::fs::read_to_string(out(world.work.path()).join("args.txt")).unwrap();
+    assert!(args.contains("> Add c.ts that exports y."));
+    assert!(args.lines().any(|arg| arg == "mcp__diffpilot__get_diff"));
+    assert!(!args.lines().any(|arg| arg == "mcp__diffpilot__resolve"));
+
+    let report = world.engine.undo_run(id, false).unwrap();
+    assert!(report.conflicts.is_empty());
+    assert!(!world.repo.path().join("c.ts").exists());
 }

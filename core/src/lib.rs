@@ -5,6 +5,7 @@ pub mod claude;
 pub mod comparison;
 pub mod diff;
 pub mod file_kind;
+pub mod fix;
 pub mod git;
 pub mod guard;
 pub mod mcp;

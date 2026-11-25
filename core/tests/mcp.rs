@@ -536,3 +536,43 @@ fn dropping_the_bridge_removes_its_socket() {
     drop(bridge);
     assert!(!socket.exists());
 }
+
+#[test]
+fn resolve_fails_for_the_rest_of_a_run_after_a_refused_edit() {
+    let fx = fixture();
+    let thread = fx.user_thread(1, "Rename it.");
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let token = ask_binding(&fx, EditPermission::AskEach, requests.clone());
+    let resolve = || {
+        fx.call(
+            &token,
+            "resolve",
+            json!({ "threadId": thread.0.to_string(), "summary": "Fixed." }),
+        )
+    };
+    std::thread::scope(|scope| {
+        let first = scope.spawn(|| approve(&fx, &token, "Edit", json!({ "file_path": "/x/a.ts" })));
+        answer_when_asked(&fx, &requests, 1, true);
+        assert_eq!(first.join().unwrap()["behavior"], "allow");
+        let second = scope.spawn(|| approve(&fx, &token, "Bash", json!({ "command": "npm test" })));
+        answer_when_asked(&fx, &requests, 2, false);
+        assert_eq!(second.join().unwrap()["behavior"], "deny");
+        assert!(resolve().is_ok(), "a refused command is not a refused edit");
+    });
+    fx.store.clear_addressed(thread).unwrap();
+    std::thread::scope(|scope| {
+        let edit = scope.spawn(|| approve(&fx, &token, "Write", json!({ "file_path": "/x/b.ts", "content": "" })));
+        answer_when_asked(&fx, &requests, 3, false);
+        assert_eq!(edit.join().unwrap()["behavior"], "deny");
+    });
+    assert!(resolve().unwrap_err().starts_with("edit_rejected"));
+    assert!(fx.store.load_thread(thread).unwrap().unwrap().1.addressed.is_none());
+    assert!(
+        fx.call(
+            &token,
+            "reply",
+            json!({ "threadId": thread.0.to_string(), "body": "I would rename it." })
+        )
+        .is_ok()
+    );
+}

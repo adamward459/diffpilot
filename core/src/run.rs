@@ -132,6 +132,8 @@ pub struct Run {
     pub finished_at_ms: Option<i64>,
     pub steps: Vec<RunStep>,
     pub units: Option<Progress>,
+    #[serde(default)]
+    pub threads: Vec<crate::threads::ThreadId>,
     pub activity: Option<String>,
     pub log: Vec<LogEntry>,
     pub outcome: Option<RunOutcome>,
@@ -181,6 +183,7 @@ impl Run {
             finished_at_ms: None,
             steps: Vec::new(),
             units: None,
+            threads: Vec::new(),
             activity: None,
             log: Vec::new(),
             outcome: None,

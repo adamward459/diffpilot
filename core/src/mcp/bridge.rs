@@ -59,6 +59,7 @@ pub struct Binding {
 struct Bound {
     binding: Binding,
     edits_approved: AtomicBool,
+    edit_rejected: AtomicBool,
 }
 
 pub struct McpBridge {
@@ -132,6 +133,7 @@ impl McpBridge {
             Arc::new(Bound {
                 binding,
                 edits_approved: AtomicBool::new(false),
+                edit_rejected: AtomicBool::new(false),
             }),
         );
         token
@@ -168,6 +170,12 @@ impl McpBridge {
         if tool == APPROVE_TOOL && tools::allowed(&bound.binding).contains(&APPROVE_TOOL) {
             return Ok(self.approve(&bound, &args));
         }
+        if tool == "resolve" && bound.edit_rejected.load(Ordering::SeqCst) {
+            return Err(ToolError(
+                "edit_rejected: The reviewer rejected an edit in this run. Reply on the thread instead of resolving it."
+                    .into(),
+            ));
+        }
         tools::call(&self.store, &bound.binding, tool, args)
     }
 
@@ -182,6 +190,9 @@ impl McpBridge {
         let allow = remembered || self.ask(binding, tool, &input, is_edit);
         if allow && is_edit && binding.permission == EditPermission::AskOnce {
             bound.edits_approved.store(true, Ordering::SeqCst);
+        }
+        if !allow && is_edit {
+            bound.edit_rejected.store(true, Ordering::SeqCst);
         }
         let text = if allow {
             json!({ "behavior": "allow", "updatedInput": input })

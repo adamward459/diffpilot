@@ -7,6 +7,7 @@
 use crate::cancel::CancelToken;
 use crate::claude::{self, ReviewError};
 use crate::diff::FileDiff;
+use crate::fix;
 use crate::mcp::{Binding, McpBridge, Notice, PermissionRequest};
 use crate::paths::{sibling_binary, standardized};
 use crate::policy::{EditPermission, PolicyError, ToolPolicy, hook_settings, mcp_config};
@@ -280,6 +281,7 @@ impl RunEngine {
             now_ms(),
         );
         if !request.threads.is_empty() {
+            run.threads = request.threads.clone();
             run.units = Some(Progress {
                 done: 0,
                 total: request.threads.len() as u32,
@@ -606,6 +608,7 @@ impl Inner {
         let ending = self.ending_of(id, result);
         if request.kind.edits() {
             self.record_changes(id, &request.repo);
+            self.record_thread_files(id, request);
         }
         let _ = std::fs::remove_dir_all(&dir);
         ending
@@ -676,6 +679,20 @@ impl Inner {
                 Err(error) => live.run.error = live.run.error.take().or(Some(error.to_string())),
             }
         });
+    }
+
+    fn record_thread_files(&self, id: RunId, request: &RunRequest) {
+        if request.threads.is_empty() {
+            return;
+        }
+        let Some((changed, session)) = self.with_run(id, |live| (live.run.changed_files.clone(), live.run.session))
+        else {
+            return;
+        };
+        let updated = fix::record_files(&self.config.store, id, &request.threads, &changed);
+        if updated.is_ok_and(|threads| !threads.is_empty()) {
+            self.emit(RunEvent::ThreadsChanged { run: id, session });
+        }
     }
 
     fn apply_line(&self, id: RunId, line: &str) {
