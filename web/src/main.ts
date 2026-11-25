@@ -3,7 +3,7 @@ import type { VirtualItem } from '@tanstack/virtual-core';
 import type { FileDiff, HighlightRequest, HighlightResult, HostApi, ReviewThread, Theme, Token } from './bridge.ts';
 import { send } from './bridge.ts';
 import { I, fileIcon } from './icons.ts';
-import { SIZE, buildFileRows, codeHtml, esc, wordRanges } from './rows.ts';
+import { SIZE, buildFileRows, codeHtml, esc, isPlain, lineHeight, wordRanges } from './rows.ts';
 import type { PageFile, Row } from './rows.ts';
 import { applyTheme } from './theme.ts';
 import { mountThread, unmountThread } from './threads.tsx';
@@ -23,6 +23,15 @@ interface Mounted {
 }
 
 const MEASURED = new Set<Row['k']>(['th', 'fc']);
+const isMeasured = (r: Row): boolean => MEASURED.has(r.k) || (r.k === 'ln' && !isPlain(r.text));
+
+const GUTTER_PX = 40 + 40 + 3 + 12;
+let cols = 80;
+const estimate = (i: number): number => {
+  const r = S.rows[i];
+  if (!r) return SIZE.ln;
+  return r.k === 'ln' ? lineHeight(r, cols) : SIZE[r.k];
+};
 
 const S = {
   files: [] as PageFile[],
@@ -82,7 +91,7 @@ const bump = (file: PageFile): void => {
 function rebuild(): void {
   S.rows = S.fileRows.flat();
   if (!S.done) S.rows.push({ k: 'load', f: -1, key: 'load' });
-  v.setOptions({ ...v.options, count: S.rows.length, estimateSize: (i) => SIZE[S.rows[i]?.k ?? 'ln'] });
+  v.setOptions({ ...v.options, count: S.rows.length, estimateSize: estimate });
   v._willUpdate();
   render();
 }
@@ -146,7 +155,7 @@ function rowHtml(r: Row): string {
       const toks = tk ? (r.t === 'd' ? tk.old[r.oi] : tk.new[r.ni]) : null;
       const ranges = r.pair ? wordRanges(r) : null;
       const s = LINE_STYLE[r.t];
-      return `<div class="group row-hover relative grid h-5 grid-cols-[40px_40px_3px_1fr] font-mono text-xs/5 ${s.row} ${s.word}"><span class="${NO} ${s.no}">${r.o ?? ''}</span><span class="${NO} ${s.no}">${r.n ?? ''}</span><span class="${s.rib}"></span><span class="overflow-hidden pl-3 whitespace-pre text-code">${codeHtml(r.text, toks, ranges, cls)}</span><button class="absolute top-px left-[62px] z-[2] hidden size-[18px] items-center justify-center rounded bg-accent text-on-accent group-hover:flex" aria-label="Add comment" data-act="linecomment">${I('plus', 12)}</button></div>`;
+      return `<div class="group row-hover relative grid min-h-5 grid-cols-[40px_40px_3px_minmax(0,1fr)] font-mono text-xs/5 ${s.row} ${s.word}"><span class="${NO} ${s.no}">${r.o ?? ''}</span><span class="${NO} ${s.no}">${r.n ?? ''}</span><span class="${s.rib}"></span><span class="pl-3 whitespace-break-spaces text-code [line-break:anywhere]">${codeHtml(r.text, toks, ranges, cls)}</span><button class="absolute top-px left-[62px] z-[2] hidden size-[18px] items-center justify-center rounded bg-accent text-on-accent group-hover:flex" aria-label="Add comment" data-act="linecomment">${I('plus', 12)}</button></div>`;
     }
     default:
       return '';
@@ -156,7 +165,7 @@ function rowHtml(r: Row): string {
 const v = new Virtualizer<HTMLDivElement, HTMLDivElement>({
   count: 0,
   getScrollElement: () => root,
-  estimateSize: () => 20,
+  estimateSize: estimate,
   getItemKey: (i) => S.rows[i]?.key ?? i,
   overscan: 12,
   scrollToFn: elementScroll,
@@ -193,8 +202,11 @@ function makeNode(r: Row, index: number): Mounted {
     S.threadEls.set(r.thread.id, inner);
     mountThread(inner, r.thread, api);
   } else {
-    el.className = 'absolute inset-x-0 top-0 [contain:strict]';
-    el.style.height = `${SIZE[r.k]}px`;
+    if (isMeasured(r)) el.className = 'absolute inset-x-0 top-0 [contain:layout_style]';
+    else {
+      el.className = 'absolute inset-x-0 top-0 [contain:strict]';
+      el.style.height = `${r.k === 'ln' ? lineHeight(r, cols) : SIZE[r.k]}px`;
+    }
     el.innerHTML = rowHtml(r);
   }
   return m;
@@ -215,7 +227,7 @@ function render(): void {
       m = makeNode(r, it.index);
       spacer.appendChild(m.el);
       S.nodes.set(r.key, m);
-      if (MEASURED.has(r.k)) v.measureElement(m.el);
+      if (isMeasured(r)) v.measureElement(m.el);
     }
     if (m.y !== it.start) {
       m.el.style.transform = `translateY(${it.start}px)`;
@@ -477,6 +489,26 @@ function setInset(px: number): void {
   v.setOptions({ ...v.options, paddingStart: px });
   rebuild();
 }
+
+const probe = document.body.appendChild(document.createElement('span'));
+probe.className = 'invisible fixed font-mono text-xs whitespace-pre';
+probe.textContent = 'x'.repeat(100);
+let charW = 0;
+function measureCols(): void {
+  charW ||= probe.getBoundingClientRect().width / 100;
+  if (!charW) return;
+  const next = Math.max(1, Math.floor((root.clientWidth - GUTTER_PX) / charW - 0.01));
+  if (next === cols) return;
+  cols = next;
+  v.setOptions({ ...v.options, estimateSize: estimate });
+  v.measure();
+  for (const m of S.nodes.values()) {
+    if (m.row.k === 'ln' && !isMeasured(m.row)) m.el.style.height = `${lineHeight(m.row, cols)}px`;
+  }
+  render();
+}
+new ResizeObserver(measureCols).observe(root);
+measureCols();
 
 const BENCH_SECONDS = 3;
 const BENCH_PX_PER_SECOND = 6000;

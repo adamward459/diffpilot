@@ -30,10 +30,28 @@ export interface LineRow extends RowBase {
   ni: number;
   pair?: LineRow;
   ranges?: Range[] | null;
+  wrap?: [cols: number, lines: number];
 }
 export type ClassFor = (light: string, dark: string) => string;
 
 export const SIZE: Record<Row['k'], number> = { fh: 38, hk: 28, ln: 20, gap: 12, big: 96, load: 60, th: 150, fc: 150 };
+export const LINE_H = 20;
+const TAB_CELLS = 4;
+const NOT_PLAIN = /[^\x20-\x7e]/;
+export const isPlain = (text: string): boolean => !NOT_PLAIN.test(text);
+
+export function wrapLines(text: string, cols: number): number {
+  if (cols < 1) return 1;
+  let cells = 0;
+  for (let i = 0; i < text.length; i++) cells += text.charCodeAt(i) === 9 ? TAB_CELLS : 1;
+  return Math.max(1, Math.ceil(cells / cols));
+}
+
+export function lineHeight(r: LineRow, cols: number): number {
+  if (r.wrap?.[0] !== cols) r.wrap = [cols, wrapLines(r.text, cols)];
+  return r.wrap[1] * LINE_H;
+}
+
 export const BIG_LINES = 1500;
 export const GENERATED = /(^|\/)(yarn\.lock|package-lock\.json|pnpm-lock\.yaml|Podfile\.lock|.*\.pbxproj|.*\.snap)$/;
 const WORD_DIFF_MAX = 500;
