@@ -38,8 +38,8 @@ fn file_of<'a>(files: &'a [FileDiff], path: &str) -> Option<&'a FileDiff> {
         .or_else(|| files.iter().find(|file| file.old_path.as_deref() == Some(path)))
 }
 
-fn last_line(thread: &ReviewThread, line: u32) -> u32 {
-    thread.end_line.filter(|end| *end >= line).unwrap_or(line)
+fn last_line(end_line: Option<u32>, line: u32) -> u32 {
+    end_line.filter(|end| *end >= line).unwrap_or(line)
 }
 
 /// The text of lines `start..=end`, when the diff shows all of them.
@@ -61,11 +61,21 @@ pub fn text_of(thread: &ReviewThread, files: &[FileDiff]) -> Option<String> {
     let ThreadAnchor::Line { path, side, line } = &thread.anchor else {
         return None;
     };
-    lines_text(file_of(files, path)?, *side, *line, last_line(thread, *line))
+    lines_text(file_of(files, path)?, *side, *line, last_line(thread.end_line, *line))
 }
 
 pub fn place(thread: &ReviewThread, files: &[FileDiff]) -> Placement {
-    let (path, side, line) = match &thread.anchor {
+    place_at(&thread.anchor, thread.end_line, thread.anchor_text.as_deref(), files)
+}
+
+/// Where an anchor with `end_line` and the text it was made on sits in `files` now. Guides use this for their notes.
+pub fn place_at(
+    anchor: &ThreadAnchor,
+    end_line: Option<u32>,
+    anchor_text: Option<&str>,
+    files: &[FileDiff],
+) -> Placement {
+    let (path, side, line) = match anchor {
         ThreadAnchor::Change => return Placement::Current,
         ThreadAnchor::File { path } => {
             return if file_of(files, path).is_some() {
@@ -81,8 +91,8 @@ pub fn place(thread: &ReviewThread, files: &[FileDiff]) -> Placement {
     };
     let lines = side_lines(file, side);
     let shown = |number: u32| lines.binary_search_by_key(&number, |(shown, _)| *shown).is_ok();
-    let Some(text) = thread.anchor_text.as_deref().filter(|text| !text.is_empty()) else {
-        let any = (line..=last_line(thread, line)).any(shown);
+    let Some(text) = anchor_text.filter(|text| !text.is_empty()) else {
+        let any = (line..=last_line(end_line, line)).any(shown);
         return if any { Placement::Current } else { Placement::Outdated };
     };
     let block: Vec<&str> = text.split('\n').collect();
@@ -102,7 +112,7 @@ pub fn place(thread: &ReviewThread, files: &[FileDiff]) -> Placement {
     match starts.iter().min_by_key(|start| start.abs_diff(line)) {
         Some(&start) => Placement::Moved {
             line: start,
-            end_line: thread.end_line.map(|_| start + block.len() as u32 - 1),
+            end_line: end_line.map(|_| start + block.len() as u32 - 1),
         },
         None => Placement::Outdated,
     }
