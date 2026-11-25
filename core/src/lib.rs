@@ -10,6 +10,7 @@ pub mod refs;
 pub mod review;
 pub mod settings;
 pub mod stage;
+pub mod sync;
 pub mod threads;
 pub mod tree;
 pub mod viewed;
