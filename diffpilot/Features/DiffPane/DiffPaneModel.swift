@@ -14,12 +14,19 @@ final class DiffPaneModel {
     private(set) var visiblePath: String?
     private(set) var scrollStats: ScrollStats?
     private(set) var collapsed: Set<String> = []
+    private(set) var review = ReviewRun.idle
+    var reviewFocuses: Set<String>
+    var reviewInstructions = ""
     var mode = PaneMode.diff
 
     let viewed: ViewedFiles
     private let repo: URL?
     private let comparison: Comparison
     private let replier: any ClaudeReplier
+    private let reviewer: any ClaudeReviewer
+    private var reviewTask: Task<Void, Never>?
+    private var reviewThreadIDs: [Int] = []
+    private let focusDefaults: UserDefaults
     private let benchScrollDelay: Duration?
     private var files: [FileDiff]?
     private var batches: DiffBatches?
@@ -34,6 +41,8 @@ final class DiffPaneModel {
         repo: URL?, comparison: Comparison = .checkedOut(base: "main", includesUncommitted: true),
         viewed: ViewedFiles = ViewedFiles(key: ViewedKey(repo: "", branch: ""), store: ViewedStore()),
         replier: any ClaudeReplier = ScriptedReplier(),
+        reviewer: any ClaudeReviewer = ScriptedReviewer(),
+        focusDefaults: UserDefaults = .standard,
         benchScrollDelay: Duration? = ProcessInfo.processInfo.environment["DIFFPILOT_BENCH"].flatMap(Double.init).map {
             .seconds($0)
         },
@@ -44,6 +53,9 @@ final class DiffPaneModel {
         self.viewed = viewed
         collapsed = viewed.paths
         self.replier = replier
+        self.reviewer = reviewer
+        self.focusDefaults = focusDefaults
+        reviewFocuses = repo.map { ReviewFocus.saved(repo: $0, defaults: focusDefaults) } ?? []
         self.benchScrollDelay = benchScrollDelay
         self.send = send
         firstPaintInterval = Self.signposter.beginInterval(Self.firstPaintSignpost)
@@ -55,11 +67,13 @@ final class DiffPaneModel {
     }
 
     var accessibilitySummary: String {
-        let reply = threads.threads.values.flatMap(\.comments).last(where: { $0.author == ThreadStore.claudeName })
+        let reply = threads.threads.values.filter { $0.finding == nil }.flatMap(\.comments).last(where: {
+            $0.author == ThreadStore.claudeName
+        })
         let scroll =
             scrollStats.map { String(format: "%d/%.2f/%.2f/%.2f", $0.frames, $0.medianMs, $0.p95Ms, $0.maxMs) } ?? ""
         return
-            "top=\(visiblePath ?? ""); threads=\(threads.threads.count); viewed=\(viewed.paths.count); scroll=\(scroll); reply=\(reply?.body ?? "")"
+            "top=\(visiblePath ?? ""); threads=\(threads.threads.count); viewed=\(viewed.paths.count); scroll=\(scroll); reply=\(reply?.body ?? ""); review=\(review.label)"
     }
 
     func load() async {
@@ -129,6 +143,63 @@ final class DiffPaneModel {
         viewed.toggle(path, fingerprint: fingerprint ?? ViewedFiles.unknown)
         if viewed.contains(path) { collapsed.insert(path) } else { collapsed.remove(path) }
         sendFileState(path)
+    }
+
+    var reviewTitle: String {
+        let count = files.map { " · \($0.count) \($0.count == 1 ? "file" : "files")" } ?? ""
+        switch comparison {
+        case .branch(let branch, let base): return "\(branch) compared to \(base)" + count
+        case .checkedOut(let base, _): return "Current branch compared to \(base)" + count
+        case .workingTree: return "Working tree compared to HEAD" + count
+        case .staged: return "Staged changes" + count
+        }
+    }
+
+    func startReview() {
+        if case .running = review { return }
+        guard let repo else {
+            review = .failed("Open a Git repository first.")
+            return
+        }
+        ReviewFocus.save(reviewFocuses, repo: repo, defaults: focusDefaults)
+        let (focus, instructions) = ReviewFocus.request(selected: reviewFocuses, text: reviewInstructions)
+        let request = ReviewRequest(
+            repo: repo, revisions: comparison.revisions, focus: focus,
+            instructions: instructions)
+        let since = Date()
+        review = .running(since: since)
+        let reviewer = reviewer
+        reviewTask = Task {
+            do {
+                let result = try await reviewer.review(request)
+                guard !Task.isCancelled else { return }
+                showReview(result)
+            } catch {
+                guard !Task.isCancelled else { return }
+                review = .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            }
+        }
+    }
+
+    func stopReview() {
+        guard case .running = review else { return }
+        reviewTask?.cancel()
+        reviewTask = nil
+        review = .idle
+    }
+
+    private func showReview(_ result: ReviewResult) {
+        for id in reviewThreadIDs {
+            threads.remove(id)
+            send(.removeThread(id))
+        }
+        reviewThreadIDs = []
+        for planned in ReviewPlan.threads(for: result, files: files ?? []) {
+            let thread = threads.addFinding(planned.anchor, finding: planned.finding, body: planned.body)
+            reviewThreadIDs.append(thread.id)
+            send(.thread(thread))
+        }
+        review = .done(counts: result.counts)
     }
 
     func commentOnVisibleFile() {

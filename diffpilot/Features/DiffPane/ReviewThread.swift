@@ -6,10 +6,12 @@ nonisolated enum ThreadAnchor: Hashable, Sendable, Codable {
 
     case file(path: String)
     case line(path: String, side: Side, line: Int)
+    case change
 
     var path: String {
         switch self {
         case .file(let path), .line(let path, _, _): path
+        case .change: ""
         }
     }
 
@@ -17,12 +19,13 @@ nonisolated enum ThreadAnchor: Hashable, Sendable, Codable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Key.self)
-        let path = try c.decode(String.self, forKey: .path)
         switch try c.decode(String.self, forKey: .kind) {
-        case "file": self = .file(path: path)
+        case "file": self = .file(path: try c.decode(String.self, forKey: .path))
         case "line":
             self = .line(
-                path: path, side: try c.decode(Side.self, forKey: .side), line: try c.decode(Int.self, forKey: .line))
+                path: try c.decode(String.self, forKey: .path), side: try c.decode(Side.self, forKey: .side),
+                line: try c.decode(Int.self, forKey: .line))
+        case "change": self = .change
         case let other: throw DecodingError.dataCorruptedError(forKey: .kind, in: c, debugDescription: other)
         }
     }
@@ -38,8 +41,16 @@ nonisolated enum ThreadAnchor: Hashable, Sendable, Codable {
             try c.encode(path, forKey: .path)
             try c.encode(side, forKey: .side)
             try c.encode(line, forKey: .line)
+        case .change:
+            try c.encode("change", forKey: .kind)
         }
     }
+}
+
+nonisolated struct FindingMeta: Equatable, Sendable, Codable {
+    var severity: Severity
+    var title: String
+    var location: String?
 }
 
 nonisolated struct ThreadComment: Equatable, Sendable, Codable {
@@ -53,6 +64,7 @@ nonisolated struct ReviewThread: Equatable, Sendable, Codable, Identifiable {
     var id: Int
     var anchor: ThreadAnchor
     var comments: [ThreadComment]
+    var finding: FindingMeta?
 }
 
 @Observable
@@ -66,6 +78,16 @@ final class ThreadStore {
     func create(_ anchor: ThreadAnchor) -> ReviewThread {
         if let existing = threads.values.first(where: { $0.anchor == anchor }) { return existing }
         let thread = ReviewThread(id: nextThreadID, anchor: anchor, comments: [])
+        nextThreadID += 1
+        threads[thread.id] = thread
+        return thread
+    }
+
+    func addFinding(_ anchor: ThreadAnchor, finding: FindingMeta?, body: String) -> ReviewThread {
+        let thread = ReviewThread(
+            id: nextThreadID, anchor: anchor,
+            comments: [ThreadComment(id: 1, author: Self.claudeName, body: body, isStreaming: false)],
+            finding: finding)
         nextThreadID += 1
         threads[thread.id] = thread
         return thread

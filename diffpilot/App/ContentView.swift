@@ -91,10 +91,16 @@ private struct RepoSession {
     let sidebar: SidebarModel
     let diff: DiffPaneModel
 
+    private static func reviewer() -> any ClaudeReviewer {
+        ProcessInfo.processInfo.environment["DIFFPILOT_REVIEWER"] == "scripted"
+            ? ScriptedReviewer() : ClaudeCLIReviewer()
+    }
+
     init(repo: URL, comparison: Comparison, refs: Refs?) {
         self.comparison = comparison
         let viewed = ViewedFiles(key: ViewedKey(repo: repo, comparison: comparison, refs: refs))
         sidebar = SidebarModel(repo: repo, comparison: comparison, viewed: viewed)
-        diff = DiffPaneModel(repo: repo, comparison: comparison, viewed: viewed)
+        diff = DiffPaneModel(
+            repo: repo, comparison: comparison, viewed: viewed, reviewer: Self.reviewer())
     }
 }

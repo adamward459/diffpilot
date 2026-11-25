@@ -21,5 +21,8 @@ struct PaneToolbar: ToolbarContent {
             .disabled(model.visiblePath == nil)
             .accessibilityIdentifier("comment-on-file")
         }
+        ToolbarItem(placement: .primaryAction) {
+            ReviewControl(model: model)
+        }
     }
 }
