@@ -18,7 +18,6 @@ use crate::threads::{Side, ThreadAnchor};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// How much of the reviewer's attention a chapter needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Attention {
@@ -30,7 +29,6 @@ pub enum Attention {
     Low,
 }
 
-/// Lines of a file on one side of the diff.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Span {
     pub side: Side,
@@ -50,7 +48,6 @@ impl Span {
     }
 }
 
-/// A note shown under a line of the diff. Without a span it belongs to the whole file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Note {
     pub path: String,
@@ -60,14 +57,12 @@ pub struct Note {
     pub critical: bool,
 }
 
-/// A file a chapter covers. No spans means the whole file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChapterFile {
     pub path: String,
     pub spans: Vec<Span>,
 }
 
-/// Code the diff does not touch that depends on what the chapter changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Impact {
     pub site: String,
@@ -76,7 +71,6 @@ pub struct Impact {
     pub text: String,
 }
 
-/// One step of "Follow the flow": the node (or participant) that is active, and what happens there.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowStep {
     pub node: String,
@@ -92,7 +86,6 @@ pub struct Diagram {
 }
 
 impl Diagram {
-    /// The typed graph for the UI. `Graph::Source` for a kind this crate does not read.
     pub fn graph(&self) -> Result<Graph, mermaid::MermaidError> {
         mermaid::parse(&self.source)
     }
@@ -114,7 +107,6 @@ pub struct Chapter {
     pub phase: Option<String>,
     pub attention: Attention,
     pub points: Vec<String>,
-    /// What to check while reading these files.
     pub focus: Vec<String>,
     /// In reading order.
     pub files: Vec<ChapterFile>,
@@ -135,7 +127,6 @@ pub struct Guide {
     pub diagrams: Vec<Diagram>,
     /// In reading order.
     pub chapters: Vec<Chapter>,
-    /// Of the whole diff the guide describes. See `stale::fingerprint`.
     pub fingerprint: String,
     /// Per file, so a chapter can tell which of its files changed since.
     pub file_fingerprints: BTreeMap<String, String>,

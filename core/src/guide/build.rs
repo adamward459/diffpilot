@@ -205,7 +205,6 @@ fn span(file: &FileDiff, side: Side, line: u32, end_line: Option<u32>) -> Result
     })
 }
 
-/// A new guide that describes `files`, with nothing written yet.
 pub fn begin(files: &[FileDiff], head: Option<String>) -> Guide {
     Guide {
         fingerprint: stale::fingerprint(files),
@@ -368,7 +367,6 @@ fn impact_of(args: &[ImpactArg], title: &str, files: &[FileDiff], problems: &mut
         .collect()
 }
 
-/// Pins a note to a line (or a range, or the whole file) of one of the chapter's files.
 pub fn add_note(guide: &mut Guide, files: &[FileDiff], args: &NoteArgs) -> Result<(), String> {
     let count = guide.chapters.len();
     let chapter = args
@@ -483,7 +481,6 @@ pub fn add_diagram(guide: &mut Guide, args: &DiagramArgs) -> Result<DiagramKind,
     Ok(kind)
 }
 
-/// What `finish` did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finished {
     pub chapters: usize,

@@ -3,7 +3,6 @@ use crate::guide::Guide;
 use crate::review::{Effort, ModelName, ReviewModel};
 use rusqlite::{OptionalExtension, Row};
 
-/// A guide as saved: the content, and the run that wrote it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredGuide {
     pub id: GuideId,
@@ -16,7 +15,6 @@ pub struct StoredGuide {
     pub guide: Guide,
 }
 
-/// One row of the Past Guides menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuideSummary {
     pub id: GuideId,
@@ -105,7 +103,6 @@ impl Store {
             .map(GuideId))
     }
 
-    /// The finished guide this run wrote, if it got that far.
     pub fn guide_of_run(&self, run: RunId) -> Result<Option<GuideId>> {
         Ok(self
             .lock()
@@ -124,7 +121,6 @@ impl Store {
         Ok(())
     }
 
-    /// The newest finished guide of the review.
     pub fn current_guide(&self, session: SessionId) -> Result<Option<StoredGuide>> {
         let conn = self.lock();
         Ok(conn

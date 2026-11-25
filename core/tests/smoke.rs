@@ -173,6 +173,55 @@ fn a_real_fix_run_edits_a_throwaway_repo_and_cannot_push() {
     );
 }
 
+/// A guide run on a small change that spans several files. Start it by hand like the tests above.
+#[test]
+#[ignore = "runs the real claude CLI and costs tokens"]
+fn a_real_guide_run_writes_a_guide_for_a_multi_file_change_and_edits_nothing() {
+    let smoke = setup();
+    std::fs::write(
+        smoke.repo.join("greet.ts"),
+        "export function greet(name: string, loud = false) {\n  const text = `Hello, ${name}!`;\n  return loud ? text.toUpperCase() : text;\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        smoke.repo.join("farewell.ts"),
+        "import { greet } from \"./greet\";\n\nexport function farewell(name: string) {\n  return greet(name).replace(\"Hello\", \"Goodbye\");\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        smoke.repo.join("greet.test.ts"),
+        "import { greet } from \"./greet\";\n\ntest(\"loud greeting\", () => {\n  expect(greet(\"ann\", true)).toBe(\"HELLO, ANN!\");\n});\n",
+    )
+    .unwrap();
+    std::fs::write(smoke.repo.join("README.md"), "# greeter\n\nGreets and says goodbye.\n").unwrap();
+    git(&smoke.repo, &["add", "-A"]);
+    let status_before = git(&smoke.repo, &["status", "--short"]);
+
+    let target = smoke.target(ReviewModel::new(ModelName::Sonnet, Effort::Medium));
+    let run = smoke.run(diffpilot_core::guide::prompt::request(&target, ""));
+    assert_eq!(run.state, RunState::Done, "{:?}", run.error);
+    let stored = smoke
+        .store
+        .current_guide(smoke.store.session(&smoke.key).unwrap())
+        .unwrap()
+        .unwrap();
+    println!("{:#?}", stored.guide);
+    let files = diffpilot_core::diff::load_revisions(&smoke.repo, &["main".to_string()]).unwrap();
+    let status = diffpilot_core::guide::check(&stored.guide, &files);
+    println!("staleness: {status:?}");
+
+    assert!(!stored.guide.is_empty());
+    assert!(!status.is_stale, "the diff did not move during the run");
+    assert!(status.uncovered_files.is_empty());
+    assert_eq!(
+        git(&smoke.repo, &["status", "--short"]),
+        status_before,
+        "a guide run edits nothing"
+    );
+    assert!(run.snapshot.is_none() && run.changed_files.is_empty());
+    smoke.assert_nothing_left_the_repo();
+}
+
 /// The fix run above followed the prompt and never tried to push. This one asks for the pushes directly, so the
 /// deny list and the PreToolUse hook have to stop them.
 #[test]

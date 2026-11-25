@@ -33,9 +33,7 @@ pub fn fingerprint(files: &[FileDiff]) -> String {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ChapterStaleness {
-    /// Files of the chapter that are no longer in the diff.
     pub gone_files: Vec<String>,
-    /// Files of the chapter whose diff changed since the guide was written.
     pub changed_files: Vec<String>,
     /// One per note of the chapter, in order.
     pub notes: Vec<Placement>,
@@ -44,7 +42,6 @@ pub struct ChapterStaleness {
 }
 
 impl ChapterStaleness {
-    /// Nothing the chapter points at moved or went away.
     pub fn is_current(&self) -> bool {
         self.gone_files.is_empty()
             && self.changed_files.is_empty()
@@ -67,11 +64,8 @@ impl ChapterStaleness {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Staleness {
-    /// The diff is not the one the guide was written for.
     pub is_stale: bool,
-    /// Files of the diff that no chapter covers.
     pub uncovered_files: Vec<String>,
-    /// One per chapter of the guide, in order.
     pub chapters: Vec<ChapterStaleness>,
 }
 
