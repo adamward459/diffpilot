@@ -468,7 +468,7 @@ impl Utf8Chunks {
 mod tests {
     use super::*;
     use crate::review::{Effort, ModelName, ReviewModel, Severity};
-    use crate::threads::{Side, ThreadComment, ThreadId, ThreadStore};
+    use crate::threads::{Side, ThreadStore};
     use std::os::unix::fs::PermissionsExt;
     use std::time::Instant;
 
@@ -842,17 +842,11 @@ mod tests {
 
     #[test]
     fn the_reply_prompt_skips_the_comment_still_streaming() {
-        let thread = ReviewThread {
-            id: ThreadId(1),
-            anchor: ThreadAnchor::Change,
-            comments: vec![ThreadComment {
-                id: 1,
-                author: "Claude".into(),
-                body: "partial".into(),
-                is_streaming: true,
-            }],
-            finding: None,
-        };
+        let mut store = ThreadStore::new();
+        let id = store.create(ThreadAnchor::Change).id;
+        store.begin_claude_reply(id);
+        store.append_claude(id, "partial", false);
+        let thread = store.get(id).unwrap().clone();
         assert!(!reply_prompt(&thread).contains("partial"));
     }
 

@@ -28,6 +28,19 @@ impl Severity {
             Self::Question => "Question",
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MustFix => "must-fix",
+            Self::Suggestion => "suggestion",
+            Self::Nit => "nit",
+            Self::Question => "question",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|severity| severity.as_str() == text)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

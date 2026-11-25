@@ -1,3 +1,4 @@
+pub mod anchor;
 pub mod cancel;
 pub mod changes;
 pub mod claude;
@@ -9,6 +10,7 @@ pub mod prompt;
 pub mod refs;
 pub mod review;
 pub mod settings;
+pub mod store;
 pub mod threads;
 pub mod tree;
 pub mod viewed;
