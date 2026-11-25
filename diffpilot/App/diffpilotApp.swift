@@ -5,6 +5,8 @@ struct diffpilotApp: App {
     @State private var workspace = Workspace()
 
     init() {
+        // A session that quit with no window open would otherwise relaunch with no window.
+        UserDefaults.standard.register(defaults: ["ApplePersistenceIgnoreState": true])
         switch ProcessInfo.processInfo.environment["DIFFPILOT_APPEARANCE"] {
         case "light": NSApplication.shared.appearance = NSAppearance(named: .aqua)
         case "dark": NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
