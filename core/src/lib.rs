@@ -6,6 +6,7 @@ pub mod comparison;
 pub mod diff;
 pub mod file_kind;
 pub mod git;
+pub mod guard;
 pub mod prompt;
 pub mod refs;
 pub mod review;
