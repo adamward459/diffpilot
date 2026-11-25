@@ -39,7 +39,10 @@ pub fn run_io(repo: &Path, args: &[&str], env: &[(&str, &OsStr)], stdin: Option<
         .args(args)
         .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE");
     for (name, value) in env {
         command.env(name, value);
     }

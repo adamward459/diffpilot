@@ -7,6 +7,7 @@ pub mod diff;
 pub mod file_kind;
 pub mod fix;
 pub mod git;
+pub mod github;
 pub mod guard;
 pub mod mcp;
 pub mod policy;
@@ -17,13 +18,17 @@ pub mod run;
 pub mod runner;
 pub mod settings;
 pub mod snapshot;
+pub mod stage;
 pub mod store;
 pub mod stream;
+pub mod sync;
 pub mod threads;
 pub mod tree;
 pub mod viewed;
 pub mod watcher;
+pub mod worktree;
 
+mod exec;
 mod paths;
 
 #[cfg(test)]

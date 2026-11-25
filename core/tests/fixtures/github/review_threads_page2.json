@@ -1,0 +1,6 @@
+{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
+ {"id":"PRRT_bot","isResolved":false,"isOutdated":false,"path":"src/a.ts","line":5,"startLine":null,"originalLine":5,"originalStartLine":null,
+  "diffSide":"RIGHT","startDiffSide":null,
+  "comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
+   {"databaseId":401,"body":"Possible null","createdAt":"2026-11-22T09:00:00Z","author":{"login":"review-bot","__typename":"Bot"},"pullRequestReview":{"id":"PRR_bot"}}]}}
+]}}}}}

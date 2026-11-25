@@ -1,0 +1,15 @@
+{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":true,"endCursor":"T-CURSOR-1"},"nodes":[
+ {"id":"PRRT_live","isResolved":false,"isOutdated":false,"path":"src/undo.ts","line":11,"startLine":9,"originalLine":11,"originalStartLine":9,
+  "diffSide":"RIGHT","startDiffSide":"RIGHT",
+  "comments":{"pageInfo":{"hasNextPage":true,"endCursor":"C-CURSOR-1"},"nodes":[
+   {"databaseId":101,"body":"This races with the timer","createdAt":"2026-11-24T09:00:00Z","author":{"login":"mira","__typename":"User"},"pullRequestReview":{"id":"PRR_1"}},
+   {"databaseId":102,"body":"Same here","createdAt":"2026-11-24T09:05:00Z","author":null,"pullRequestReview":null}]}},
+ {"id":"PRRT_old","isResolved":true,"isOutdated":true,"path":"src/undo.ts","line":null,"startLine":null,"originalLine":12,"originalStartLine":10,
+  "diffSide":"LEFT","startDiffSide":"LEFT",
+  "comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
+   {"databaseId":201,"body":"Old note","createdAt":"2026-11-20T09:00:00Z","author":{"login":"alice","__typename":"User"},"pullRequestReview":{"id":"PRR_0"}}]}},
+ {"id":"PRRT_file","isResolved":false,"isOutdated":false,"path":"src/b.ts","line":null,"startLine":null,"originalLine":null,"originalStartLine":null,
+  "diffSide":"RIGHT","startDiffSide":null,
+  "comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
+   {"databaseId":301,"body":"Whole file remark","createdAt":"2026-11-21T09:00:00Z","author":{"login":"alice","__typename":"User"},"pullRequestReview":{"id":"PRR_2"}}]}}
+]}}}}}
