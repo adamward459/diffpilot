@@ -38,6 +38,25 @@ nonisolated struct ReviewRequest: Equatable, Sendable {
     var revisions: [String]
     var focus: String
     var instructions: String = ""
+    var paths: [String] = []
+    var model = ReviewModel.standard
+}
+
+nonisolated struct ReviewModel: Equatable, Hashable, Sendable {
+    enum Name: String, CaseIterable, Sendable { case opus, sonnet, haiku }
+    enum Effort: String, CaseIterable, Sendable { case low, medium, high }
+
+    static let standard = ReviewModel(name: .opus, effort: .high)
+
+    var name: Name
+    var effort: Effort
+
+    var title: String { "\(name.rawValue.capitalized) · \(effort.rawValue.capitalized)" }
+}
+
+enum ReviewScope: Equatable {
+    case all
+    case openFile
 }
 
 nonisolated protocol ClaudeReviewer: Sendable {
@@ -87,9 +106,23 @@ nonisolated enum ReviewFocus {
 extension ReviewPrompt {
     nonisolated static func render(_ request: ReviewRequest) -> String {
         template
-            .replacingOccurrences(of: "{{revisions}}", with: request.revisions.joined(separator: " "))
+            .replacingOccurrences(of: "{{revisions}}", with: diffArguments(request))
             .replacingOccurrences(of: "{{focus}}", with: request.focus)
-            .replacingOccurrences(of: "{{instructions}}", with: instructions(request.instructions))
+            .replacingOccurrences(
+                of: "{{instructions}}", with: instructions(request.instructions) + scope(request.paths))
+    }
+
+    nonisolated static func diffArguments(_ request: ReviewRequest) -> String {
+        let revisions = request.revisions.joined(separator: " ")
+        guard !request.paths.isEmpty else { return revisions }
+        return revisions + " -- " + request.paths.map { "'\($0)'" }.joined(separator: " ")
+    }
+
+    nonisolated static func scope(_ paths: [String]) -> String {
+        guard !paths.isEmpty else { return "" }
+        let list = paths.map { "- `\($0)`" }.joined(separator: "\n")
+        return
+            "\n## Scope\n\nReview only these files. You may read other files for context, but do not report findings on them.\n\n\(list)\n"
     }
 
     nonisolated static func instructions(_ text: String) -> String {

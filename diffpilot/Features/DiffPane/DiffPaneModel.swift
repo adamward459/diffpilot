@@ -17,6 +17,9 @@ final class DiffPaneModel {
     private(set) var review = ReviewRun.idle
     var reviewFocuses: Set<String>
     var reviewInstructions = ""
+    var reviewScope = ReviewScope.all
+    var reviewModel = ReviewModel.standard
+    var branchName: String?
     var mode = PaneMode.diff
 
     let viewed: ViewedFiles
@@ -145,13 +148,15 @@ final class DiffPaneModel {
         sendFileState(path)
     }
 
+    var fileCount: Int { files?.count ?? 0 }
+
     var reviewTitle: String {
-        let count = files.map { " · \($0.count) \($0.count == 1 ? "file" : "files")" } ?? ""
+        let count = "\(fileCount) \(fileCount == 1 ? "file" : "files")"
         switch comparison {
-        case .branch(let branch, let base): return "\(branch) compared to \(base)" + count
-        case .checkedOut(let base, _): return "Current branch compared to \(base)" + count
-        case .workingTree: return "Working tree compared to HEAD" + count
-        case .staged: return "Staged changes" + count
+        case .branch(let branch, let base): return "\(branch) compared to \(base) · \(count)"
+        case .checkedOut(let base, _): return "\(branchName ?? "Current branch") compared to \(base) · \(count)"
+        case .workingTree: return "Working tree compared to HEAD · \(count)"
+        case .staged: return "Staged changes · \(count)"
         }
     }
 
@@ -165,7 +170,8 @@ final class DiffPaneModel {
         let (focus, instructions) = ReviewFocus.request(selected: reviewFocuses, text: reviewInstructions)
         let request = ReviewRequest(
             repo: repo, revisions: comparison.revisions, focus: focus,
-            instructions: instructions)
+            instructions: instructions,
+            paths: reviewScope == .openFile ? visiblePath.map { [$0] } ?? [] : [], model: reviewModel)
         let since = Date()
         review = .running(since: since)
         let reviewer = reviewer

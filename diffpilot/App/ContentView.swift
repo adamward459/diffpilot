@@ -106,5 +106,6 @@ private struct RepoSession {
         sidebar = SidebarModel(repo: repo, comparison: comparison, viewed: viewed)
         diff = DiffPaneModel(
             repo: repo, comparison: comparison, viewed: viewed, reviewer: Self.reviewer())
+        diff.branchName = refs?.checkedOut
     }
 }

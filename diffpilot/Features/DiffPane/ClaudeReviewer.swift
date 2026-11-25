@@ -67,6 +67,7 @@ nonisolated struct ClaudeCLIReviewer: ClaudeReviewer {
         [
             "-p", ReviewPrompt.render(request), "--output-format", "json", "--json-schema", schema,
             "--tools", "Read,Grep,Glob,Bash",
+            "--model", request.model.name.rawValue, "--effort", request.model.effort.rawValue,
             "--allowedTools", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
         ]
     }

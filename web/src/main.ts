@@ -213,7 +213,25 @@ function makeNode(r: Row, index: number): Mounted {
   return m;
 }
 
+let rendering = false;
+let renderAgain = false;
 function render(): void {
+  if (rendering) {
+    renderAgain = true;
+    return;
+  }
+  rendering = true;
+  try {
+    do {
+      renderAgain = false;
+      renderOnce();
+    } while (renderAgain);
+  } finally {
+    rendering = false;
+  }
+}
+
+function renderOnce(): void {
   const items = v.getVirtualItems();
   const seen = new Set<string>();
   for (const it of items) {

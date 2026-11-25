@@ -125,6 +125,23 @@ struct ReviewTests {
         #expect(Array(allowed) == ["Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)"])
     }
 
+    @Test func cliArgumentsCarryTheChosenModelAndEffort() {
+        var request = ReviewRequest(repo: URL(filePath: "/r"), revisions: ["--cached"], focus: "Tests")
+        request.model = ReviewModel(name: .sonnet, effort: .medium)
+        let args = ClaudeCLIReviewer.arguments(for: request)
+        #expect(args.drop { $0 != "--model" }.dropFirst().first == "sonnet")
+        #expect(args.drop { $0 != "--effort" }.dropFirst().first == "medium")
+    }
+
+    @Test func aScopedReviewDiffsOnlyThoseFilesAndSaysSo() {
+        var request = ReviewRequest(repo: URL(filePath: "/r"), revisions: ["--merge-base", "main"], focus: "Tests")
+        request.paths = ["src/a b.ts"]
+        let prompt = ReviewPrompt.render(request)
+        #expect(prompt.contains("git diff --merge-base main -- 'src/a b.ts'"))
+        #expect(prompt.contains("## Scope"))
+        #expect(!prompt.contains("{{"))
+    }
+
     @Test func theRenderedPromptHasNoPlaceholdersLeft() {
         let plain = ReviewPrompt.render(
             ReviewRequest(repo: URL(filePath: "/r"), revisions: ["--cached"], focus: "everything"))
