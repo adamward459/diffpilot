@@ -4,16 +4,12 @@ struct FileSidebar: View {
     @Bindable var model: SidebarModel
 
     var body: some View {
-        if model.repo == nil {
-            ContentUnavailableView("No Repository", systemImage: "folder")
-        } else {
-            VStack(spacing: 0) {
-                SummaryHeader(summary: model.summary, isLoading: model.isLoading)
-                FilterRow(model: model)
-                FileOutline(
-                    root: model.root, files: model.files, filter: model.filter, mode: model.mode,
-                    selection: $model.selection)
-            }
+        VStack(spacing: 0) {
+            SummaryHeader(summary: model.summary, isLoading: model.isLoading)
+            FilterRow(model: model)
+            FileOutline(
+                root: model.root, files: model.files, filter: model.filter, mode: model.mode,
+                selection: $model.selection)
         }
     }
 }

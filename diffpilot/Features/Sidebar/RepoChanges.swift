@@ -6,19 +6,15 @@ nonisolated struct ReviewState: Decodable, Equatable {
 }
 
 nonisolated enum RepoChanges {
-    static func configuredRepo() -> URL? {
-        guard let value = ProcessInfo.processInfo.environment["DIFFPILOT_REPO"], !value.isEmpty else { return nil }
-        return URL(fileURLWithPath: value)
-    }
-
-    static func load(repo: URL, base: String = "main") throws -> [FileChange] {
+    static func load(repo: URL, comparison: Comparison) throws -> [FileChange] {
         let review =
             (try? Data(contentsOf: repo.appendingPathComponent(".git/diffpilot-review.json")))
             .flatMap { try? JSONDecoder().decode(ReviewState.self, from: $0) } ?? ReviewState()
         return parse(
-            nameStatus: try Git.run(repo, ["diff", "-z", "-M", "--name-status", base]),
-            numstat: try Git.run(repo, ["diff", "-z", "-M", "--numstat", base]),
-            uncommitted: try Git.run(repo, ["diff", "-z", "--name-only", "HEAD"]),
+            nameStatus: try Git.run(repo, ["diff", "-z", "-M", "--name-status"] + comparison.revisions),
+            numstat: try Git.run(repo, ["diff", "-z", "-M", "--numstat"] + comparison.revisions),
+            uncommitted: comparison.includesUncommitted
+                ? try Git.run(repo, ["diff", "-z", "--name-only", "HEAD"]) : "",
             review: review)
     }
 

@@ -18,7 +18,7 @@ final class DiffPaneModel {
     var mode = PaneMode.diff
 
     private let repo: URL?
-    private let base: String
+    private let comparison: Comparison
     private let replier: any ClaudeReplier
     private let benchScrollDelay: Duration?
     private var files: [FileDiff]?
@@ -31,14 +31,15 @@ final class DiffPaneModel {
     private var firstPaintInterval: OSSignpostIntervalState?
 
     init(
-        repo: URL?, base: String = "main", replier: any ClaudeReplier = ScriptedReplier(),
+        repo: URL?, comparison: Comparison = .checkedOut(base: "main", includesUncommitted: true),
+        replier: any ClaudeReplier = ScriptedReplier(),
         benchScrollDelay: Duration? = ProcessInfo.processInfo.environment["DIFFPILOT_BENCH"].flatMap(Double.init).map {
             .seconds($0)
         },
         send: @escaping (HostCommand) -> Void = { _ in }
     ) {
         self.repo = repo
-        self.base = base
+        self.comparison = comparison
         self.replier = replier
         self.benchScrollDelay = benchScrollDelay
         self.send = send
@@ -56,9 +57,11 @@ final class DiffPaneModel {
 
     func load() async {
         let repo = repo
-        let base = base
+        let comparison = comparison
         let files = await Task.detached(priority: .userInitiated) {
-            guard let repo, let text = try? Git.run(repo, UnifiedDiff.args + [base]) else { return [FileDiff]() }
+            guard let repo, let text = try? Git.run(repo, UnifiedDiff.args + comparison.revisions) else {
+                return [FileDiff]()
+            }
             return UnifiedDiff.parse(text).inTreeOrder()
         }.value
         self.files = files
