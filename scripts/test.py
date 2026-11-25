@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run diffpilot checks per Cargo crate.
 
-A crate is a workspace member: core (logic), diff-pane, review-ui, gpui-app (app shell, sidebar,
-comparison). Crates are named by package (diffpilot-core) or folder (core). A change in a crate
+A crate is a workspace member: core (logic), ui-kit (theme, icons, shared components), diff-pane,
+review-ui, gpui-app (app shell, sidebar, comparison). Crates are named by package (diffpilot-core) or folder (core). A change in a crate
 also touches the crates that depend on it; a change to the root Cargo files touches all crates.
 
   scripts/test.py unit [crate...]          cargo test (all crates when none named)

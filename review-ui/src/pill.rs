@@ -1,10 +1,9 @@
-use crate::assets;
-use crate::palette::Palette;
 use crate::popover::{PopoverEvent, ReviewPopover};
 use crate::session::{ReviewEvent, ReviewSession};
-use crate::ui::{Btn, Look, filled_check, severity_badge};
 use diffpilot_core::review::{ReviewRun, Severity};
 use diffpilot_core::threads::ThreadId;
+use diffpilot_ui_kit::components::{Button, Look, filled_check, severity_badge};
+use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::{
     App, AppContext, Context, Corner, Entity, EventEmitter, FontWeight, Global, IntoElement, KeyBinding, ParentElement,
     Render, Styled, Subscription, Task, WeakEntity, Window, actions, div, px,
@@ -165,15 +164,16 @@ impl ReviewPill {
         }
     }
 
-    fn trigger(&self, run: &ReviewRun, visible: bool, palette: Palette) -> Btn {
-        let button = Btn::new("claude-pill")
+    fn trigger(&self, run: &ReviewRun, visible: bool, theme: Theme) -> Button {
+        let button = Button::new("claude-pill")
             .look(Look::Ghost)
             .regular()
+            .rounded_full()
             .h(px(24.))
             .gap(px(6.));
         match run {
             ReviewRun::Done { counts } if self.shows_result => button
-                .child(filled_check(palette.green, 16.))
+                .child(filled_check(theme.ui.green, 16.))
                 .child(div().child("Review done"))
                 .children(Severity::ALL.iter().filter_map(|severity| {
                     let count = counts.get(severity).copied().unwrap_or(0);
@@ -181,22 +181,22 @@ impl ReviewPill {
                         h_flex()
                             .gap(px(2.))
                             .items_center()
-                            .text_color(palette.severity(*severity))
-                            .child(severity_badge(*severity, palette, 12.5))
+                            .text_color(theme.severity(*severity))
+                            .child(severity_badge(*severity, &theme, 12.5))
                             .child(div().font_weight(FontWeight::MEDIUM).child(count.to_string()))
                     })
                 })),
             ReviewRun::Failed(_) => button
-                .icon_color(assets::WARNING, 16., palette.amber)
+                .icon_color(Glyph::TriangleAlert, 16., theme.amber)
                 .label("Review failed"),
             _ => button
-                .icon_color(assets::SPARKLES, 16., palette.claude)
+                .icon_color(Glyph::Sparkles, 16., theme.ui.claude)
                 .label("Ask Claude")
                 .disabled(!visible),
         }
     }
 
-    fn running(&self, since: Instant, palette: Palette, cx: &Context<Self>) -> impl IntoElement {
+    fn running(&self, since: Instant, theme: Theme, cx: &Context<Self>) -> impl IntoElement {
         let seconds = since.elapsed().as_secs();
         h_flex()
             .gap(px(7.))
@@ -205,8 +205,8 @@ impl ReviewPill {
             .items_center()
             .child(
                 Spinner::new()
-                    .icon(Icon::empty().path(assets::SPINNER))
-                    .color(palette.muted)
+                    .icon(Icon::new(Glyph::Spinner))
+                    .color(theme.ui.muted)
                     .with_size(px(16.)),
             )
             .child(
@@ -215,17 +215,18 @@ impl ReviewPill {
                     .child(div().font_weight(FontWeight::SEMIBOLD).child("Reviewing"))
                     .child(
                         div()
-                            .text_color(palette.muted)
+                            .text_color(theme.ui.muted)
                             .child(format!("{}:{:02}", seconds / 60, seconds % 60)),
                     ),
             )
             .child(
-                Btn::new("stop-review")
+                Button::new("stop-review")
                     .look(Look::Ghost)
+                    .rounded_full()
                     .w(px(22.))
                     .px(px(0.))
                     .tooltip("Stop Claude (⌘.)")
-                    .child(div().size(px(10.)).rounded(px(2.)).bg(palette.red))
+                    .child(div().size(px(10.)).rounded(px(2.)).bg(theme.danger))
                     .on_click(cx.listener(|this, _, _, cx| this.stop(cx))),
             )
     }
@@ -237,18 +238,18 @@ impl ReviewPill {
 
 impl Render for ReviewPill {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = Palette::of(cx);
+        let theme = Theme::of(cx);
         let session = self.session.read(cx);
         let run = session.run().clone();
         let visible = session.host().visible_path.is_some();
         let count = session.thread_count();
         let claude = match &run {
-            ReviewRun::Running { since } => self.running(*since, palette, cx).into_any_element(),
+            ReviewRun::Running { since } => self.running(*since, theme, cx).into_any_element(),
             _ => Popover::new("review-popover")
                 .anchor(Corner::TopRight)
                 .open(self.open)
                 .on_open_change(cx.listener(|this, open: &bool, _, cx| this.set_open(*open, cx)))
-                .trigger(self.trigger(&run, visible, palette))
+                .trigger(self.trigger(&run, visible, theme))
                 .content({
                     let popover = self.popover.clone();
                     move |_, _, _| popover.clone()
@@ -261,14 +262,15 @@ impl Render for ReviewPill {
             .text_size(px(13.))
             .text_color(cx.theme().foreground)
             .child(claude)
-            .child(div().w(px(1.)).h(px(16.)).mx_0p5().bg(palette.line))
+            .child(div().w(px(1.)).h(px(16.)).mx_0p5().bg(theme.ui.line))
             .child(
-                Btn::new("comment-on-file")
+                Button::new("comment-on-file")
                     .look(Look::Ghost)
                     .regular()
+                    .rounded_full()
                     .h(px(24.))
                     .gap(px(6.))
-                    .icon(assets::COMMENT, 16.)
+                    .icon(Glyph::MessageSquare, 16.)
                     .label(count.to_string())
                     .tooltip("Comment on file")
                     .disabled(!visible)

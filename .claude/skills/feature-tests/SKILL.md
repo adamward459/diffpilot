@@ -10,6 +10,7 @@ The Cargo workspace is split by crate:
 | Crate (folder) | Holds |
 | --- | --- |
 | `core` (`diffpilot-core`) | logic: git, diff, review, viewed store, settings |
+| `ui-kit` (`diffpilot-ui-kit`) | theme, icons, and shared components; has a `gallery` example |
 | `diff-pane` (`diffpilot-diff-pane`) | the diff view; has a bench example |
 | `review-ui` (`diffpilot-review-ui`) | review UI components |
 | `gpui-app` (`diffpilot`) | app shell, sidebar, comparison; the binary |

@@ -1,15 +1,11 @@
-mod assets;
 mod bench;
 mod comparison_control;
 mod comparison_menu;
 mod format;
-mod glyph;
 mod pane;
 mod repo_view;
 mod sidebar;
 mod sidebar_rows;
-mod theme;
-mod ui;
 mod workspace;
 
 use bench::Bench;
@@ -26,8 +22,8 @@ fn main() {
     let start = Instant::now();
     let bench = bench::Config::from_env();
 
-    Application::new().with_assets(assets::Assets).run(move |cx| {
-        gpui_component::init(cx);
+    Application::new().with_assets(diffpilot_ui_kit::Assets).run(move |cx| {
+        diffpilot_ui_kit::init(cx);
         workspace::init(cx);
         if let Some(config) = bench {
             Bench::install(cx, start, config);
@@ -65,7 +61,7 @@ fn main() {
             ..Default::default()
         };
         cx.open_window(options, move |window, cx| {
-            theme::install(window, cx);
+            diffpilot_ui_kit::theme::install(window, cx);
             let workspace = cx.new(|cx| Workspace::new(settings, viewed_store, folder, bench.is_some(), window, cx));
             cx.new(|cx| Root::new(workspace, window, cx))
         })

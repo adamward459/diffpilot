@@ -1,21 +1,21 @@
 use crate::chrome;
 use crate::highlight::{self, FileTokens};
-use crate::icons;
 use crate::layout::{FILE_HEADER, HUNK, LINE, NOTICE, Sticky, ThreadFrame};
 use crate::lines::{self, CODE_SIZE, Fonts, Frame, LineCache, LineKey, LineRequest, Style, Thumb};
 use crate::rows::{Notice, RowKind, ThreadSlot};
 use crate::state::{Geometry, PaneState};
-use crate::theme::{Palette, is_dark};
 use diffpilot_core::diff::{FileDiff, LineKind};
+use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use diffpilot_review_ui::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange};
+use diffpilot_ui_kit::components::{BadgeTone, State, status_badge, viewed_toggle};
+use diffpilot_ui_kit::{Theme, painted};
 use gpui::{
     AnyView, App, AppContext as _, ClickEvent, Context, Div, Entity, EventEmitter, FontWeight, Hsla,
     InteractiveElement as _, IntoElement, MouseMoveEvent, ParentElement as _, Pixels, Render, ScrollWheelEvent,
     SharedString, Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled as _, Subscription, Window,
     canvas, div, font, px,
 };
-use gpui_component::{ActiveTheme as _, Theme};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
@@ -83,13 +83,12 @@ pub struct DiffPane {
     mouse_y: Option<Pixels>,
     top: Pixels,
     fonts: Fonts,
-    palette: Palette,
+    theme: Theme,
     highlights: Vec<Highlight>,
     running: usize,
     lines: LineCache,
     first_paint: FirstPaint,
     last_scroll: Option<Instant>,
-    dark: Option<bool>,
     pub probe: Probe,
 }
 
@@ -130,7 +129,7 @@ impl DiffPane {
             highlight::engine();
         })
         .detach();
-        cx.observe_window_appearance(window, |_, _, cx| cx.notify()).detach();
+        cx.observe_global::<Theme>(|_, cx| cx.notify()).detach();
         Self {
             state: PaneState::new(geometry),
             review: None,
@@ -138,13 +137,12 @@ impl DiffPane {
             mouse_y: None,
             top: px(0.0),
             fonts,
-            palette: Palette::new(false),
+            theme: Theme::new(false),
             highlights: Vec::new(),
             running: 0,
             lines: LineCache::default(),
             first_paint: FirstPaint::Waiting,
             last_scroll: None,
-            dark: None,
             probe: Probe::default(),
         }
     }
@@ -178,12 +176,6 @@ impl DiffPane {
     pub fn set_wrap(&mut self, wrap: bool, cx: &mut Context<Self>) {
         self.state.set_wrap(wrap);
         self.sync(cx);
-    }
-
-    /// `None` follows the gpui-component theme when the app installed one, else the window appearance.
-    pub fn set_dark(&mut self, dark: Option<bool>, cx: &mut Context<Self>) {
-        self.dark = dark;
-        cx.notify();
     }
 
     pub fn scroll_by(&mut self, dy: f32, dx: f32, cx: &mut Context<Self>) {
@@ -448,7 +440,7 @@ impl DiffPane {
         }
         let style = Style {
             fonts: &self.fonts,
-            palette: &self.palette,
+            theme: &self.theme,
             wrap: self.state.wrap_cols(),
         };
         self.lines.begin_frame(&style);
@@ -483,7 +475,7 @@ impl DiffPane {
         }
         Frame {
             scroll_x: self.state.scroll_x(),
-            palette: self.palette,
+            theme: self.theme,
             lines: painted,
             thumb: self.thumb(window),
         }
@@ -528,7 +520,7 @@ impl DiffPane {
     }
 
     fn file_header(&self, file: usize, glass: Option<Hsla>, cx: &mut Context<Self>) -> Stateful<Div> {
-        let palette = &self.palette;
+        let theme = &self.theme;
         let pinned = glass.is_some();
         let diff = &self.state.files[file];
         let collapsed = self.state.collapsed.contains(&diff.path);
@@ -551,7 +543,7 @@ impl DiffPane {
             .h(px(20.0))
             .cursor_pointer()
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle_collapsed(&collapse_path, cx)))
-            .child(icons::chevron(!collapsed, 12.0, palette.muted));
+            .child(painted::chevron(!collapsed, 12.0, theme.diff.muted));
         let id = if pinned { "pinned-header" } else { "file-header" };
         let left = div()
             .flex()
@@ -559,40 +551,45 @@ impl DiffPane {
             .gap(px(7.0))
             .min_w_0()
             .child(chevron)
-            .child(icons::document(14.0, chrome::tint(palette, diff)))
-            .child(chrome::path_text(palette, diff))
-            .child(chrome::status_badge(palette, &self.fonts.mono, diff.status))
-            .child(chrome::counts(
-                palette,
-                &self.fonts.mono,
-                diff.additions,
-                diff.deletions,
+            .child(painted::document(14.0, theme.tint(file_kind(&diff.path).tint())))
+            .child(chrome::path_text(theme, diff))
+            .child(status_badge(
+                diff.status.code(),
+                BadgeTone::Plain,
+                self.fonts.mono.clone(),
+                theme,
             ))
-            .child(chrome::minibar(palette, diff.additions, diff.deletions))
-            .children((threads > 0).then(|| chrome::thread_count(palette, threads)));
+            .child(chrome::counts(theme, &self.fonts.mono, diff.additions, diff.deletions))
+            .child(chrome::minibar(theme, diff.additions, diff.deletions))
+            .children((threads > 0).then(|| chrome::thread_count(theme, threads)));
         let bar = div()
             .flex()
             .items_center()
             .h(px(FILE_HEADER))
             .w_full()
             .pl(px(10.0))
-            .pr(px(12.0))
+            .pr(px(6.0))
             .child(left)
             .child(
-                chrome::viewed_toggle(palette, (if pinned { "pinned-viewed" } else { "viewed" }, file), viewed)
-                    .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                        cx.emit(DiffPaneEvent::ToggleViewed(viewed_path.clone()))
-                    })),
+                viewed_toggle(
+                    theme,
+                    (if pinned { "pinned-viewed" } else { "viewed" }, file),
+                    viewed,
+                    State::Normal,
+                )
+                .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                    cx.emit(DiffPaneEvent::ToggleViewed(viewed_path.clone()))
+                })),
             );
         let bar = bar.id((id, file));
         match glass {
-            Some(glass) => bar.border_b_1().border_color(palette.line).bg(glass),
-            None => bar.border_y_1().border_color(palette.line).bg(palette.editor),
+            Some(glass) => bar.border_b_1().border_color(theme.diff.line).bg(glass),
+            None => bar.border_y_1().border_color(theme.diff.line).bg(theme.background),
         }
     }
 
     fn hunk_bar(&self, file: usize, hunk: usize, glass: Option<Hsla>) -> Div {
-        let palette = &self.palette;
+        let theme = &self.theme;
         let header = self.state.files[file].hunks[hunk].header.clone();
         let bar = div()
             .flex()
@@ -605,16 +602,16 @@ impl DiffPane {
             .whitespace_nowrap()
             .font(self.fonts.mono.clone())
             .text_size(px(11.5))
-            .text_color(palette.muted)
+            .text_color(theme.diff.muted)
             .child(header);
         match glass {
-            Some(glass) => bar.border_b_1().border_color(palette.line).bg(glass),
-            None => bar.border_y_1().border_color(palette.line).bg(palette.hunk),
+            Some(glass) => bar.border_b_1().border_color(theme.diff.line).bg(glass),
+            None => bar.border_y_1().border_color(theme.diff.line).bg(theme.diff.hunk),
         }
     }
 
     fn notice(&self, file: usize, notice: Notice, cx: &mut Context<Self>) -> Div {
-        let palette = &self.palette;
+        let theme = &self.theme;
         let path = self.state.files[file].path.clone();
         let mut body = div()
             .flex()
@@ -625,9 +622,9 @@ impl DiffPane {
             .h(px(NOTICE))
             .w_full()
             .border_b_1()
-            .border_color(palette.line)
+            .border_color(theme.diff.line)
             .text_size(px(12.5))
-            .text_color(palette.muted)
+            .text_color(theme.diff.muted)
             .child(SharedString::from(notice.text()));
         if notice.can_load() {
             body = body.child(
@@ -639,12 +636,12 @@ impl DiffPane {
                     .px(px(8.0))
                     .rounded(px(5.0))
                     .border_1()
-                    .border_color(palette.line)
-                    .bg(palette.cap)
+                    .border_color(theme.diff.line)
+                    .bg(theme.diff.cap)
                     .cursor_pointer()
                     .text_size(px(12.0))
                     .font_weight(FontWeight::MEDIUM)
-                    .text_color(palette.text)
+                    .text_color(theme.diff.text)
                     .child("Load diff")
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.load_diff(&path, cx))),
             );
@@ -665,13 +662,13 @@ impl DiffPane {
             .pt(px(frame.top))
             .pb(px(frame.bottom));
         if frame.rule {
-            row = row.border_b_1().border_color(self.palette.line);
+            row = row.border_b_1().border_color(self.theme.diff.line);
         }
         Some(row.child(AnyView::from(card.clone()).cached(style)))
     }
 
     fn add_comment_button(&self, index: usize, y: f32, cx: &mut Context<Self>) -> Stateful<Div> {
-        let palette = &self.palette;
+        let theme = &self.theme;
         div()
             .id(("add-comment", index))
             .absolute()
@@ -682,28 +679,28 @@ impl DiffPane {
             .justify_center()
             .size(px(18.0))
             .rounded(px(4.0))
-            .bg(palette.accent)
+            .bg(theme.accent)
             .cursor_pointer()
-            .child(icons::plus(12.0, palette.on_accent))
+            .child(painted::plus(12.0, theme.on_accent))
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.add_comment(index, window, cx)))
     }
 
     fn backdrop(&self, y: f32) -> Hsla {
-        let palette = &self.palette;
+        let theme = &self.theme;
         let Some(index) = self.state.tops.row_at(self.state.scroll() + y.max(0.0)) else {
-            return palette.editor;
+            return theme.background;
         };
         let row = self.state.rows.rows[index];
         match row.kind {
-            RowKind::Hunk { .. } => palette.hunk,
+            RowKind::Hunk { .. } => theme.diff.hunk,
             RowKind::Line { hunk, line } => {
                 match self.state.files[row.file as usize].hunks[hunk as usize].lines[line as usize].kind {
-                    LineKind::Added => palette.add_bg,
-                    LineKind::Deleted => palette.del_bg,
-                    LineKind::Context => palette.editor,
+                    LineKind::Added => theme.diff.add_bg,
+                    LineKind::Deleted => theme.diff.del_bg,
+                    LineKind::Context => theme.background,
                 }
             }
-            _ => palette.editor,
+            _ => theme.background,
         }
     }
 
@@ -716,7 +713,7 @@ impl DiffPane {
             .w_full()
             .flex()
             .flex_col();
-        let glass = |center: f32| Some(self.palette.glass(self.backdrop(sticky.push + center)));
+        let glass = |center: f32| Some(self.theme.pinned_glass(self.backdrop(sticky.push + center)));
         group = group.child(self.file_header(file, glass(FILE_HEADER / 2.0), cx));
         if let Some(hunk) = sticky.hunk {
             group = group.child(self.hunk_bar(file, hunk as usize, glass(FILE_HEADER + HUNK / 2.0)));
@@ -726,28 +723,22 @@ impl DiffPane {
 }
 
 impl Render for DiffPane {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.probe.begin();
-        let dark = self.dark.unwrap_or_else(|| {
-            if cx.has_global::<Theme>() {
-                cx.theme().is_dark()
-            } else {
-                is_dark(window.appearance())
-            }
-        });
-        if self.palette.dark != dark {
-            self.palette = Palette::new(dark);
+        let current = Theme::of(cx);
+        if self.theme.dark != current.dark {
             self.lines.clear();
         }
-        let palette = self.palette;
+        self.theme = current;
+        let theme = self.theme;
         let scroll = self.state.scroll();
         let mut root = div()
             .id("diff-pane")
             .relative()
             .size_full()
             .overflow_hidden()
-            .bg(palette.editor)
-            .text_color(palette.text)
+            .bg(theme.background)
+            .text_color(theme.diff.text)
             .font(self.fonts.ui.clone())
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
                 let delta = event.delta.pixel_delta(px(LINE));
@@ -771,7 +762,7 @@ impl Render for DiffPane {
                 .items_center()
                 .justify_center()
                 .text_size(px(13.0))
-                .text_color(palette.muted)
+                .text_color(theme.diff.muted)
                 .child("No changes");
         }
         let pane = cx.entity();
@@ -809,7 +800,7 @@ impl Render for DiffPane {
         if let Some(index) = self.hovered_line() {
             let y = self.state.tops.top(index) - scroll;
             let height = self.state.tops.height(index);
-            root = root.child(Self::placed(y, height).bg(palette.text.opacity(0.05)));
+            root = root.child(Self::placed(y, height).bg(theme.diff.text.opacity(0.05)));
             root = root.child(self.add_comment_button(index, y, cx));
         }
         if let Some(sticky) = self.state.position().and_then(|position| position.sticky) {

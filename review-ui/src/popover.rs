@@ -1,8 +1,7 @@
-use crate::assets;
-use crate::palette::Palette;
 use crate::session::ReviewSession;
-use crate::ui::{Btn, Look, chip};
 use diffpilot_core::review::{Effort, ModelName, ReviewModel, ReviewRun, ReviewScope, focus};
+use diffpilot_ui_kit::components::{Button, Look, chip};
+use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, FontWeight, IntoElement, ParentElement, Render,
@@ -69,8 +68,8 @@ impl ReviewPopover {
 
     fn model_menu(&self, model: ReviewModel) -> AnyElement {
         let session = self.session.clone();
-        Btn::new("review-model")
-            .icon(assets::SPARKLES, 12.)
+        Button::new("review-model")
+            .icon(Glyph::Sparkles, 12.)
             .label(model.title())
             .regular()
             .dropdown_menu(move |menu, _, _| {
@@ -112,7 +111,7 @@ fn title_case(word: &str) -> String {
 
 impl Render for ReviewPopover {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = Palette::of(cx);
+        let theme = Theme::of(cx);
         let session = self.session.read(cx);
         let run = session.run().clone();
         let setup = session.setup().clone();
@@ -138,7 +137,7 @@ impl Render for ReviewPopover {
             div()
                 .text_size(px(12.))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(palette.text)
+                .text_color(theme.ui.text)
                 .child(text)
         };
         v_flex()
@@ -146,21 +145,16 @@ impl Render for ReviewPopover {
             .p(px(4.))
             .gap(px(0.))
             .text_size(px(13.))
-            .text_color(palette.text)
+            .text_color(theme.ui.text)
             .child(
                 h_flex()
                     .gap_2()
                     .mb(px(12.))
                     .items_center()
-                    .child(
-                        Icon::empty()
-                            .path(assets::SPARKLES)
-                            .size(px(13.))
-                            .text_color(palette.claude),
-                    )
+                    .child(Icon::new(Glyph::Sparkles).size(px(13.)).text_color(theme.ui.claude))
                     .child(div().font_weight(FontWeight::BOLD).child("Ask Claude"))
                     .child(div().flex_1())
-                    .child(div().text_size(px(10.)).text_color(palette.muted).child("Claude Code")),
+                    .child(div().text_size(px(10.)).text_color(theme.ui.muted).child("Claude Code")),
             )
             .child(
                 h_flex()
@@ -168,8 +162,8 @@ impl Render for ReviewPopover {
                     .mb(px(14.))
                     .items_center()
                     .text_size(px(12.))
-                    .text_color(palette.muted)
-                    .child(Icon::empty().path(assets::BRANCH).size_3p5())
+                    .text_color(theme.ui.muted)
+                    .child(Icon::new(Glyph::GitBranch).size_3p5())
                     .child(
                         div()
                             .min_w_0()
@@ -190,8 +184,8 @@ impl Render for ReviewPopover {
                             .gap_2()
                             .mb(px(12.))
                             .items_start()
-                            .text_color(palette.red)
-                            .child(Icon::empty().path(assets::WARNING).size_4().flex_none())
+                            .text_color(theme.danger)
+                            .child(Icon::new(Glyph::TriangleAlert).size_4().flex_none())
                             .child(div().min_w_0().child(message)),
                     )
                 },
@@ -210,7 +204,7 @@ impl Render for ReviewPopover {
                                 .left(px(13.))
                                 .right(px(13.))
                                 .text_size(px(13.))
-                                .text_color(palette.muted)
+                                .text_color(theme.ui.muted)
                                 .child(INSTRUCTIONS_HINT),
                         )
                     }),
@@ -253,7 +247,7 @@ impl Render for ReviewPopover {
                     .child(Radio::new("scope-all").label(format!("All changes ({files} {plural})")))
                     .child(Radio::new("scope-open").label(format!("Only the open file  {open_name}"))),
             )
-            .child(div().h(px(1.)).bg(palette.line).my(px(12.)))
+            .child(div().h(px(1.)).bg(theme.ui.line).my(px(12.)))
             .child(
                 h_flex()
                     .gap_2()
@@ -261,13 +255,13 @@ impl Render for ReviewPopover {
                     .child(self.model_menu(model))
                     .child(div().flex_1())
                     .child(
-                        Btn::new("cancel-review")
+                        Button::new("cancel-review")
                             .label("Cancel")
                             .regular()
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(PopoverEvent::Dismiss))),
                     )
                     .child(
-                        Btn::new("start-review")
+                        Button::new("start-review")
                             .label(start_title)
                             .hint("⌘↩")
                             .regular()

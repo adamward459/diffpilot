@@ -305,6 +305,7 @@ fn start_bench(pane: &Entity<DiffPane>, repo: PathBuf, launch: Value, window: gp
 
 fn run_window(repo: PathBuf, launch: Instant, bench_mode: bool) {
     Application::new().run(move |cx: &mut App| {
+        diffpilot_ui_kit::init(cx);
         let slot: Rc<RefCell<Option<Entity<DiffPane>>>> = Rc::default();
         let displays = cx.displays();
         for (index, display) in displays.iter().enumerate() {
@@ -324,12 +325,8 @@ fn run_window(repo: PathBuf, launch: Instant, bench_mode: bool) {
             .open_window(options, {
                 let slot = slot.clone();
                 move |window, cx| {
+                    diffpilot_ui_kit::theme::install(window, cx);
                     let pane = cx.new(|cx| DiffPane::new(window, cx));
-                    match std::env::var("DIFFPILOT_APPEARANCE").as_deref() {
-                        Ok("dark") => pane.update(cx, |pane, cx| pane.set_dark(Some(true), cx)),
-                        Ok("light") => pane.update(cx, |pane, cx| pane.set_dark(Some(false), cx)),
-                        _ => {}
-                    }
                     *slot.borrow_mut() = Some(pane.clone());
                     pane
                 }

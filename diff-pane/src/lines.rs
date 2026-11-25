@@ -1,9 +1,9 @@
 use crate::highlight::{Piece, Span, chunk_pieces, pieces};
 use crate::layout::{CODE_PADDING, LINE, NUMBER_COLUMN, RIBBON, wrap_ranges};
-use crate::theme::{Palette, hex};
 use crate::word::{pair_lines, word_ranges};
 use diffpilot_core::diff::{DiffLine, Hunk, LineKind};
-use gpui::{App, Bounds, ContentMask, Font, Pixels, ShapedLine, TextRun, Window, fill, point, px, size};
+use diffpilot_ui_kit::Theme;
+use gpui::{App, Bounds, ContentMask, Font, Hsla, Pixels, ShapedLine, TextRun, Window, fill, point, px, size};
 use std::collections::HashMap;
 use std::ops::Range;
 
@@ -23,7 +23,7 @@ pub struct Fonts {
 
 pub struct Style<'a> {
     pub fonts: &'a Fonts,
-    pub palette: &'a Palette,
+    pub theme: &'a Theme,
     pub wrap: Option<usize>,
 }
 
@@ -76,7 +76,7 @@ pub struct Thumb {
 
 pub struct Frame {
     pub scroll_x: f32,
-    pub palette: Palette,
+    pub theme: Theme,
     pub lines: Vec<PaintLine>,
     pub thumb: Option<Thumb>,
 }
@@ -92,7 +92,7 @@ impl LineCache {
     }
 
     pub fn begin_frame(&mut self, style: &Style) {
-        let key = (style.palette.dark, style.wrap);
+        let key = (style.theme.dark, style.wrap);
         self.frame += 1;
         if self.style != Some(key) {
             self.style = Some(key);
@@ -172,14 +172,14 @@ fn prepare(style: &Style, window: &mut Window, line: &DiffLine, spans: &[Span], 
         None => std::iter::once(0..text.floor_char_boundary(MAX_UNWRAPPED_BYTES)).collect(),
     };
     let number_color = if line.kind == LineKind::Context {
-        style.palette.faint
+        style.theme.diff.faint
     } else {
-        style.palette.muted
+        style.theme.diff.muted
     };
     Prepared {
         last_used: 0,
         chunks: vec![None; ranges.len()],
-        pieces: pieces(text.len(), spans, style.palette.dark, words),
+        pieces: pieces(text.len(), spans, style.theme.dark, words),
         old: line.old.map(|number| shape_number(style, window, number, number_color)),
         new: line.new.map(|number| shape_number(style, window, number, number_color)),
         ranges,
@@ -207,8 +207,8 @@ fn shape_chunk(style: &Style, window: &mut Window, line: &DiffLine, range: &Rang
         return ShapedLine::default();
     }
     let word_background = match line.kind {
-        LineKind::Added => Some(style.palette.add_word),
-        LineKind::Deleted => Some(style.palette.del_word),
+        LineKind::Added => Some(style.theme.diff.add_word),
+        LineKind::Deleted => Some(style.theme.diff.del_word),
         LineKind::Context => None,
     };
     let runs: Vec<TextRun> = chunk
@@ -216,7 +216,7 @@ fn shape_chunk(style: &Style, window: &mut Window, line: &DiffLine, range: &Rang
         .map(|piece| TextRun {
             len: piece.len,
             font: style.fonts.mono.clone(),
-            color: piece.color.map_or(style.palette.text, hex),
+            color: piece.color.map_or(style.theme.diff.text, hex),
             background_color: if piece.word { word_background } else { None },
             underline: None,
             strikethrough: None,
@@ -231,15 +231,19 @@ const THUMB_WIDTH: f32 = 6.0;
 const THUMB_INSET: f32 = 3.0;
 
 pub fn paint(frame: &Frame, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
-    let palette = &frame.palette;
+    let theme = &frame.theme;
     let line_height = px(LINE);
     window.with_content_mask(Some(ContentMask { bounds }), |window| {
         for line in &frame.lines {
             let top = bounds.origin.y + px(line.y);
             let height = px(line.height);
             let (background, number, ribbon) = match line.kind {
-                LineKind::Added => (Some(palette.add_bg), Some(palette.add_number), Some(palette.add_ribbon)),
-                LineKind::Deleted => (Some(palette.del_bg), Some(palette.del_number), Some(palette.del_ribbon)),
+                LineKind::Added => (
+                    Some(theme.diff.add_bg),
+                    Some(theme.diff.add_number),
+                    Some(theme.success),
+                ),
+                LineKind::Deleted => (Some(theme.diff.del_bg), Some(theme.diff.del_number), Some(theme.danger)),
                 LineKind::Context => (None, None, None),
             };
             if let Some(color) = background {
@@ -286,11 +290,15 @@ pub fn paint(frame: &Frame, bounds: Bounds<Pixels>, window: &mut Window, cx: &mu
                 bounds.right() - px(THUMB_WIDTH + THUMB_INSET),
                 bounds.origin.y + px(thumb.top),
             );
-            let color = palette.muted.opacity(thumb.opacity);
+            let color = theme.diff.muted.opacity(thumb.opacity);
             window.paint_quad(
                 fill(Bounds::new(origin, size(px(THUMB_WIDTH), px(thumb.height))), color)
                     .corner_radii(px(THUMB_WIDTH / 2.0)),
             );
         }
     });
+}
+
+fn hex(color: u32) -> Hsla {
+    gpui::rgb(color).into()
 }

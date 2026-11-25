@@ -67,11 +67,12 @@ Settings and viewed files are in `~/Library/Application Support/diffpilot/`: `se
 
 ## Develop
 
-The Cargo workspace has four crates:
+The Cargo workspace has five crates:
 
 | Crate | Holds |
 | --- | --- |
 | `core` | Git, comparisons, the diff parser, viewed files, settings, the file watcher, and the Claude runner. No UI. |
+| `ui-kit` | The theme, the icons, and the shared components (buttons, glass capsules, badges). `cargo run -p diffpilot-ui-kit --example gallery` shows them. |
 | `diff-pane` | The diff view |
 | `review-ui` | The Claude review pill, popover, and thread cards |
 | `gpui-app` | The `diffpilot` binary: window, sidebar, and comparison menus |

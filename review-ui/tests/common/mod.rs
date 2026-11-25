@@ -195,7 +195,7 @@ pub fn root_window<V: Render + 'static>(
     build: impl FnOnce(&mut Window, &mut Context<V>) -> V,
 ) -> (Entity<V>, &mut VisualTestContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
+        diffpilot_ui_kit::init(cx);
         diffpilot_review_ui::init(cx);
     });
     let mut view = None;

@@ -1,18 +1,17 @@
 use crate::bench::{Bench, Mark};
 use crate::format::{compact, file_count, grouped};
-use crate::glyph::Glyph;
 use crate::sidebar_rows::{
     Arrow, ArrowOutcome, Row, RowInput, RowKind, arrow, build_rows, index_of, scroll_target, step,
 };
-use crate::theme::{palette, tint};
-use crate::ui::{BadgeTone, filter_field, glass_button, status_badge, viewed_check};
 use diffpilot_core::changes::{ChangeSummary, FileChange};
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::tree::{FileEntry, FileFilter, Folder, SidebarMode};
+use diffpilot_ui_kit::components::{BadgeTone, State, filter_field, glass_button, status_badge, viewed_check};
+use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::{
     AnyElement, App, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
     IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
-    UniformListScrollHandle, Window, actions, div, point, prelude::*, px, uniform_list,
+    UniformListScrollHandle, Window, actions, div, font, point, prelude::*, px, uniform_list,
 };
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle};
@@ -240,8 +239,8 @@ impl Sidebar {
 
     fn summary_header(&self, cx: &App) -> AnyElement {
         let theme = cx.theme();
-        let palette = palette(cx);
-        let muted = palette.secondary;
+        let tokens = Theme::of(cx);
+        let muted = tokens.chrome.secondary;
         let summary = &self.summary;
         let fraction = if summary.file_count == 0 {
             0.0
@@ -262,12 +261,12 @@ impl Sidebar {
                         .text_size(px(11.5))
                         .child(
                             div()
-                                .text_color(palette.success)
+                                .text_color(tokens.success)
                                 .child(format!("+{}", compact(summary.additions))),
                         )
                         .child(
                             div()
-                                .text_color(palette.danger)
+                                .text_color(tokens.danger)
                                 .child(format!("−{}", compact(summary.deletions))),
                         ),
                 )
@@ -299,14 +298,14 @@ impl Sidebar {
                         .h_full()
                         .w(gpui::relative(fraction))
                         .rounded_full()
-                        .bg(palette.accent),
+                        .bg(tokens.accent),
                 ),
             )
             .into_any_element()
     }
 
     fn filter_row(&self, cx: &mut Context<Self>) -> AnyElement {
-        let palette = palette(cx);
+        let tokens = Theme::of(cx);
         let uncommitted = self.filter.only_uncommitted;
         let hide_viewed = self.filter.hide_viewed;
         let list_mode = self.mode == SidebarMode::List;
@@ -315,7 +314,7 @@ impl Sidebar {
             .px(px(10.))
             .py(px(6.))
             .child(filter_field(
-                &palette,
+                &tokens,
                 Input::new(&self.filter_input)
                     .appearance(false)
                     .bordered(false)
@@ -327,7 +326,8 @@ impl Sidebar {
                 Glyph::Pencil,
                 "Only uncommitted",
                 uncommitted,
-                &palette,
+                State::Normal,
+                &tokens,
                 cx.listener(|this, _, _, cx| this.toggle_uncommitted(cx)),
             ))
             .child(glass_button(
@@ -335,7 +335,8 @@ impl Sidebar {
                 Glyph::Eye,
                 "Hide viewed",
                 hide_viewed,
-                &palette,
+                State::Normal,
+                &tokens,
                 cx.listener(|this, _, _, cx| this.toggle_hide_viewed(cx)),
             ))
             .child(glass_button(
@@ -343,7 +344,8 @@ impl Sidebar {
                 if list_mode { Glyph::List } else { Glyph::ListTree },
                 if list_mode { "Switch to tree" } else { "Switch to list" },
                 false,
-                &palette,
+                State::Normal,
+                &tokens,
                 cx.listener(move |this, _, _, cx| {
                     this.set_mode(
                         if list_mode {
@@ -428,26 +430,30 @@ impl Render for Sidebar {
 
 impl Sidebar {
     fn render_row(&self, index: usize, row: &Row, focused: bool, cx: &mut Context<Self>) -> AnyElement {
-        let palette = palette(cx);
+        let tokens = Theme::of(cx);
         let selected = self.selected.as_deref() == Some(row.path.as_str());
         let on_accent = selected && focused;
-        let primary = if on_accent { palette.on_accent } else { palette.label };
-        let secondary = if on_accent {
-            palette.on_accent_dim
+        let primary = if on_accent {
+            tokens.on_accent
         } else {
-            palette.secondary
+            tokens.chrome.label
+        };
+        let secondary = if on_accent {
+            tokens.on_accent_dim
+        } else {
+            tokens.chrome.secondary
         };
         let tertiary = if on_accent {
-            palette.on_accent_dim
+            tokens.on_accent_dim
         } else {
-            palette.tertiary
+            tokens.chrome.tertiary
         };
         let selection_bg = if on_accent {
             cx.theme().list_active
         } else {
-            palette.segment
+            tokens.chrome.segment
         };
-        let hover_bg = cx.theme().list_hover;
+        let hover_bg = tokens.hover;
         let path = row.path.clone();
         let depth = row.depth as f32;
 
@@ -510,7 +516,11 @@ impl Sidebar {
                     Icon::new(Glyph::FolderFilled)
                         .size(px(17.))
                         .ml(px(-1.))
-                        .text_color(if on_accent { palette.on_accent } else { palette.folder }),
+                        .text_color(if on_accent {
+                            tokens.on_accent
+                        } else {
+                            tokens.chrome.folder
+                        }),
                 )
                 .child(
                     div()
@@ -526,9 +536,9 @@ impl Sidebar {
                 let viewed = self.viewed.contains(&entry.change.path);
                 let comments = self.comments.get(&entry.change.path).copied().unwrap_or(0);
                 let icon_color = if on_accent {
-                    palette.on_accent
+                    tokens.on_accent
                 } else {
-                    tint(file_kind(&entry.name).tint(), cx)
+                    tokens.tint(file_kind(&entry.name).tint())
                 };
                 let name_color = if viewed && !on_accent { secondary } else { primary };
                 let toggle_path = path.clone();
@@ -590,8 +600,8 @@ impl Sidebar {
                     .child(status_badge(
                         change.status.code(),
                         tone,
-                        cx.theme().mono_font_family.clone(),
-                        &palette,
+                        font(cx.theme().mono_font_family.clone()),
+                        &tokens,
                     ))
             }
         };
@@ -656,7 +666,7 @@ mod tests {
 
     fn setup(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            diffpilot_ui_kit::init(cx);
             bind_keys(cx);
         });
     }

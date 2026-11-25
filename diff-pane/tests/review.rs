@@ -90,7 +90,7 @@ struct Opened {
 
 fn open(cx: &mut TestAppContext) -> (Opened, &mut VisualTestContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
+        diffpilot_ui_kit::init(cx);
         diffpilot_review_ui::init(cx);
     });
     let replier = Arc::new(Chunks::default());

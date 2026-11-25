@@ -1,9 +1,8 @@
-use crate::assets;
 use crate::markup::{Markup, SpanKind, pending_mention};
-use crate::palette::Palette;
 use crate::session::{ReviewEvent, ReviewSession, ThreadChange};
-use crate::ui::{Btn, Look, avatar, card_shell, icon_button, severity_badge};
 use diffpilot_core::threads::{CLAUDE_NAME, ReviewThread, ThreadAnchor, ThreadComment, ThreadId, mentions_claude};
+use diffpilot_ui_kit::components::{Button, Look, avatar, card_shell, icon_button, severity_badge};
+use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, ClipboardItem, Context, Entity, EventEmitter, Focusable, FontWeight, Hsla,
@@ -99,7 +98,7 @@ impl EventEmitter<CardEvent> for ThreadCard {}
 struct Fonts {
     base: gpui::Font,
     mono: gpui::Font,
-    palette: Palette,
+    theme: Theme,
 }
 
 impl Fonts {
@@ -108,7 +107,7 @@ impl Fonts {
         Self {
             base: font(theme.font_family.clone()),
             mono: font(theme.mono_font_family.clone()),
-            palette: Palette::of(cx),
+            theme: Theme::of(cx),
         }
     }
 
@@ -125,24 +124,24 @@ impl Fonts {
         let mut at = 0;
         for (range, kind) in &markup.spans {
             if range.start > at {
-                runs.push(run(range.start - at, &self.base, self.palette.text));
+                runs.push(run(range.start - at, &self.base, self.theme.ui.text));
             }
             runs.push(match kind {
                 SpanKind::Code => TextRun {
-                    background_color: Some(self.palette.text.opacity(0.07)),
-                    ..run(range.len(), &self.mono, self.palette.text)
+                    background_color: Some(self.theme.ui.text.opacity(0.07)),
+                    ..run(range.len(), &self.mono, self.theme.ui.text)
                 },
                 SpanKind::Mention => {
                     let mut bold = self.base.clone();
                     bold.weight = FontWeight::SEMIBOLD;
-                    run(range.len(), &bold, self.palette.claude)
+                    run(range.len(), &bold, self.theme.ui.claude)
                 }
-                SpanKind::Caret => run(range.len(), &self.base, self.palette.claude),
+                SpanKind::Caret => run(range.len(), &self.base, self.theme.ui.claude),
             });
             at = range.end;
         }
         if at < markup.text.len() {
-            runs.push(run(markup.text.len() - at, &self.base, self.palette.text));
+            runs.push(run(markup.text.len() - at, &self.base, self.theme.ui.text));
         }
         runs
     }
@@ -431,30 +430,30 @@ impl ThreadCard {
         }
     }
 
-    fn button(&self, label: &'static str, key: &'static str) -> Btn {
-        Btn::new((key, self.id.0 as usize)).label(label)
+    fn button(&self, label: &'static str, key: &'static str) -> Button {
+        Button::new((key, self.id.0 as usize)).label(label)
     }
 
-    fn ask_button(&self, busy: bool) -> Btn {
+    fn ask_button(&self, busy: bool) -> Button {
         self.button("Ask Claude", "ask")
             .look(Look::Claude)
-            .icon(assets::SPARKLES, 12.)
+            .icon(Glyph::Sparkles, 12.)
             .disabled(busy)
     }
 
     fn comment(&self, comment: &ThreadComment, first: bool, fonts: &Fonts) -> AnyElement {
-        let palette = fonts.palette;
+        let theme = fonts.theme;
         h_flex()
             .items_start()
             .gap(px(m::AVATAR_GAP))
             .px(px(m::SIDE))
             .pt(px(m::COMMENT_TOP))
             .pb(px(m::COMMENT_BOTTOM))
-            .when(!first, |row| row.border_t_1().border_color(palette.line))
+            .when(!first, |row| row.border_t_1().border_color(theme.ui.line))
             .child(avatar(
                 &comment.author,
                 comment.author == CLAUDE_NAME,
-                palette,
+                &theme,
                 m::AVATAR,
             ))
             .child(
@@ -466,7 +465,7 @@ impl ThreadCard {
                             .h(px(m::NAME_LINE))
                             .text_size(px(12.))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(palette.text)
+                            .text_color(theme.ui.text)
                             .child(comment.author.clone()),
                     )
                     .child(div().mt(px(m::NAME_GAP)).child(fonts.text(&self.markup_of(comment)))),
@@ -474,13 +473,7 @@ impl ThreadCard {
             .into_any_element()
     }
 
-    fn composer_view(
-        &self,
-        thread: &ReviewThread,
-        palette: Palette,
-        window: &Window,
-        cx: &Context<Self>,
-    ) -> AnyElement {
+    fn composer_view(&self, thread: &ReviewThread, theme: Theme, window: &Window, cx: &Context<Self>) -> AnyElement {
         let draft = thread.comments.is_empty();
         let (rows, has_text, mention, suggest) = self
             .composer
@@ -507,10 +500,10 @@ impl ThreadCard {
                 .items_center()
                 .rounded(cx.theme().radius)
                 .border_1()
-                .border_color(palette.line)
-                .bg(palette.field)
+                .border_color(theme.ui.line)
+                .bg(theme.background)
                 .text_size(px(12.5))
-                .text_color(palette.muted)
+                .text_color(theme.ui.muted)
                 .cursor_text()
                 .on_mouse_down(
                     MouseButton::Left,
@@ -525,7 +518,7 @@ impl ThreadCard {
             .pt(px(m::COMPOSER_TOP))
             .pb(px(m::COMPOSER_BOTTOM))
             .border_t_1()
-            .border_color(palette.line)
+            .border_color(theme.ui.line)
             .child(field)
             .when(suggest, |col| {
                 col.child(
@@ -535,15 +528,15 @@ impl ThreadCard {
                         .gap_2()
                         .items_center()
                         .text_size(px(12.))
-                        .text_color(palette.claude)
+                        .text_color(theme.ui.claude)
                         .cursor_pointer()
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(|this, _, window, cx| this.complete_mention(window, cx)),
                         )
-                        .child(Icon::empty().path(assets::SPARKLES).size_3())
+                        .child(Icon::new(Glyph::Sparkles).size_3())
                         .child("@claude")
-                        .child(div().text_color(palette.muted).child("Ask Claude in this thread")),
+                        .child(div().text_color(theme.ui.muted).child("Ask Claude in this thread")),
                 )
             })
             .when(has_text || draft, |col| {
@@ -561,10 +554,10 @@ impl ThreadCard {
                                     .h(px(20.))
                                     .items_center()
                                     .rounded_full()
-                                    .bg(palette.claude_bg)
-                                    .text_color(palette.claude)
+                                    .bg(theme.ui.claude_bg)
+                                    .text_color(theme.ui.claude)
                                     .text_size(px(11.))
-                                    .child(Icon::empty().path(assets::SPARKLES).size(px(11.)))
+                                    .child(Icon::new(Glyph::Sparkles).size(px(11.)))
                                     .child("Claude will reply"),
                             )
                         })
@@ -587,17 +580,17 @@ impl ThreadCard {
     }
 
     fn finding_card(&self, thread: &ReviewThread, fonts: &Fonts, window: &Window, cx: &Context<Self>) -> AnyElement {
-        let palette = fonts.palette;
+        let theme = fonts.theme;
         let Some(finding) = &thread.finding else {
             return div().into_any_element();
         };
-        let color = palette.severity(finding.severity);
+        let color = theme.severity(finding.severity);
         let place = match &thread.anchor {
             ThreadAnchor::Line { line, .. } => Some(format!("Line {line}")),
             _ => finding.location.clone(),
         };
         let border = if finding.severity == diffpilot_core::review::Severity::Nit {
-            palette.line
+            theme.ui.line
         } else {
             color.opacity(0.45)
         };
@@ -609,7 +602,7 @@ impl ThreadCard {
             .gap_2()
             .items_center()
             .text_size(px(m::TEXT_SIZE))
-            .child(severity_badge(finding.severity, palette, 15.))
+            .child(severity_badge(finding.severity, &theme, 15.))
             .child(
                 div()
                     .min_w_0()
@@ -646,11 +639,11 @@ impl ThreadCard {
                         icon_button(
                             ("fold", self.id.0 as usize),
                             if collapsed {
-                                assets::CHEVRON_DOWN
+                                Glyph::ChevronDown
                             } else {
-                                assets::CHEVRON_UP
+                                Glyph::ChevronUp
                             },
-                            palette.muted,
+                            theme.ui.muted,
                         )
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_collapsed(cx))),
                     ),
@@ -670,72 +663,69 @@ impl ThreadCard {
                         .gap_1p5()
                         .items_start()
                         .text_size(px(11.5))
-                        .text_color(palette.muted)
+                        .text_color(theme.ui.muted)
                         .child(
                             h_flex()
                                 .gap_1()
                                 .items_center()
-                                .text_color(palette.claude)
-                                .child(Icon::empty().path(assets::SPARKLES).size(px(11.)))
+                                .text_color(theme.ui.claude)
+                                .child(Icon::new(Glyph::Sparkles).size(px(11.)))
                                 .child(CLAUDE_NAME),
                         )
                         .children(place.map(|place| format!("·  {place}"))),
                 )
                 .children(thread.comments.iter().skip(1).map(|c| self.comment(c, false, fonts)))
                 .when(self.replying, |col| {
-                    col.child(self.composer_view(thread, palette, window, cx))
+                    col.child(self.composer_view(thread, theme, window, cx))
                 })
         });
-        card_shell(palette, border, cx.theme().is_dark())
+        card_shell(&theme, border)
             .child(header)
             .children(body)
             .into_any_element()
     }
 
     fn summary_card(&self, thread: &ReviewThread, fonts: &Fonts, window: &Window, cx: &Context<Self>) -> AnyElement {
-        let palette = fonts.palette;
+        let theme = fonts.theme;
         let first = thread.comments.first();
         let copy_text = first.map(|c| c.body.clone()).unwrap_or_default();
-        let header = h_flex()
-            .h(px(m::FINDING_HEADER))
-            .pl(px(m::SIDE))
-            .pr_2()
-            .gap_2()
-            .items_center()
-            .text_size(px(m::TEXT_SIZE))
-            .child(
-                div()
-                    .text_color(palette.claude)
-                    .child(Icon::empty().path(assets::SPARKLES).size(px(13.))),
-            )
-            .child(div().font_weight(FontWeight::SEMIBOLD).child("Review summary"))
-            .child(
-                div()
-                    .text_size(px(12.))
-                    .text_color(palette.muted)
-                    .child("Whole change · Claude"),
-            )
-            .child(div().flex_1())
-            .child(
-                h_flex()
-                    .gap_1()
-                    .child(
-                        self.button("Copy as Markdown", "copy")
-                            .icon(assets::COPY, 11.)
-                            .on_click(move |_, _, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()))
-                            }),
-                    )
-                    .child(
-                        self.button("Reply", "reply")
-                            .on_click(cx.listener(|this, _, window, cx| this.open_reply(window, cx))),
-                    )
-                    .child(
-                        self.button("Resolve", "resolve")
-                            .on_click(cx.listener(|this, _, _, cx| this.resolve(cx))),
-                    ),
-            );
-        card_shell(palette, palette.claude_border, cx.theme().is_dark())
+        let header =
+            h_flex()
+                .h(px(m::FINDING_HEADER))
+                .pl(px(m::SIDE))
+                .pr_2()
+                .gap_2()
+                .items_center()
+                .text_size(px(m::TEXT_SIZE))
+                .child(
+                    div()
+                        .text_color(theme.ui.claude)
+                        .child(Icon::new(Glyph::Sparkles).size(px(13.))),
+                )
+                .child(div().font_weight(FontWeight::SEMIBOLD).child("Review summary"))
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(theme.ui.muted)
+                        .child("Whole change · Claude"),
+                )
+                .child(div().flex_1())
+                .child(
+                    h_flex()
+                        .gap_1()
+                        .child(self.button("Copy as Markdown", "copy").icon(Glyph::Copy, 11.).on_click(
+                            move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone())),
+                        ))
+                        .child(
+                            self.button("Reply", "reply")
+                                .on_click(cx.listener(|this, _, window, cx| this.open_reply(window, cx))),
+                        )
+                        .child(
+                            self.button("Resolve", "resolve")
+                                .on_click(cx.listener(|this, _, _, cx| this.resolve(cx))),
+                        ),
+                );
+        card_shell(&theme, theme.ui.claude_border)
             .child(header)
             .child(div().px(px(m::SIDE)).pb(px(m::SUMMARY_BOTTOM)).child(first.map_or_else(
                 || div().h(px(m::LINE)).into_any_element(),
@@ -743,13 +733,13 @@ impl ThreadCard {
             )))
             .children(thread.comments.iter().skip(1).map(|c| self.comment(c, false, fonts)))
             .when(self.replying, |col| {
-                col.child(self.composer_view(thread, palette, window, cx))
+                col.child(self.composer_view(thread, theme, window, cx))
             })
             .into_any_element()
     }
 
     fn plain_card(&self, thread: &ReviewThread, fonts: &Fonts, window: &Window, cx: &Context<Self>) -> AnyElement {
-        let palette = fonts.palette;
+        let theme = fonts.theme;
         let busy = thread.comments.iter().any(|c| c.is_streaming);
         let claude = thread.comments.iter().any(|c| c.author == CLAUDE_NAME);
         let label = match &thread.anchor {
@@ -772,9 +762,9 @@ impl ThreadCard {
             .gap_2()
             .items_center()
             .border_b_1()
-            .border_color(palette.line)
+            .border_color(theme.ui.line)
             .text_size(px(12.))
-            .text_color(palette.muted)
+            .text_color(theme.ui.muted)
             .child(label)
             .when(thread.comments.is_empty(), |row| {
                 row.child(
@@ -784,8 +774,8 @@ impl ThreadCard {
                         .flex()
                         .items_center()
                         .rounded_full()
-                        .bg(palette.amber.opacity(0.16))
-                        .text_color(palette.amber)
+                        .bg(theme.amber.opacity(0.16))
+                        .text_color(theme.amber)
                         .text_size(px(11.))
                         .child("Draft"),
                 )
@@ -804,21 +794,17 @@ impl ThreadCard {
                         )
                     }),
             );
-        card_shell(
-            palette,
-            if claude { palette.claude_border } else { palette.line },
-            cx.theme().is_dark(),
-        )
-        .child(header)
-        .children(
-            thread
-                .comments
-                .iter()
-                .enumerate()
-                .map(|(index, c)| self.comment(c, index == 0, fonts)),
-        )
-        .child(self.composer_view(thread, palette, window, cx))
-        .into_any_element()
+        card_shell(&theme, if claude { theme.ui.claude_border } else { theme.ui.line })
+            .child(header)
+            .children(
+                thread
+                    .comments
+                    .iter()
+                    .enumerate()
+                    .map(|(index, c)| self.comment(c, index == 0, fonts)),
+            )
+            .child(self.composer_view(thread, theme, window, cx))
+            .into_any_element()
     }
 }
 
