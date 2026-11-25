@@ -19,6 +19,11 @@ struct PageMessageTests {
         #expect(PageMessage(body: ["type": "toggleCollapsed"]) == nil)
     }
 
+    @Test func parsesViewedToggles() {
+        #expect(PageMessage(body: ["type": "toggleViewed", "path": "a.ts"]) == .toggleViewed("a.ts"))
+        #expect(PageMessage(body: ["type": "toggleViewed"]) == nil)
+    }
+
     @Test func parsesScrollStats() {
         #expect(
             PageMessage(body: ["type": "scrollStats", "frames": 90, "p50": 8.3, "p95": 9.0, "max": 17.1])

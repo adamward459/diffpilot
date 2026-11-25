@@ -10,9 +10,7 @@ nonisolated struct FileChange: Hashable, Sendable {
     var status: FileStatus
     var additions: Int
     var deletions: Int
-    var isViewed: Bool
     var isUncommitted: Bool
-    var commentCount: Int
 }
 
 nonisolated struct ChangeSummary: Equatable, Sendable {
@@ -23,12 +21,12 @@ nonisolated struct ChangeSummary: Equatable, Sendable {
 
     init() {}
 
-    init(_ changes: [FileChange]) {
+    init(_ changes: [FileChange], viewed viewedPaths: Set<String> = []) {
         fileCount = changes.count
         for change in changes {
             additions += change.additions
             deletions += change.deletions
-            if change.isViewed { viewed += 1 }
+            if viewedPaths.contains(change.path) { viewed += 1 }
         }
     }
 }

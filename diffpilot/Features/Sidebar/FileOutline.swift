@@ -6,12 +6,32 @@ enum SidebarMode {
     case list
 }
 
+nonisolated struct FileMarks: Equatable, Sendable {
+    var viewed: Set<String> = []
+    var comments: [String: Int] = [:]
+}
+
 struct FileOutline: NSViewRepresentable {
     let root: FileNode
     let files: [FileNode]
     let filter: FileFilter
     let mode: SidebarMode
+    let marks: FileMarks
+    let toggleViewed: (String) -> Void
     @Binding var selection: String?
+
+    init(
+        root: FileNode, files: [FileNode], filter: FileFilter, mode: SidebarMode, marks: FileMarks = FileMarks(),
+        toggleViewed: @escaping (String) -> Void = { _ in }, selection: Binding<String?>
+    ) {
+        self.root = root
+        self.files = files
+        self.filter = filter
+        self.mode = mode
+        self.marks = marks
+        self.toggleViewed = toggleViewed
+        _selection = selection
+    }
 
     func makeCoordinator() -> OutlineController { OutlineController() }
 
@@ -20,13 +40,15 @@ struct FileOutline: NSViewRepresentable {
     func updateNSView(_ view: NSScrollView, context: Context) { context.coordinator.update(self) }
 }
 
-final class OutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
+final class OutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
     private let outline = NSOutlineView()
     private var top: [FileNode] = []
     private var collapsed: Set<String> = []
     private var isReloading = false
     private var isSelecting = false
     private var selection: Binding<String?> = .constant(nil)
+    private var toggleViewed: (String) -> Void = { _ in }
+    private var marks = FileMarks()
 
     private var shownRoot: FileNode?
     private var shownFilter: FileFilter?
@@ -48,6 +70,9 @@ final class OutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewD
         outline.backgroundColor = .clear
         outline.allowsMultipleSelection = false
         outline.setAccessibilityIdentifier("file-outline")
+        let menu = NSMenu()
+        menu.delegate = self
+        outline.menu = menu
         outline.dataSource = self
         outline.delegate = self
 
@@ -61,18 +86,52 @@ final class OutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewD
 
     func update(_ input: FileOutline) {
         selection = input.$selection
-        if shownRoot !== input.root || shownFilter != input.filter || shownMode != input.mode {
+        toggleViewed = input.toggleViewed
+        let structureChanged = shownRoot !== input.root || shownFilter != input.filter || shownMode != input.mode
+        let marksChanged = marks != input.marks
+        let previous = marks
+        marks = input.marks
+        if structureChanged {
             shownRoot = input.root
             shownFilter = input.filter
             shownMode = input.mode
             listMode = input.mode == .list
-            top =
-                listMode
-                ? FileTree.list(input.files, input.filter)
-                : FileTree.filter(input.root, input.filter).children
-            reload(expandAll: !listMode && input.filter.hasQuery)
+            rebuild(input)
+        } else if marksChanged {
+            if input.filter.hideViewed && previous.viewed != input.marks.viewed {
+                rebuild(input)
+            } else {
+                reloadRows(for: changedPaths(previous, input.marks))
+            }
         }
         select(path: input.selection)
+    }
+
+    private func rebuild(_ input: FileOutline) {
+        top =
+            listMode
+            ? FileTree.list(input.files, input.filter, viewed: input.marks.viewed)
+            : FileTree.filter(input.root, input.filter, viewed: input.marks.viewed).children
+        reload(expandAll: !listMode && input.filter.hasQuery)
+    }
+
+    private func changedPaths(_ old: FileMarks, _ new: FileMarks) -> Set<String> {
+        var paths = old.viewed.symmetricDifference(new.viewed)
+        for path in Set(old.comments.keys).union(new.comments.keys) where old.comments[path] != new.comments[path] {
+            paths.insert(path)
+        }
+        return paths
+    }
+
+    private func reloadRows(for paths: Set<String>) {
+        var rows = IndexSet()
+        for path in paths {
+            guard let node = find(path, in: top) else { continue }
+            let row = outline.row(forItem: node)
+            if row >= 0 { rows.insert(row) }
+        }
+        guard !rows.isEmpty else { return }
+        outline.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: 0))
     }
 
     private func reload(expandAll: Bool) {
@@ -143,7 +202,9 @@ final class OutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewD
         guard let node = item as? FileNode else { return nil }
         if let change = node.change {
             let cell = outlineView.makeView(withIdentifier: FileCell.id, owner: self) as? FileCell ?? FileCell()
-            cell.configure(node: node, change: change, showsParent: listMode)
+            cell.configure(
+                node: node, change: change, showsParent: listMode, isViewed: marks.viewed.contains(change.path),
+                commentCount: marks.comments[change.path] ?? 0)
             return cell
         }
         let cell = outlineView.makeView(withIdentifier: FolderCell.id, owner: self) as? FolderCell ?? FolderCell()
@@ -170,5 +231,19 @@ final class OutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewD
             let node = notification.userInfo?["NSObject"] as? FileNode
         else { return }
         if isExpanded { collapsed.remove(node.path) } else { collapsed.insert(node.path) }
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        guard let path = (outline.item(atRow: outline.clickedRow) as? FileNode)?.change?.path else { return }
+        let title = marks.viewed.contains(path) ? "Mark as Not Viewed" : "Mark as Viewed"
+        let item = NSMenuItem(title: title, action: #selector(toggleViewedFromMenu(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = path
+        menu.addItem(item)
+    }
+
+    @objc private func toggleViewedFromMenu(_ item: NSMenuItem) {
+        if let path = item.representedObject as? String { toggleViewed(path) }
     }
 }

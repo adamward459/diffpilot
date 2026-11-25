@@ -3,8 +3,8 @@
 
 The repo lives in .fixtures/ at the repo root. Xcode test builds give the sandboxed app read access to /.
 Branch `main` holds the base files; branch `feature` holds committed changes, and the
-working tree holds uncommitted ones. .git/diffpilot-review.json lists viewed files and
-comment counts, which git cannot store.
+working tree holds uncommitted ones. .fixtures/large-viewed.json lists the viewed files; the UI
+tests pass it to the app in DIFFPILOT_VIEWED_SEED.
 
   scripts/fixture_repo.py           build it if the script changed since the last build
   scripts/fixture_repo.py --force   rebuild it
@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent / ".fixtures" / "large"
+VIEWED_SEED = REPO.parent / "large-viewed.json"
 STAMP = REPO / ".git" / "diffpilot-fixture-version"
 GENERATED_COUNT = 1988
 CONTEXT_LINES = 3
@@ -35,7 +36,6 @@ class Spec:
     deletions: int
     viewed: bool = False
     uncommitted: bool = False
-    comments: int = 0
 
     @property
     def old_path(self) -> str:
@@ -45,11 +45,11 @@ class Spec:
 
 DESIGN = [
     Spec("docs/archive.md", "A", 19, 0, viewed=True),
-    Spec("src/api/archive.ts", "M", 38, 6, comments=1),
+    Spec("src/api/archive.ts", "M", 38, 6),
     Spec("src/api/client.ts", "M", 4, 1, viewed=True),
     Spec("src/components/inbox/ArchiveToast.tsx", "A", 48, 0),
     Spec("src/components/inbox/MessageRow.tsx", "M", 23, 15),
-    Spec("src/hooks/useArchiveUndo.ts", "A", 64, 0, uncommitted=True, comments=2),
+    Spec("src/hooks/useArchiveUndo.ts", "A", 64, 0, uncommitted=True),
     Spec("src/lib/queryKeys.ts", "M", 3, 1, viewed=True),
     Spec("src/types/message.ts", "M", 5, 0),
     Spec("tests/api/archive.test.ts", "M", 31, 4, uncommitted=True),
@@ -91,9 +91,10 @@ def generated(count: int, taken: set[str]) -> list[Spec]:
                 deletions=0 if status == "A" else (1 + rng.randrange(14) if status == "D" else rng.randrange(15)),
                 viewed=rng.randrange(100) < 25,
                 uncommitted=rng.randrange(100) < 12,
-                comments=1 + rng.randrange(5) if rng.randrange(100) < 15 else 0,
             )
         )
+        if rng.randrange(100) < 15:
+            rng.randrange(5)
     return specs
 
 
@@ -160,11 +161,7 @@ def build(specs: list[Spec]) -> None:
     git("commit", "-q", "-m", "feature")
     apply([s for s in specs if s.uncommitted])
     git("add", "-A")
-    review = {
-        "viewed": sorted(s.path for s in specs if s.viewed),
-        "comments": {s.path: s.comments for s in specs if s.comments},
-    }
-    (REPO / ".git" / "diffpilot-review.json").write_text(json.dumps(review, indent=2) + "\n")
+    VIEWED_SEED.write_text(json.dumps(sorted(s.path for s in specs if s.viewed), indent=2) + "\n")
 
 
 def main(argv: list[str]) -> int:

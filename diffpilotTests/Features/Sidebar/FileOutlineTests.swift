@@ -7,9 +7,7 @@ import Testing
 @MainActor
 struct FileOutlineExpansionTests {
     private func change(_ path: String) -> FileChange {
-        FileChange(
-            path: path, status: .modified, additions: 1, deletions: 0, isViewed: false, isUncommitted: false,
-            commentCount: 0)
+        FileChange(path: path, status: .modified, additions: 1, deletions: 0, isUncommitted: false)
     }
 
     private func setUp() -> (OutlineController, NSOutlineView) {
@@ -61,5 +59,48 @@ struct FileOutlineExpansionTests {
 
         controller.update(input(changes))
         #expect(titles(outline) == ["a", "b", "two.ts"])
+    }
+
+    private func marked(_ changes: [FileChange], _ marks: FileMarks, _ filter: FileFilter = FileFilter())
+        -> FileOutline
+    {
+        let root = FileTree.build(changes)
+        return FileOutline(
+            root: root, files: FileTree.files(in: root), filter: filter, mode: .tree, marks: marks,
+            selection: .constant(nil))
+    }
+
+    @Test func markChangesReloadOnlyTheChangedRows() {
+        let (controller, outline) = setUp()
+        let changes = (0..<30).map { change("src/f\($0).ts") }
+        let root = FileTree.build(changes)
+        func input(_ marks: FileMarks) -> FileOutline {
+            FileOutline(
+                root: root, files: FileTree.files(in: root), filter: FileFilter(), mode: .tree, marks: marks,
+                selection: .constant(nil))
+        }
+        controller.update(input(FileMarks()))
+        let rowsBefore = outline.numberOfRows
+
+        let counts = SidebarMetrics.measure {
+            controller.update(input(FileMarks(viewed: ["src/f3.ts"], comments: ["src/f7.ts": 2])))
+        }
+        #expect(counts.reloads == 0)
+        #expect(counts.cellsConfigured == 2)
+        #expect(outline.numberOfRows == rowsBefore)
+    }
+
+    @Test func hideViewedRefiltersWhenTheViewedSetChanges() {
+        let (controller, outline) = setUp()
+        let changes = [change("a/one.ts"), change("a/two.ts")]
+        let filter = FileFilter(hideViewed: true)
+        controller.update(marked(changes, FileMarks(), filter))
+        #expect(titles(outline) == ["a", "one.ts", "two.ts"])
+
+        let counts = SidebarMetrics.measure {
+            controller.update(marked(changes, FileMarks(viewed: ["a/one.ts"]), filter))
+        }
+        #expect(counts.reloads == 1)
+        #expect(titles(outline) == ["a", "two.ts"])
     }
 }

@@ -180,7 +180,7 @@ final class FileCell: NSTableCellView {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    func configure(node: FileNode, change: FileChange, showsParent: Bool) {
+    func configure(node: FileNode, change: FileChange, showsParent: Bool, isViewed: Bool, commentCount: Int) {
         SidebarMetrics.record { $0.cellsConfigured += 1 }
         let icon = Icons.file(named: node.name)
         self.icon.image = icon.image
@@ -189,10 +189,10 @@ final class FileCell: NSTableCellView {
         setAccessibilityLabel(node.name)
         setAccessibilityIdentifier(node.path)
         parent.stringValue = showsParent ? node.parentPath : ""
-        commentStack.isHidden = change.commentCount == 0
-        if change.commentCount > 0 { count.stringValue = String(change.commentCount) }
-        check.isHidden = !change.isViewed
-        isViewed = change.isViewed
+        commentStack.isHidden = commentCount == 0
+        if commentCount > 0 { count.stringValue = String(commentCount) }
+        check.isHidden = !isViewed
+        self.isViewed = isViewed
         isUncommitted = change.isUncommitted
         badgeText = change.status.rawValue
         applyColors()

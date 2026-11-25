@@ -1,8 +1,11 @@
 import Foundation
 
 enum Fixture {
-    static let large = URL(fileURLWithPath: #filePath)
+    private static let root = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .deletingLastPathComponent()
-        .appendingPathComponent(".fixtures/large").path
+        .appendingPathComponent(".fixtures")
+
+    static let large = root.appendingPathComponent("large").path
+    static let viewedSeed = root.appendingPathComponent("large-viewed.json").path
 }

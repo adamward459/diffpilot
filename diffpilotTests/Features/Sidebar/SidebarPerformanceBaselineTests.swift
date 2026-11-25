@@ -12,7 +12,8 @@ struct SidebarPerformanceBaselineTests {
     private static let tolerance = 0.05
 
     private static func scenarios() -> [String: MetricCounts] {
-        let changes = SampleChanges.generate(count: 10_000)
+        let sample = SampleChanges.sample(count: 10_000)
+        let changes = sample.changes
         var root = FileNode.empty
         var files: [FileNode] = []
         var result: [String: MetricCounts] = [:]
@@ -27,13 +28,16 @@ struct SidebarPerformanceBaselineTests {
         result["toggle-uncommitted"] = SidebarMetrics.measure {
             _ = FileTree.filter(root, FileFilter(onlyUncommitted: true))
         }
-        result["toggle-hide-viewed"] = SidebarMetrics.measure { _ = FileTree.list(files, FileFilter(hideViewed: true)) }
+        result["toggle-hide-viewed"] = SidebarMetrics.measure {
+            _ = FileTree.list(files, FileFilter(hideViewed: true), viewed: sample.viewed)
+        }
         return result
     }
 
     private static func outlineScenarios() -> (counts: [String: MetricCounts], visibleRows: Int) {
-        let changes = SampleChanges.generate(count: 5_000)
-        let root = FileTree.build(changes)
+        let sample = SampleChanges.sample(count: 5_000)
+        let marks = FileMarks(viewed: sample.viewed, comments: sample.comments)
+        let root = FileTree.build(sample.changes)
         let files = FileTree.files(in: root)
         let controller = OutlineController()
         let scroll = controller.makeScrollView()
@@ -43,7 +47,7 @@ struct SidebarPerformanceBaselineTests {
         window.contentView = scroll
         let outline = scroll.documentView as! NSOutlineView
         func input(_ filter: FileFilter, _ mode: SidebarMode = .tree) -> FileOutline {
-            FileOutline(root: root, files: files, filter: filter, mode: mode, selection: .constant(nil))
+            FileOutline(root: root, files: files, filter: filter, mode: mode, marks: marks, selection: .constant(nil))
         }
         var result: [String: MetricCounts] = [:]
 

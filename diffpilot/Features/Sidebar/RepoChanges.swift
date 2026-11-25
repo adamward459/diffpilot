@@ -1,24 +1,15 @@
 import Foundation
 
-nonisolated struct ReviewState: Decodable, Equatable {
-    var viewed: Set<String> = []
-    var comments: [String: Int] = [:]
-}
-
 nonisolated enum RepoChanges {
     static func load(repo: URL, comparison: Comparison) throws -> [FileChange] {
-        let review =
-            (try? Data(contentsOf: repo.appendingPathComponent(".git/diffpilot-review.json")))
-            .flatMap { try? JSONDecoder().decode(ReviewState.self, from: $0) } ?? ReviewState()
         return parse(
             nameStatus: try Git.run(repo, ["diff", "-z", "-M", "--name-status"] + comparison.revisions),
             numstat: try Git.run(repo, ["diff", "-z", "-M", "--numstat"] + comparison.revisions),
             uncommitted: comparison.includesUncommitted
-                ? try Git.run(repo, ["diff", "-z", "--name-only", "HEAD"]) : "",
-            review: review)
+                ? try Git.run(repo, ["diff", "-z", "--name-only", "HEAD"]) : "")
     }
 
-    static func parse(nameStatus: String, numstat: String, uncommitted: String, review: ReviewState) -> [FileChange] {
+    static func parse(nameStatus: String, numstat: String, uncommitted: String) -> [FileChange] {
         var statuses: [String: FileStatus] = [:]
         var fields = nameStatus.split(separator: "\0", omittingEmptySubsequences: false).makeIterator()
         while let code = fields.next(), !code.isEmpty {
@@ -46,8 +37,7 @@ nonisolated enum RepoChanges {
             let (additions, deletions) = counts[path] ?? (0, 0)
             return FileChange(
                 path: path, status: status, additions: additions, deletions: deletions,
-                isViewed: review.viewed.contains(path), isUncommitted: uncommittedPaths.contains(path),
-                commentCount: review.comments[path] ?? 0)
+                isUncommitted: uncommittedPaths.contains(path))
         }
         .sorted { $0.path < $1.path }
     }

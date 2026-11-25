@@ -7,6 +7,7 @@ final class SidebarUITests: XCTestCase {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchEnvironment["DIFFPILOT_REPO"] = Fixture.large
+        app.launchEnvironment["DIFFPILOT_VIEWED_SEED"] = Fixture.viewedSeed
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         XCTAssertTrue(app.staticTexts["summary"].waitForExistence(timeout: 10))
@@ -130,5 +131,15 @@ final class SidebarUITests: XCTestCase {
         XCTAssertFalse(row("archive.md").waitForExistence(timeout: 2))
         row("docs").typeKey(.rightArrow, modifierFlags: [])
         XCTAssertTrue(row("archive.md").waitForExistence(timeout: 5))
+    }
+
+    func testMarkingAFileViewedFromThePageHeaderRaisesTheSidebarCount() {
+        let toggle = app.descendants(matching: .any)["viewed-docs/CacheConfig.md"].firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        toggle.click()
+        let summary = app.staticTexts["summary"]
+        let raised = NSPredicate(format: "value CONTAINS %@", "494/2,000 viewed")
+        expectation(for: raised, evaluatedWith: summary)
+        waitForExpectations(timeout: 10)
     }
 }

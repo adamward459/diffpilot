@@ -60,6 +60,7 @@ export type PageMessage =
   | { type: 'firstPaint' }
   | { type: 'visibleFile'; path: string }
   | { type: 'toggleCollapsed'; path: string }
+  | { type: 'toggleViewed'; path: string }
   | { type: 'scrollStats'; frames: number; p50: number; p95: number; max: number }
   | { type: 'createThread'; path: string; side?: Side; line?: number }
   | { type: 'post'; thread: number; text: string }

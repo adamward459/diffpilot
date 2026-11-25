@@ -60,10 +60,11 @@ final class DiffPaneUITests: XCTestCase {
     func testViewedToggleInTheToolbarMarksAndUnmarksTheTopFile() {
         XCTAssertTrue(pane.waitUntil { pane.topFile == "docs/archive.md" }, pane.stateValue)
         XCTAssertTrue(pane.viewedToggle.waitForExistence(timeout: 5))
+        let before = pane.viewedCount
         pane.viewedToggle.click()
-        XCTAssertTrue(pane.waitUntil { pane.viewedCount == 1 }, pane.stateValue)
+        XCTAssertTrue(pane.waitUntil { pane.viewedCount != before }, pane.stateValue)
         pane.viewedToggle.click()
-        XCTAssertTrue(pane.waitUntil { pane.viewedCount == 0 }, pane.stateValue)
+        XCTAssertTrue(pane.waitUntil { pane.viewedCount == before }, pane.stateValue)
     }
 
     func testToolbarControlsAreNativeAndSitAboveThePane() {

@@ -164,7 +164,7 @@ nonisolated enum FileTree {
         return result
     }
 
-    static func filter(_ root: FileNode, _ filter: FileFilter) -> FileNode {
+    static func filter(_ root: FileNode, _ filter: FileFilter, viewed: Set<String> = []) -> FileNode {
         guard filter.isActive else { return root }
         let matcher = FileMatcher(filter.query)
         var visited = 0
@@ -178,18 +178,18 @@ nonisolated enum FileTree {
                 let kept = node.children.compactMap(prune)
                 return kept.isEmpty ? nil : FileNode(folder: node.name, path: node.path, children: kept)
             }
-            return accepts(node, change, filter, matcher) != nil ? node : nil
+            return accepts(node, change, filter, matcher, viewed) != nil ? node : nil
         }
         return FileNode(folder: "", path: "", children: root.children.compactMap(prune))
     }
 
-    static func list(_ files: [FileNode], _ filter: FileFilter) -> [FileNode] {
+    static func list(_ files: [FileNode], _ filter: FileFilter, viewed: Set<String> = []) -> [FileNode] {
         guard filter.isActive else { return files }
         let matcher = FileMatcher(filter.query)
         SidebarMetrics.record { $0.nodesVisited += files.count }
         var scored: [(score: Int, node: FileNode)] = []
         for node in files {
-            if let change = node.change, let score = accepts(node, change, filter, matcher) {
+            if let change = node.change, let score = accepts(node, change, filter, matcher, viewed) {
                 scored.append((score, node))
             }
         }
@@ -199,11 +199,11 @@ nonisolated enum FileTree {
         return scored.map(\.node)
     }
 
-    private static func accepts(_ node: FileNode, _ change: FileChange, _ filter: FileFilter, _ matcher: FileMatcher?)
-        -> Int?
-    {
+    private static func accepts(
+        _ node: FileNode, _ change: FileChange, _ filter: FileFilter, _ matcher: FileMatcher?, _ viewed: Set<String>
+    ) -> Int? {
         if filter.onlyUncommitted && !change.isUncommitted { return nil }
-        if filter.hideViewed && change.isViewed { return nil }
+        if filter.hideViewed && viewed.contains(change.path) { return nil }
         guard let matcher else { return 0 }
         return matcher.score(node)
     }

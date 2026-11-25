@@ -13,6 +13,7 @@ nonisolated enum PageMessage: Equatable, Sendable {
     case firstPaint
     case visibleFile(String)
     case toggleCollapsed(String)
+    case toggleViewed(String)
     case scrollStats(ScrollStats)
     case createThread(ThreadAnchor)
     case post(thread: Int, text: String)
@@ -31,6 +32,9 @@ nonisolated enum PageMessage: Equatable, Sendable {
         case "toggleCollapsed":
             guard let path = fields["path"] as? String else { return nil }
             self = .toggleCollapsed(path)
+        case "toggleViewed":
+            guard let path = fields["path"] as? String else { return nil }
+            self = .toggleViewed(path)
         case "scrollStats":
             guard let frames = fields["frames"] as? Int, let median = fields["p50"] as? Double,
                 let p95 = fields["p95"] as? Double, let max = fields["max"] as? Double

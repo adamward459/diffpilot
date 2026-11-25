@@ -268,10 +268,40 @@ struct DiffPaneModelTests {
         let recorder = Recorder()
         let model = makeModel(recorder, repo: nil)
         model.toggleViewed("a.ts")
-        #expect(model.viewed == ["a.ts"])
+        #expect(model.viewed.paths == ["a.ts"])
         model.toggleViewed("a.ts")
-        #expect(model.viewed.isEmpty)
+        #expect(model.viewed.paths.isEmpty)
         #expect(recorder.fileStates == ["a.ts true true", "a.ts false false"])
+    }
+
+    @Test func theViewedToggleFromThePageWritesThroughToTheSharedStore() {
+        let recorder = Recorder()
+        let store = ViewedStore()
+        let key = ViewedKey(repo: "/r", branch: "b")
+        let model = DiffPaneModel(
+            repo: nil, viewed: ViewedFiles(key: key, store: store), send: { recorder.commands.append($0) })
+        model.handle(.toggleViewed("a.ts"))
+        #expect(store.load(key) == ["a.ts"])
+        #expect(recorder.fileStates == ["a.ts true true"])
+    }
+
+    @Test func startsWithTheStoredViewedFiles() {
+        let recorder = Recorder()
+        let store = ViewedStore()
+        let key = ViewedKey(repo: "/r", branch: "b")
+        store.save(key, ["a.ts"])
+        let model = DiffPaneModel(
+            repo: nil, viewed: ViewedFiles(key: key, store: store), send: { recorder.commands.append($0) })
+        model.handle(.ready)
+        #expect(recorder.fileStates == ["a.ts true false"])
+    }
+
+    @Test func countsThreadsPerFile() {
+        let model = makeModel(Recorder(), repo: nil)
+        model.handle(.createThread(.file(path: "a.ts")))
+        model.handle(.createThread(.line(path: "a.ts", side: .new, line: 3)))
+        model.handle(.createThread(.file(path: "b.ts")))
+        #expect(model.commentCounts == ["a.ts": 2, "b.ts": 1])
     }
 
     @Test func pageCollapseTogglesKeepTheViewedFlag() {

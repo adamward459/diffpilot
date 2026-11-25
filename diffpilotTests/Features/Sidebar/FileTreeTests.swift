@@ -3,10 +3,8 @@ import Testing
 
 @testable import diffpilot
 
-private func change(_ path: String, viewed: Bool = false, uncommitted: Bool = false) -> FileChange {
-    FileChange(
-        path: path, status: .modified, additions: 1, deletions: 0, isViewed: viewed, isUncommitted: uncommitted,
-        commentCount: 0)
+private func change(_ path: String, uncommitted: Bool = false) -> FileChange {
+    FileChange(path: path, status: .modified, additions: 1, deletions: 0, isUncommitted: uncommitted)
 }
 
 private func names(_ node: FileNode) -> [String] { node.children.map(\.name) }
@@ -91,11 +89,12 @@ struct FileFilterTests {
 
 struct FileToggleTests {
     private let sample = FileTree.build([
-        change("a/one.ts", viewed: true, uncommitted: true),
-        change("a/two.ts", viewed: false, uncommitted: true),
-        change("b/three.ts", viewed: true, uncommitted: false),
+        change("a/one.ts", uncommitted: true),
+        change("a/two.ts", uncommitted: true),
+        change("b/three.ts", uncommitted: false),
         change("b/four.ts"),
     ])
+    private let viewed: Set<String> = ["a/one.ts", "b/three.ts"]
 
     @Test func onlyUncommittedDropsCommittedFilesAndEmptyFolders() {
         let result = FileTree.filter(sample, FileFilter(onlyUncommitted: true))
@@ -104,12 +103,13 @@ struct FileToggleTests {
     }
 
     @Test func hideViewedDropsViewedFiles() {
-        let result = FileTree.filter(sample, FileFilter(hideViewed: true))
+        let result = FileTree.filter(sample, FileFilter(hideViewed: true), viewed: viewed)
         #expect(paths(result) == ["a/two.ts", "b/four.ts"])
     }
 
     @Test func togglesCombineWithQuery() {
-        let result = FileTree.filter(sample, FileFilter(query: "t", onlyUncommitted: true, hideViewed: true))
+        let result = FileTree.filter(
+            sample, FileFilter(query: "t", onlyUncommitted: true, hideViewed: true), viewed: viewed)
         #expect(paths(result) == ["a/two.ts"])
     }
 }
@@ -128,9 +128,9 @@ struct FileListTests {
     }
 
     @Test func emptyQueryKeepsOrderAndAppliesToggles() {
-        let files = FileTree.files(in: FileTree.build([change("a.ts", viewed: true), change("b.ts")]))
+        let files = FileTree.files(in: FileTree.build([change("a.ts"), change("b.ts")]))
         #expect(FileTree.list(files, FileFilter()).map(\.path) == ["a.ts", "b.ts"])
-        #expect(FileTree.list(files, FileFilter(hideViewed: true)).map(\.path) == ["b.ts"])
+        #expect(FileTree.list(files, FileFilter(hideViewed: true), viewed: ["a.ts"]).map(\.path) == ["b.ts"])
     }
 }
 

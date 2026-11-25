@@ -37,7 +37,11 @@ private struct RepoView: View {
         NavigationSplitView {
             Group {
                 if let session {
-                    FileSidebar(model: session.sidebar).id(session.comparison)
+                    FileSidebar(
+                        model: session.sidebar, comments: session.diff.commentCounts,
+                        toggleViewed: session.diff.toggleViewed
+                    )
+                    .id(session.comparison)
                 } else {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -59,7 +63,7 @@ private struct RepoView: View {
         .task { await picker.load() }
         .task(id: picker.comparison) {
             guard let comparison = picker.comparison else { return }
-            let next = RepoSession(repo: picker.repo, comparison: comparison)
+            let next = RepoSession(repo: picker.repo, comparison: comparison, refs: picker.refs)
             session = next
             async let sidebar: Void = next.sidebar.load()
             async let diff: Void = next.diff.load()
@@ -73,9 +77,10 @@ private struct RepoSession {
     let sidebar: SidebarModel
     let diff: DiffPaneModel
 
-    init(repo: URL, comparison: Comparison) {
+    init(repo: URL, comparison: Comparison, refs: Refs?) {
         self.comparison = comparison
-        sidebar = SidebarModel(repo: repo, comparison: comparison)
-        diff = DiffPaneModel(repo: repo, comparison: comparison)
+        let viewed = ViewedFiles(key: ViewedKey(repo: repo, comparison: comparison, refs: refs))
+        sidebar = SidebarModel(repo: repo, comparison: comparison, viewed: viewed)
+        diff = DiffPaneModel(repo: repo, comparison: comparison, viewed: viewed)
     }
 }
