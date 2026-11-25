@@ -1,15 +1,34 @@
 use crate::review::ReviewRequest;
 
 const TEMPLATE: &str = include_str!("review_prompt.md");
+const TOOLS_STEP: &str = include_str!("review_tools_step.md");
+const STRUCTURED_INTRO: &str =
+    "You return your review as structured output. diffpilot shows each finding as a comment on its line.";
+const TOOLS_INTRO: &str = "You leave your review as comments through the diffpilot MCP tools. diffpilot shows each finding as a comment on its line as soon as you add it.";
+const STEP_START: &str = "## Step 3: Return findings";
+const STEP_END: &str = "## How to write findings";
 
 pub fn render(request: &ReviewRequest) -> String {
-    TEMPLATE
+    render_template(TEMPLATE, request)
+}
+
+fn render_template(template: &str, request: &ReviewRequest) -> String {
+    template
         .replace("{{revisions}}", &diff_arguments(request))
         .replace("{{focus}}", &request.focus)
         .replace(
             "{{instructions}}",
             &(instructions(&request.instructions) + &scope(&request.paths)),
         )
+}
+
+/// The same review, for a run that has the diffpilot MCP server: findings land as comments while it works.
+pub fn render_with_tools(request: &ReviewRequest) -> String {
+    let template = match (TEMPLATE.find(STEP_START), TEMPLATE.find(STEP_END)) {
+        (Some(start), Some(end)) if start < end => format!("{}{}{}", &TEMPLATE[..start], TOOLS_STEP, &TEMPLATE[end..]),
+        _ => TEMPLATE.to_string(),
+    };
+    render_template(&template.replace(STRUCTURED_INTRO, TOOLS_INTRO), request)
 }
 
 pub fn diff_arguments(request: &ReviewRequest) -> String {
@@ -65,6 +84,23 @@ mod tests {
         assert!(prompt.contains("git diff --merge-base main -- 'src/a b.ts'"));
         assert!(prompt.contains("## Scope"));
         assert!(!prompt.contains("{{"));
+    }
+
+    #[test]
+    fn the_tools_prompt_swaps_the_output_step_and_keeps_everything_else() {
+        let mut scoped = request(&["--merge-base", "main"], "Tests");
+        scoped.paths = vec!["src/a.ts".into()];
+        let tools = render_with_tools(&scoped);
+        let plain = render(&scoped);
+        assert!(tools.contains("mcp__diffpilot__add_comment"));
+        assert!(tools.contains("git diff --merge-base main -- 'src/a.ts'"));
+        assert!(tools.contains("## Scope"));
+        assert!(tools.contains("## Step 2: Analyze"));
+        assert!(tools.contains("## How to write findings"));
+        assert!(!tools.contains("structured output"));
+        assert!(!tools.contains("Step 3: Return findings"));
+        assert!(!tools.contains("{{"));
+        assert!(plain.contains("structured output") && !plain.contains("mcp__diffpilot"));
     }
 
     #[test]

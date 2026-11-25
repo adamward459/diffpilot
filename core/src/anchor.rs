@@ -42,13 +42,10 @@ fn last_line(thread: &ReviewThread, line: u32) -> u32 {
     thread.end_line.filter(|end| *end >= line).unwrap_or(line)
 }
 
-/// The text of the thread's lines, when the diff shows all of them.
-pub fn text_of(thread: &ReviewThread, files: &[FileDiff]) -> Option<String> {
-    let ThreadAnchor::Line { path, side, line } = &thread.anchor else {
-        return None;
-    };
-    let lines = side_lines(file_of(files, path)?, *side);
-    let texts: Option<Vec<&str>> = (*line..=last_line(thread, *line))
+/// The text of lines `start..=end`, when the diff shows all of them.
+pub fn lines_text(file: &FileDiff, side: Side, start: u32, end: u32) -> Option<String> {
+    let lines = side_lines(file, side);
+    let texts: Option<Vec<&str>> = (start..=end.max(start))
         .map(|number| {
             lines
                 .binary_search_by_key(&number, |(shown, _)| *shown)
@@ -57,6 +54,14 @@ pub fn text_of(thread: &ReviewThread, files: &[FileDiff]) -> Option<String> {
         })
         .collect();
     texts.map(|texts| texts.join("\n"))
+}
+
+/// The text of the thread's lines, when the diff shows all of them.
+pub fn text_of(thread: &ReviewThread, files: &[FileDiff]) -> Option<String> {
+    let ThreadAnchor::Line { path, side, line } = &thread.anchor else {
+        return None;
+    };
+    lines_text(file_of(files, path)?, *side, *line, last_line(thread, *line))
 }
 
 pub fn place(thread: &ReviewThread, files: &[FileDiff]) -> Placement {

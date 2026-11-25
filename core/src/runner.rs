@@ -7,8 +7,9 @@
 use crate::cancel::CancelToken;
 use crate::claude::{self, ReviewError};
 use crate::diff::FileDiff;
+use crate::mcp::{Binding, McpBridge, Notice, PermissionRequest};
 use crate::paths::{sibling_binary, standardized};
-use crate::policy::{EditPermission, PolicyError, ToolPolicy, hook_settings};
+use crate::policy::{EditPermission, PolicyError, ToolPolicy, hook_settings, mcp_config};
 use crate::review::{ReviewModel, ReviewRequest};
 use crate::run::{Progress, Run, RunId, RunKind, RunState, RunSummary};
 use crate::settings::app_support_dir;
@@ -20,7 +21,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunEvent {
@@ -43,6 +44,9 @@ pub enum RunEvent {
         run: RunId,
         session: SessionId,
     },
+    /// Claude wants to edit or run a command and the edit permission says to ask. Answer with
+    /// `RunEngine::answer_permission`.
+    PermissionRequest(PermissionRequest),
     Finished {
         run: RunId,
         state: RunState,
@@ -139,6 +143,23 @@ pub struct EngineConfig {
     pub run_dir: PathBuf,
     /// How many editing runs per review keep their snapshot, and so can still show a change or be undone.
     pub keep_snapshots: usize,
+    /// The MCP server. Without it a run cannot add or answer comments, and cannot ask before an edit.
+    pub mcp: Option<McpLaunch>,
+}
+
+pub struct McpLaunch {
+    pub bridge: Arc<McpBridge>,
+    /// The `diffpilot-mcp` binary that `claude` starts.
+    pub binary: PathBuf,
+}
+
+impl McpLaunch {
+    pub fn new(bridge: Arc<McpBridge>) -> Self {
+        Self {
+            bridge,
+            binary: sibling_binary("diffpilot-mcp").unwrap_or_else(|| PathBuf::from("diffpilot-mcp")),
+        }
+    }
 }
 
 impl EngineConfig {
@@ -150,6 +171,7 @@ impl EngineConfig {
             guard_binary: sibling_binary("diffpilot-guard").unwrap_or_else(|| PathBuf::from("diffpilot-guard")),
             run_dir: base.join("runs"),
             keep_snapshots: KEEP_SNAPSHOTS,
+            mcp: None,
         }
     }
 }
@@ -204,6 +226,31 @@ impl RunEngine {
 
     pub fn store(&self) -> &Arc<Store> {
         &self.inner.config.store
+    }
+
+    pub fn has_mcp(&self) -> bool {
+        self.inner.has_mcp()
+    }
+
+    /// A review request that fits this engine: findings arrive as comments while the run goes when the MCP
+    /// server is there, and as structured output at the end when it is not.
+    pub fn review_request(&self, request: &ReviewRequest, session: SessionKey, title: &str) -> RunRequest {
+        if !self.has_mcp() {
+            return RunRequest::review(request, session, title);
+        }
+        let mut run = RunRequest::review(request, session, title);
+        run.prompt = crate::prompt::render_with_tools(request);
+        run.json_schema = None;
+        run
+    }
+
+    /// Answers a `RunEvent::PermissionRequest`. False when the request is gone, for example because the run ended.
+    pub fn answer_permission(&self, id: u64, allow: bool) -> bool {
+        self.inner
+            .config
+            .mcp
+            .as_ref()
+            .is_some_and(|mcp| mcp.bridge.answer_permission(id, allow))
     }
 
     /// Every subscriber gets every event from now on.
@@ -353,24 +400,10 @@ impl RunEngine {
         Ok((run, taken))
     }
 
-    /// Counts a thread as answered for the "2 of 4" progress. Called when Claude replies to it or marks it addressed.
+    /// Counts a thread as answered for the "2 of 4" progress. The bridge calls this when Claude replies to a
+    /// thread or marks it addressed.
     pub fn note_thread_answered(&self, run: RunId, thread: ThreadId) {
-        let changed = {
-            let mut state = self.inner.state.lock().unwrap();
-            let Some(live) = state.live.get_mut(&run) else { return };
-            if !live.request.threads.contains(&thread) || !live.answered.insert(thread) {
-                false
-            } else {
-                live.run.units = Some(Progress {
-                    done: live.answered.len() as u32,
-                    total: live.request.threads.len() as u32,
-                });
-                true
-            }
-        };
-        if changed {
-            self.inner.emit(RunEvent::Updated { run });
-        }
+        self.inner.note_thread_answered(run, thread);
     }
 }
 
@@ -387,7 +420,66 @@ impl Inner {
     }
 
     fn has_mcp(&self) -> bool {
-        false
+        self.config.mcp.is_some()
+    }
+
+    fn note_thread_answered(&self, run: RunId, thread: ThreadId) {
+        let changed = {
+            let mut state = self.state.lock().unwrap();
+            let Some(live) = state.live.get_mut(&run) else { return };
+            if !live.request.threads.contains(&thread) || !live.answered.insert(thread) {
+                false
+            } else {
+                live.run.units = Some(Progress {
+                    done: live.answered.len() as u32,
+                    total: live.request.threads.len() as u32,
+                });
+                true
+            }
+        };
+        if changed {
+            self.emit(RunEvent::Updated { run });
+        }
+    }
+
+    fn notice(&self, run: RunId, session: SessionId, notice: Notice) {
+        match notice {
+            Notice::ThreadsChanged => self.emit(RunEvent::ThreadsChanged { run, session }),
+            Notice::ThreadAnswered(thread) => self.note_thread_answered(run, thread),
+            Notice::Permission(request) => self.emit(RunEvent::PermissionRequest(request)),
+        }
+    }
+
+    /// Registers the run with the bridge and writes the `--mcp-config` file. Returns the token and the file.
+    fn attach_mcp(self: &Arc<Self>, id: RunId, request: &RunRequest, dir: &Path) -> Option<(String, PathBuf)> {
+        let mcp = self.config.mcp.as_ref()?;
+        let session = self.with_run(id, |live| live.run.session)?;
+        let weak: Weak<Inner> = Arc::downgrade(self);
+        let token = mcp.bridge.register(Binding {
+            run: id,
+            session,
+            repo: request.repo.clone(),
+            kind: request.kind,
+            revisions: request.revisions.clone(),
+            threads: request.threads.clone(),
+            permission: request.edit_permission,
+            notify: Arc::new(move |notice| {
+                if let Some(inner) = weak.upgrade() {
+                    inner.notice(id, session, notice);
+                }
+            }),
+        });
+        let file = dir.join("mcp.json");
+        let config = mcp_config(&mcp.binary, mcp.bridge.socket_path(), &token);
+        let written = std::fs::write(&file, serde_json::to_vec_pretty(&config).unwrap_or_default()).and_then(|()| {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600))
+        });
+        if written.is_err() {
+            mcp.bridge.unregister(&token);
+            return None;
+        }
+        Some((token, file))
     }
 
     /// A run with no working hook would be allowed to push, so it never starts without one.
@@ -483,6 +575,14 @@ impl Inner {
             "--settings",
         ]);
         command.arg(&settings);
+        let attached = self.attach_mcp(id, request, &dir);
+        if self.has_mcp() && attached.is_none() {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Ending::Failed("Could not set up the diffpilot MCP server for this run.".into());
+        }
+        if let Some((_, file)) = &attached {
+            command.arg("--mcp-config").arg(file);
+        }
         if let Some(schema) = &request.json_schema {
             command.args(["--json-schema", schema]);
         }
@@ -499,6 +599,9 @@ impl Inner {
         });
         if let Some(tail) = lines.lock().unwrap().finish() {
             self.apply_line(id, &tail);
+        }
+        if let (Some((token, _)), Some(mcp)) = (&attached, &self.config.mcp) {
+            mcp.bridge.unregister(token);
         }
         let ending = self.ending_of(id, result);
         if request.kind.edits() {

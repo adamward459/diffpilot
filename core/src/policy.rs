@@ -125,6 +125,19 @@ impl ToolPolicy {
     }
 }
 
+/// The file passed with `--mcp-config`: `diffpilot-mcp` as a stdio server that forwards to the app over `socket`.
+pub fn mcp_config(binary: &Path, socket: &Path, token: &str) -> Value {
+    json!({
+        "mcpServers": {
+            MCP_SERVER: {
+                "type": "stdio",
+                "command": binary.to_string_lossy(),
+                "args": ["--socket", socket.to_string_lossy(), "--token", token],
+            }
+        }
+    })
+}
+
 pub fn shell_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }

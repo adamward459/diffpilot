@@ -7,6 +7,7 @@ pub mod diff;
 pub mod file_kind;
 pub mod git;
 pub mod guard;
+pub mod mcp;
 pub mod policy;
 pub mod prompt;
 pub mod refs;
