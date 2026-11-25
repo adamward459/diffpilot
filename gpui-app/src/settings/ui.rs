@@ -230,7 +230,7 @@ impl RenderOnce for Row {
             .gap(px(12.))
             .px(px(13.))
             .py(px(10.))
-            .min_h(px(52.))
+            .min_h(px(if self.sub.is_some() { 52. } else { 40. }))
             .when(self.dim, |this| this.opacity(0.55))
             .when_some(self.leading, |this, path| this.child(icon(path, 14., t.muted)))
             .child(

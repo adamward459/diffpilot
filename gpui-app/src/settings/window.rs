@@ -521,7 +521,7 @@ pub fn open_window_options(cx: &App) -> gpui::WindowOptions {
             appears_transparent: true,
             traffic_light_position: Some(gpui::point(px(14.), px(14.))),
         }),
-        is_resizable: false,
+        window_min_size: Some(gpui::size(px(780.), px(480.))),
         ..Default::default()
     }
 }
