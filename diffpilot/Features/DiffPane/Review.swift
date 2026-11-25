@@ -52,6 +52,20 @@ nonisolated struct ReviewModel: Equatable, Hashable, Sendable {
     var effort: Effort
 
     var title: String { "\(name.rawValue.capitalized) · \(effort.rawValue.capitalized)" }
+
+    private static let nameKey = "reviewModel.name"
+    private static let effortKey = "reviewModel.effort"
+
+    static func saved(defaults: UserDefaults = .standard) -> ReviewModel {
+        ReviewModel(
+            name: defaults.string(forKey: nameKey).flatMap(Name.init(rawValue:)) ?? standard.name,
+            effort: defaults.string(forKey: effortKey).flatMap(Effort.init(rawValue:)) ?? standard.effort)
+    }
+
+    func save(defaults: UserDefaults = .standard) {
+        defaults.set(name.rawValue, forKey: Self.nameKey)
+        defaults.set(effort.rawValue, forKey: Self.effortKey)
+    }
 }
 
 enum ReviewScope: Equatable {

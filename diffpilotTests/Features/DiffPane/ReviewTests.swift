@@ -173,6 +173,14 @@ struct ReviewTests {
         #expect(ReviewFocus.saved(repo: URL(filePath: "/repo/b"), defaults: defaults).isEmpty)
     }
 
+    @Test func theLastPickedModelAndEffortAreRemembered() throws {
+        let defaults = try #require(UserDefaults(suiteName: "ReviewTests-\(UUID().uuidString)"))
+        #expect(DiffPaneModel(repo: nil, focusDefaults: defaults).reviewModel == .standard)
+        DiffPaneModel(repo: nil, focusDefaults: defaults).reviewModel = ReviewModel(name: .haiku, effort: .low)
+        #expect(
+            DiffPaneModel(repo: nil, focusDefaults: defaults).reviewModel == ReviewModel(name: .haiku, effort: .low))
+    }
+
     // MARK: run state
 
     private func makeRepo() throws -> URL {

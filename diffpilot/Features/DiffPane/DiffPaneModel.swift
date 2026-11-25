@@ -18,7 +18,9 @@ final class DiffPaneModel {
     var reviewFocuses: Set<String>
     var reviewInstructions = ""
     var reviewScope = ReviewScope.all
-    var reviewModel = ReviewModel.standard
+    var reviewModel: ReviewModel {
+        didSet { reviewModel.save(defaults: focusDefaults) }
+    }
     var branchName: String?
     var showsReviewResult = false
 
@@ -68,6 +70,7 @@ final class DiffPaneModel {
         self.reviewer = reviewer
         self.focusDefaults = focusDefaults
         reviewFocuses = repo.map { ReviewFocus.saved(repo: $0, defaults: focusDefaults) } ?? []
+        reviewModel = ReviewModel.saved(defaults: focusDefaults)
         self.benchScrollDelay = benchScrollDelay
         self.send = send
         firstPaintInterval = Self.signposter.beginInterval(Self.firstPaintSignpost)
