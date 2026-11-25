@@ -1,56 +1,54 @@
 #!/usr/bin/env python3
-"""Run diffpilot tests grouped by feature folder.
+"""Run diffpilot checks per Cargo crate.
 
-A feature is a folder diffpilot/Features/<Feature>/. App/ and Shared/ sit next to
-Features/ and count as features too. Unit tests mirror the source path in diffpilotTests/
-(diffpilotTests/Features/<Feature>/) and e2e tests in diffpilotUITests/.
-Test types whose name contains "Performance" are hot path tests; they run under
-`hotpath` and never under `unit` or `e2e`. UI test types whose name contains "Screenshot" capture the
-feature's screenshots into screenshots/feature/<Feature>/. Shared/ is a feature too,
-and a change in it touches every feature.
+A crate is a workspace member: core (logic), diff-pane, review-ui, gpui-app (app shell, sidebar,
+comparison). Crates are named by package (diffpilot-core) or folder (core). A change in a crate
+also touches the crates that depend on it; a change to the root Cargo files touches all crates.
 
-  scripts/test.py unit [feature...]      run unit tests (all features when none named)
-  scripts/test.py e2e [feature...]       run e2e UI tests
-  scripts/test.py hotpath [feature...] [--base REF]
-                                         run hot path tests here and on the PR base branch
-                                         (or REF) and fail on metrics more than 5% worse
-  scripts/test.py screenshot [feature...] capture screenshots into screenshots/feature/<Feature>/
-  scripts/test.py related                print the test commands that match the current changes
-  scripts/test.py lint                   check the folder layout, features.json, and that web/ type checks
+  scripts/test.py unit [crate...]          cargo test (all crates when none named)
+  scripts/test.py clippy [crate...]        cargo clippy --all-targets -- -D warnings
+  scripts/test.py hotpath [crate...] [--base REF]
+                                           run each crate's DIFFPILOT_BENCH=1 mode here and on the PR
+                                           base ref (or REF); fail on metrics more than 5% worse
+  scripts/test.py screenshot [crate...]    capture the app window into screenshots/feature/<crate>/
+  scripts/test.py related                  print the commands that match the current changes
+  scripts/test.py lint                     check the workspace layout and the formatting of the scripts
+
+A bench mode prints one JSON object of numeric metrics on stdout; nested objects are flattened to
+dotted names. Hotpath compares only the stable ones, the names ending in median_ms or p95_ms.
+They are smaller-is-better milliseconds.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import platform
-import re
-import shutil
 import statistics
 import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-MANIFEST = ROOT / "features.json"
-SOURCE_DIR = "diffpilot"
-SHARED = "Shared"
-FEATURES_DIR = "Features"
-TOP_LEVEL_FEATURES = ("App", SHARED)
-KIND_TARGETS = {"unit": "diffpilotTests", "e2e": "diffpilotUITests"}
-PERF_MARKER = "Performance"
-HOTPATH_TOLERANCE = 0.05
-# Medians of 5 launch samples differ by up to 11% on identical code; 15 samples cut that to ~3%.
-HOTPATH_ROUNDS = 3
-SCREENSHOT_MARKER = "Screenshot"
 SCREENSHOT_DIR = ROOT / "screenshots" / "feature"
-NA_KINDS = (*KIND_TARGETS, "screenshot")
-TOP_LEVEL_TYPE = re.compile(
-    r"^(?:(?:public|internal|private|fileprivate|final|open)\s+)*(?:class|struct|actor)\s+(\w+)([^{\n]*)",
-    re.M,
-)
+FIXTURE_REPO = ROOT / ".fixtures" / "large"
+FIXTURE_VIEWED = ROOT / ".fixtures" / "large-viewed.json"
+ROOT_FILES = ("Cargo.toml", "Cargo.lock", "rustfmt.toml", "rust-toolchain.toml")
+HOTPATH_TOLERANCE = 0.05
+# Medians of 5 samples differ by up to 11% on identical code; 3 alternating rounds cut that to ~3%.
+HOTPATH_ROUNDS = 3
+# Medians and 95th percentiles settle between runs. Maxima, over-budget counts and interval counts swing 20-50%.
+STABLE_METRICS = ("median_ms", "p95_ms")
+HEADLESS_FEATURE = "headless-tests"
+APP_PACKAGE = "diffpilot"
+BENCH_ARGS = {
+    "diffpilot-diff-pane": ["-p", "diffpilot-diff-pane", "--example", "diff_pane"],
+    "diffpilot-review-ui": ["-p", "diffpilot-review-ui", "--example", "review"],
+    APP_PACKAGE: ["-p", APP_PACKAGE],
+}
+SCREENSHOT_PACKAGES = (APP_PACKAGE,)
+SCENES = (("light", "light"), ("dark", "dark"))
+COMMANDS = ("unit", "clippy", "hotpath", "screenshot", "related", "lint")
 
 
 class LintError(Exception):
@@ -58,33 +56,51 @@ class LintError(Exception):
 
 
 @dataclass(frozen=True)
-class TestType:
-    target: str
-    feature: str
-    name: str
-    path: str
-    body: str
+class Crate:
+    package: str
+    folder: str
+    deps: tuple[str, ...]
+    features: tuple[str, ...] = ()
 
-    @property
-    def is_perf(self) -> bool:
-        return PERF_MARKER in self.name
+    def test_flags(self) -> list[str]:
+        return ["--features", HEADLESS_FEATURE] if HEADLESS_FEATURE in self.features else []
 
-    @property
-    def is_screenshot(self) -> bool:
-        return SCREENSHOT_MARKER in self.name
 
-    @property
-    def test_id(self) -> str:
-        return f"{self.target}/{self.name}"
+def sh(*cmd: str, cwd: Path = ROOT) -> str:
+    return subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True).stdout
 
 
 def git(*args: str) -> list[str]:
-    out = subprocess.run(["git", *args], cwd=ROOT, check=True, capture_output=True, text=True).stdout
-    return [line for line in out.splitlines() if line]
+    return [line for line in sh("git", *args).splitlines() if line]
 
 
-def swift_files() -> list[str]:
-    return [f for f in git("ls-files", "-co", "--exclude-standard") if f.endswith(".swift") and (ROOT / f).is_file()]
+def workspace() -> list[Crate]:
+    meta = json.loads(sh("cargo", "metadata", "--no-deps", "--format-version", "1", "--offline"))
+    members = {p["name"] for p in meta["packages"]}
+    return sorted(
+        (
+            Crate(
+                p["name"],
+                Path(p["manifest_path"]).parent.relative_to(ROOT).as_posix(),
+                tuple(d["name"] for d in p["dependencies"] if d["name"] in members),
+                tuple(p["features"]),
+            )
+            for p in meta["packages"]
+        ),
+        key=lambda c: c.folder,
+    )
+
+
+def resolve(crates: list[Crate], names: list[str]) -> list[Crate]:
+    if not names:
+        return crates
+    out = []
+    for name in names:
+        match = [c for c in crates if name in (c.package, c.folder)]
+        if not match:
+            raise LintError(f"unknown crate {name!r}; known: {', '.join(c.folder for c in crates)}")
+        out.append(match[0])
+    return out
 
 
 def upstream() -> str:
@@ -94,232 +110,106 @@ def upstream() -> str:
         return git("merge-base", "HEAD", resolve_base(None))[0]
 
 
-def changed_files(base: str) -> list[str]:
-    scope = [SOURCE_DIR, *KIND_TARGETS.values()]
-    return sorted(
-        set(git("diff", "--name-only", base, "--", *scope))
-        | set(git("ls-files", "-o", "--exclude-standard", "--", *scope))
-    )
-
-
-def folder_of(path: str) -> str | None:
-    parts = path.split("/")
-    if len(parts) > 3 and parts[1] == FEATURES_DIR:
-        return parts[2]
-    if len(parts) > 2 and parts[1] in TOP_LEVEL_FEATURES:
-        return parts[1]
-    return None
-
-
-def feature_dir(top: str, feature: str) -> str:
-    return f"{top}/{feature}/" if feature in TOP_LEVEL_FEATURES else f"{top}/{FEATURES_DIR}/{feature}/"
-
-
-def features(files: list[str]) -> list[str]:
-    return sorted({folder_of(f) for f in files if f.startswith(SOURCE_DIR + "/") and folder_of(f)})
-
-
-def test_types(files: list[str]) -> list[TestType]:
-    found = []
-    for f in files:
-        target = f.split("/")[0]
-        if target not in KIND_TARGETS.values() or not folder_of(f):
-            continue
-        text = (ROOT / f).read_text(errors="ignore")
-        decls = list(TOP_LEVEL_TYPE.finditer(text))
-        for i, m in enumerate(decls):
-            body = text[m.start() : decls[i + 1].start() if i + 1 < len(decls) else len(text)]
-            if "XCTestCase" in m.group(2) or "@Test" in body:
-                found.append(TestType(target, folder_of(f), m.group(1), f, body))
-    return found
-
-
-def load_manifest() -> dict:
-    manifest = json.loads(MANIFEST.read_text())
-    manifest.setdefault("na", {})
-    return manifest
-
-
-def functional_tests(types: list[TestType], feature: str, kind: str) -> list[str]:
-    return sorted(
-        t.test_id
-        for t in types
-        if t.feature == feature and t.target == KIND_TARGETS[kind] and not t.is_perf and not t.is_screenshot
-    )
-
-
-def screenshot_tests(types: list[TestType], feature: str) -> list[str]:
-    return sorted(t.test_id for t in types if t.feature == feature and t.is_screenshot)
-
-
-def hotpath_tests(types: list[TestType], feature: str) -> list[str]:
-    return sorted(t.test_id for t in types if t.feature == feature and t.is_perf)
-
-
-def lint(manifest: dict, files: list[str], types: list[TestType]) -> None:
-    errors: list[str] = []
-    feats = features(files)
-
-    for f in files:
-        top = f.split("/")[0]
-        if top in (SOURCE_DIR, *KIND_TARGETS.values()):
-            folder = folder_of(f)
-            if folder is None:
-                errors.append(f"{f}: move it into {top}/{FEATURES_DIR}/<Feature>/, or {top}/App/ or {top}/{SHARED}/")
-            elif top != SOURCE_DIR and folder not in feats:
-                errors.append(f"{f}: no source folder {feature_dir(SOURCE_DIR, folder)} for this test folder")
-
-    for feature, reasons in manifest["na"].items():
-        if feature not in feats:
-            errors.append(f'features.json na: unknown feature "{feature}"')
-            continue
-        for kind, reason in reasons.items():
-            if kind not in NA_KINDS:
-                errors.append(f'features.json na.{feature}: unknown kind "{kind}" (use {", ".join(NA_KINDS)})')
-            elif not isinstance(reason, str) or not reason.strip():
-                errors.append(f"features.json na.{feature}.{kind}: give a reason")
-
-    for feature in feats:
-        for kind, target in KIND_TARGETS.items():
-            has_tests = bool(functional_tests(types, feature, kind))
-            has_na = kind in manifest["na"].get(feature, {})
-            if not has_tests and not has_na:
-                errors.append(
-                    f"{feature} has no {kind} tests: add them in {feature_dir(target, feature)}, "
-                    f"or set na.{feature}.{kind} in features.json with a reason"
-                )
-            if has_tests and has_na:
-                errors.append(f"{feature} has {kind} tests, so remove na.{feature}.{kind} from features.json")
-
-        has_shots = bool(screenshot_tests(types, feature))
-        has_na = "screenshot" in manifest["na"].get(feature, {})
-        if not has_shots and not has_na:
-            errors.append(
-                f"{feature} has no screenshot test: add a *{SCREENSHOT_MARKER}UITests type in "
-                f"{feature_dir(KIND_TARGETS['e2e'], feature)}, or set na.{feature}.screenshot in features.json with a reason"
-            )
-        if has_shots and has_na:
-            errors.append(f"{feature} has a screenshot test, so remove na.{feature}.screenshot from features.json")
-
-    for t in types:
-        if t.is_screenshot and t.target != KIND_TARGETS["e2e"]:
-            errors.append(f"{t.path}: {t.name} must live in {KIND_TARGETS['e2e']} to capture the app")
-
-    if "hotpaths" in manifest:
-        errors.append(
-            "features.json: remove hotpaths; hot path tests now come from *Performance* types in each feature"
-        )
-
-    if errors:
-        raise LintError("\n".join(errors))
-
-
-def run_kind(kind: str, names: list[str], base: str | None = None) -> int:
-    manifest, files = load_manifest(), swift_files()
-    types = test_types(files)
-    lint(manifest, files, types)
-    feats = features(files)
-    unknown = [n for n in names if n not in feats]
-    if unknown:
-        raise LintError(f"unknown feature(s): {', '.join(unknown)}; features are {', '.join(feats)}")
-    names = names or feats
-    pickers = {
-        "hotpath": lambda n: hotpath_tests(types, n),
-        "screenshot": lambda n: screenshot_tests(types, n),
-    }
-    pick = pickers.get(kind, lambda n: functional_tests(types, n, kind))
-    tests = sorted({t for n in names for t in pick(n)})
-    if not tests:
-        print(f"No {kind} tests for: {' '.join(names)}", file=sys.stderr)
-        return 0
-
-    if kind != "unit":
-        subprocess.run([sys.executable, str(ROOT / "scripts" / "fixture_repo.py")], check=True)
-    print(f"== {kind}: {' '.join(tests)}", file=sys.stderr)
-    code, bundle = xcode_test(ROOT, tests, kind)
-    if code != 0:
-        print(f"Failure details: xcrun xcresulttool get test-results tests --path {bundle}", file=sys.stderr)
-    elif kind == "screenshot":
-        export_screenshots(bundle, types, names)
-    elif kind == "hotpath":
-        return compare_with_base(bundle, types, base)
-    return code
-
-
-def xcode_test(cwd: Path, tests: list[str], kind: str) -> tuple[int, Path]:
-    args = [f"-only-testing:{t}" for t in tests]
-    env = dict(os.environ)
-    if kind == "hotpath":
-        # Serial, so parallel test clones do not skew the numbers.
-        args += ["-parallel-testing-enabled", "NO"]
-        # xcodebuild passes TEST_RUNNER_* to the test process without the prefix.
-        env["TEST_RUNNER_DIFFPILOT_HOTPATH"] = "1"
-    bundle = Path(tempfile.mkdtemp(prefix=f"diffpilot-{kind}-")) / "result.xcresult"
-    code = subprocess.run(
-        [
-            "xcodebuild",
-            "test",
-            "-quiet",
-            "-project",
-            "diffpilot.xcodeproj",
-            "-scheme",
-            "diffpilot",
-            "-destination",
-            f"platform=macOS,arch={platform.machine()}",
-            "-resultBundlePath",
-            str(bundle),
-            *args,
-        ],
-        cwd=cwd,
-        env=env,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    noise = re.compile(r"\[MT\] (IDELaunchParametersSnapshot|IDETestOperationsObserverDebug|IDERunDestination)")
-    sys.stderr.write("".join(line for line in code.stderr.splitlines(True) if not noise.search(line)))
-    return code.returncode, bundle
-
-
-def read_metrics(bundle: Path) -> dict[tuple[str, str], dict]:
-    out = subprocess.run(
-        ["xcrun", "xcresulttool", "get", "test-results", "metrics", "--path", str(bundle)],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    metrics = {}
-    for test in json.loads(out or "[]"):
-        for run in test["testRuns"]:
-            for m in run["metrics"]:
-                if m["measurements"]:
-                    metrics[(test["testIdentifier"], m["displayName"])] = {
-                        "measurements": m["measurements"],
-                        "unit": m.get("unitOfMeasurement", ""),
-                        "smaller_is_better": m.get("polarity") != "prefers larger",
-                    }
-    return metrics
-
-
-def pool(into: dict, metrics: dict) -> None:
-    for key, m in metrics.items():
-        into.setdefault(key, {**m, "measurements": []})["measurements"] += m["measurements"]
-
-
 def resolve_base(explicit: str | None) -> str:
     if explicit:
         return explicit
     try:
-        name = subprocess.run(
-            ["gh", "pr", "view", "--json", "baseRefName", "-q", ".baseRefName"],
-            cwd=ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
+        name = sh("gh", "pr", "view", "--json", "baseRefName", "-q", ".baseRefName").strip()
     except (OSError, subprocess.CalledProcessError):
         name = "main"
     subprocess.run(["git", "fetch", "-q", "origin", name], cwd=ROOT, capture_output=True)
     return f"origin/{name}"
+
+
+def changed_files(base: str) -> list[str]:
+    return sorted(set(git("diff", "--name-only", base)) | set(git("ls-files", "-o", "--exclude-standard")))
+
+
+def touched_crates(crates: list[Crate], files: list[str]) -> list[Crate]:
+    touched = {c.package for c in crates for f in files if f.startswith(c.folder + "/")}
+    if any(f in ROOT_FILES for f in files):
+        touched = {c.package for c in crates}
+    grew = True
+    while grew:
+        grew = False
+        for c in crates:
+            if c.package not in touched and touched & set(c.deps):
+                touched.add(c.package)
+                grew = True
+    return [c for c in crates if c.package in touched]
+
+
+def cargo(*args: str, cwd: Path = ROOT, env: dict | None = None) -> int:
+    print("+ cargo " + " ".join(args), file=sys.stderr)
+    return subprocess.call(["cargo", *args], cwd=cwd, env={**os.environ, **(env or {})})
+
+
+def run_each(crates: list[Crate], *args: str) -> int:
+    failed = [c.folder for c in crates if cargo(*args, "-p", c.package, *c.test_flags()) != 0]
+    if failed:
+        print(f"failed: {', '.join(failed)}", file=sys.stderr)
+    return 1 if failed else 0
+
+
+def clippy(crates: list[Crate]) -> int:
+    failed = [
+        c.folder
+        for c in crates
+        if cargo("clippy", "-p", c.package, *c.test_flags(), "--all-targets", "--", "-D", "warnings") != 0
+    ]
+    if failed:
+        print(f"failed: {', '.join(failed)}", file=sys.stderr)
+    return 1 if failed else 0
+
+
+def ensure_fixture(root: Path = ROOT) -> None:
+    subprocess.run([sys.executable, str(root / "scripts" / "fixture_repo.py")], check=True)
+
+
+def bench_env() -> dict:
+    return {
+        "DIFFPILOT_BENCH": "1",
+        "DIFFPILOT_REPO": str(FIXTURE_REPO),
+        "DIFFPILOT_VIEWED_SEED": str(FIXTURE_VIEWED),
+    }
+
+
+def flatten(value: object, prefix: str = "") -> dict[str, float]:
+    if isinstance(value, bool):
+        return {}
+    if isinstance(value, (int, float)):
+        return {prefix: float(value)}
+    if isinstance(value, dict):
+        out: dict[str, float] = {}
+        for key, item in value.items():
+            out.update(flatten(item, f"{prefix}.{key}" if prefix else key))
+        return out
+    return {}
+
+
+def bench_once(crate: Crate, cwd: Path) -> dict[str, float]:
+    done = subprocess.run(
+        ["cargo", "run", "--release", "--quiet", *BENCH_ARGS[crate.package]],
+        cwd=cwd,
+        env={**os.environ, **bench_env()},
+        capture_output=True,
+        text=True,
+    )
+    if done.returncode != 0:
+        raise RuntimeError(
+            f"{crate.folder}: bench run failed (exit {done.returncode}). Does it support DIFFPILOT_BENCH=1?\n"
+            + done.stderr.strip()[-2000:]
+        )
+    try:
+        metrics = flatten(json.loads(done.stdout))
+    except json.JSONDecodeError:
+        raise RuntimeError(f"{crate.folder}: DIFFPILOT_BENCH=1 did not print a JSON object on stdout") from None
+    stable = {name: value for name, value in metrics.items() if name.endswith(STABLE_METRICS)}
+    if not stable:
+        raise RuntimeError(
+            f"{crate.folder}: DIFFPILOT_BENCH=1 printed no median or p95 metrics (names ending {', '.join(STABLE_METRICS)})"
+        )
+    return stable
 
 
 def base_worktree(ref: str) -> Path:
@@ -330,147 +220,184 @@ def base_worktree(ref: str) -> Path:
         subprocess.run(["git", "-C", str(path), "checkout", "-q", "-f", "--detach", sha], check=True)
     else:
         subprocess.run(["git", "worktree", "add", "-q", "--detach", str(path), sha], cwd=ROOT, check=True)
-    fixture = path / "scripts" / "fixture_repo.py"
-    if fixture.exists():
-        subprocess.run([sys.executable, str(fixture)], check=True)
     return path
 
 
-def compare_with_base(head_bundle: Path, types: list[TestType], base: str | None) -> int:
-    head: dict = {}
-    pool(head, read_metrics(head_bundle))
-    if not head:
-        print("No measured metrics; nothing to compare with the base branch.", file=sys.stderr)
+def hotpath(crates: list[Crate], base: str | None) -> int:
+    benched = [c for c in crates if c.package in BENCH_ARGS]
+    if not benched:
+        print("No selected crate has a bench mode.", file=sys.stderr)
         return 0
-
-    target_of = {t.name: t.target for t in types}
-    tests = sorted({f"{target_of[tid.split('/')[0]]}/{tid.split('/')[0]}" for tid, _ in head})
+    ensure_fixture()
     ref = resolve_base(base)
     path = base_worktree(ref)
     print(f"== hotpath baseline: {ref} at {git('rev-parse', '--short', ref)[0]}", file=sys.stderr)
-
-    baseline: dict = {}
-    # Alternate base and head so slow drift on the machine hits both sides equally.
-    for round in range(HOTPATH_ROUNDS):
-        for side, cwd, into in (("base", path, baseline), ("head", ROOT, head)):
-            if side == "head" and round == 0:
-                continue
-            print(f"== hotpath round {round + 1}/{HOTPATH_ROUNDS}: {side}", file=sys.stderr)
-            code, bundle = xcode_test(cwd, tests, "hotpath")
+    sides = (("base", path), ("head", ROOT))
+    for side, cwd in sides:
+        for c in benched:
+            code = subprocess.call(["cargo", "build", "--release", *BENCH_ARGS[c.package]], cwd=cwd)
             if code != 0:
-                print(f"{side} run failed, so there is nothing to compare: {bundle}", file=sys.stderr)
+                if side == "base":
+                    print(f"base cannot build {c.folder}; no baseline for it", file=sys.stderr)
+                    continue
                 return code
-            pool(into, read_metrics(bundle))
 
     regressions = 0
-    for key in sorted(head):
-        test_id, name = key
-        h = statistics.median(head[key]["measurements"])
-        unit = head[key]["unit"]
-        if key not in baseline:
-            print(f"  {test_id} {name}: {h:.4g} {unit} (new, no baseline)", file=sys.stderr)
-            continue
-        b = statistics.median(baseline[key]["measurements"])
-        change = (h - b) / b if b else 0.0
-        worse = change > HOTPATH_TOLERANCE if head[key]["smaller_is_better"] else change < -HOTPATH_TOLERANCE
-        regressions += worse
-        verdict = f"REGRESSION (limit {HOTPATH_TOLERANCE:.0%})" if worse else "ok"
-        samples = f"{len(baseline[key]['measurements'])} vs {len(head[key]['measurements'])} samples"
-        print(
-            f"  {test_id} {name}: base {b:.4g} -> head {h:.4g} {unit} ({change:+.1%}, {samples}) {verdict}",
-            file=sys.stderr,
-        )
+    for c in benched:
+        samples: dict[str, dict[str, list[float]]] = {"base": {}, "head": {}}
+        # Alternate base and head so slow drift on the machine hits both sides equally.
+        try:
+            for round in range(HOTPATH_ROUNDS):
+                for side, cwd in sides:
+                    print(f"== hotpath {c.folder} round {round + 1}/{HOTPATH_ROUNDS}: {side}", file=sys.stderr)
+                    try:
+                        metrics = bench_once(c, cwd)
+                    except RuntimeError as e:
+                        if side == "head":
+                            raise
+                        print(f"base has no usable bench for {c.folder}: {e}", file=sys.stderr)
+                        break
+                    for name, value in metrics.items():
+                        samples[side].setdefault(name, []).append(value)
+        except RuntimeError as e:
+            print(f"hotpath: {e}", file=sys.stderr)
+            return 1
+        for name in sorted(samples["head"]):
+            h = statistics.median(samples["head"][name])
+            if name not in samples["base"]:
+                print(f"  {c.folder} {name}: {h:.4g} (new, no baseline)", file=sys.stderr)
+                continue
+            b = statistics.median(samples["base"][name])
+            change = (h - b) / b if b else 0.0
+            worse = change > HOTPATH_TOLERANCE
+            regressions += worse
+            verdict = f"REGRESSION (limit {HOTPATH_TOLERANCE:.0%})" if worse else "ok"
+            print(f"  {c.folder} {name}: base {b:.4g} -> head {h:.4g} ({change:+.1%}) {verdict}", file=sys.stderr)
     return 1 if regressions else 0
 
 
-def export_screenshots(bundle: Path, types: list[TestType], names: list[str]) -> None:
-    exported = bundle.parent / "attachments"
-    subprocess.run(
-        ["xcrun", "xcresulttool", "export", "attachments", "--path", str(bundle), "--output-path", str(exported)],
-        check=True,
-        capture_output=True,
-    )
-    feature_of = {t.name: t.feature for t in types if t.is_screenshot}
-    for name in names:
-        shutil.rmtree(SCREENSHOT_DIR / name, ignore_errors=True)
-    for test in json.loads((exported / "manifest.json").read_text()):
-        feature = feature_of.get(test["testIdentifier"].split("/")[0])
-        for attachment in test["attachments"]:
-            if feature is None or not attachment["exportedFileName"].endswith(".png"):
-                continue
-            target = SCREENSHOT_DIR / feature / f"{attachment_name(attachment)}.png"
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(exported / attachment["exportedFileName"], target)
-            print(f"saved {target.relative_to(ROOT)}", file=sys.stderr)
+WINDOW_JXA = """
+ObjC.import("CoreGraphics");
+const pid = %d;
+const list = ObjC.castRefToObject($.CGWindowListCopyWindowInfo(1, 0));
+let best = 0, area = 0;
+for (let i = 0; i < list.count; i++) {
+  const w = ObjC.deepUnwrap(list.objectAtIndex(i));
+  if (w.kCGWindowOwnerPID !== pid || w.kCGWindowLayer !== 0) continue;
+  const a = w.kCGWindowBounds.Width * w.kCGWindowBounds.Height;
+  if (a > area) { best = w.kCGWindowNumber; area = a; }
+}
+best
+"""
 
 
-def attachment_name(attachment: dict) -> str:
-    return re.sub(r"_\d+_[0-9A-F-]{36}\.png$", "", attachment["suggestedHumanReadableName"])
+def window_id(pid: int) -> int:
+    out = subprocess.run(
+        ["osascript", "-l", "JavaScript", "-e", WINDOW_JXA % pid], capture_output=True, text=True
+    ).stdout.strip()
+    return int(out) if out.isdigit() else 0
 
 
-def touched_features(base: str) -> tuple[set[str], list[str]]:
-    """Return (touched features, changed files outside feature folders)."""
-    feats = set(features(swift_files()))
-    touched: set[str] = set()
-    misplaced: list[str] = []
-    for f in changed_files(base):
-        folder = folder_of(f)
-        if folder is None:
-            if (ROOT / f).exists():
-                misplaced.append(f)
-            continue
-        touched |= feats if folder == SHARED else {folder} & feats
-    return touched, misplaced
+def capture_scene(binary: Path, appearance: str, out: Path) -> None:
+    import time
+
+    env = {
+        **os.environ,
+        "DIFFPILOT_REPO": str(FIXTURE_REPO),
+        "DIFFPILOT_VIEWED_SEED": str(FIXTURE_VIEWED),
+        "DIFFPILOT_APPEARANCE": appearance,
+        "DIFFPILOT_REVIEWER": "scripted",
+    }
+    app = subprocess.Popen([str(binary)], cwd=ROOT, env=env)
+    try:
+        deadline = time.time() + 60
+        wid = 0
+        while not wid and time.time() < deadline and app.poll() is None:
+            time.sleep(0.5)
+            wid = window_id(app.pid)
+        if not wid:
+            raise RuntimeError("the app showed no window within 60 s (or exited early)")
+        time.sleep(3)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["screencapture", "-x", "-o", "-l", str(wid), str(out)], check=True)
+    finally:
+        app.terminate()
+        app.wait(timeout=10)
 
 
-def screenshot_features(manifest: dict, touched: set[str]) -> list[str]:
-    return [f for f in sorted(touched) if "screenshot" not in manifest["na"].get(f, {})]
+def screenshot(crates: list[Crate]) -> int:
+    chosen = [c for c in crates if c.package in SCREENSHOT_PACKAGES]
+    if not chosen:
+        print("No selected crate has a window to capture.", file=sys.stderr)
+        return 0
+    ensure_fixture()
+    if cargo("build", "--release", "-p", APP_PACKAGE) != 0:
+        return 1
+    target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
+    binary = target / "release" / APP_PACKAGE
+    for c in chosen:
+        for name, appearance in SCENES:
+            out = SCREENSHOT_DIR / c.folder / f"{name}.png"
+            print(f"== screenshot {c.folder}/{name}", file=sys.stderr)
+            try:
+                capture_scene(binary, appearance, out)
+            except (RuntimeError, subprocess.CalledProcessError) as e:
+                print(f"screenshot: {e}. screencapture needs Screen Recording permission.", file=sys.stderr)
+                return 1
+    return 0
+
+
+def screenshot_crates(crates: list[Crate]) -> list[str]:
+    return [c.folder for c in crates if c.package in SCREENSHOT_PACKAGES]
 
 
 def related() -> None:
-    manifest = load_manifest()
-    types = test_types(swift_files())
-    touched, misplaced = touched_features(upstream())
-    if not touched and not misplaced:
-        print("No changes in source or test folders.")
+    crates = workspace()
+    files = changed_files(upstream())
+    touched = touched_crates(crates, files)
+    py = [f for f in files if f.endswith(".py")]
+    if not touched and not py:
+        print("No changes in crates or scripts.")
         return
-
-    print(f"Touched features: {' '.join(sorted(touched)) or 'none'}")
-    if misplaced:
-        print(f"Not in a feature folder (run scripts/test.py lint): {' '.join(misplaced)}")
-    for feature in sorted(touched):
-        for kind in KIND_TARGETS:
-            reason = manifest["na"].get(feature, {}).get(kind)
-            print(f"  # {kind} {feature}: n/a ({reason})" if reason else f"  scripts/test.py {kind} {feature}")
-    for feature in sorted(touched):
-        if hotpath_tests(types, feature):
-            print(f"  scripts/test.py hotpath {feature}")
-    if screenshot_features(manifest, touched):
+    print(f"Touched crates: {' '.join(c.folder for c in touched) or 'none'}")
+    for c in touched:
+        flags = "".join(f" {flag}" for flag in c.test_flags())
+        print(f"  cargo test -p {c.package}{flags}")
+        print(f"  cargo clippy -p {c.package}{flags} --all-targets -- -D warnings")
+    for c in touched:
+        if c.package in BENCH_ARGS:
+            print(f"  scripts/test.py hotpath {c.folder}")
+    if py:
+        print("  scripts/test.py lint")
+    if screenshot_crates(touched):
         print("After you open the PR:")
         print("  scripts/pr_screenshots.py")
 
 
-def web_typecheck() -> None:
-    web = ROOT / "web"
-    if not (web / "node_modules").is_dir():
-        print("web types skipped: run `npm ci` in web/ to type check the page", file=sys.stderr)
-        return
-    done = subprocess.run(["npm", "run", "--silent", "typecheck"], cwd=web, capture_output=True, text=True)
+def lint() -> None:
+    crates = workspace()
+    packages = {c.package for c in crates}
+    for table, name in ((BENCH_ARGS, "BENCH_ARGS"), ({p: 1 for p in SCREENSHOT_PACKAGES}, "SCREENSHOT_PACKAGES")):
+        for stale in sorted(set(table) - packages):
+            raise LintError(f"{name} names {stale}, which is not a workspace member")
+    if not (ROOT / "rustfmt.toml").is_file():
+        raise LintError("rustfmt.toml is missing")
+    done = subprocess.run(
+        ["uvx", "ruff", "format", "--check", "scripts", ".githooks"], cwd=ROOT, capture_output=True, text=True
+    )
     if done.returncode != 0:
-        raise LintError("web/ does not type check (npm run typecheck):\n" + (done.stdout + done.stderr).strip())
+        raise LintError("ruff format check failed:\n" + (done.stdout + done.stderr).strip())
 
 
 def main(argv: list[str]) -> int:
-    if not argv or argv[0] not in ("unit", "e2e", "hotpath", "screenshot", "related", "lint"):
+    if not argv or argv[0] not in COMMANDS:
         print(__doc__.strip(), file=sys.stderr)
         return 64
     command, rest = argv[0], argv[1:]
     try:
         if command == "lint":
-            files = swift_files()
-            lint(load_manifest(), files, test_types(files))
-            web_typecheck()
-            print("Layout, features.json, and web types OK", file=sys.stderr)
+            lint()
+            print(f"Workspace layout and ruff OK ({len(workspace())} crates)", file=sys.stderr)
             return 0
         if command == "related":
             related()
@@ -479,7 +406,14 @@ def main(argv: list[str]) -> int:
         if "--base" in rest:
             i = rest.index("--base")
             base, rest = rest[i + 1], rest[:i] + rest[i + 2 :]
-        return run_kind(command, rest, base)
+        crates = resolve(workspace(), rest)
+        if command == "unit":
+            return run_each(crates, "test")
+        if command == "clippy":
+            return clippy(crates)
+        if command == "hotpath":
+            return hotpath(crates, base)
+        return screenshot(crates)
     except LintError as e:
         print(f"lint: {e}".replace("\n", "\nlint: "), file=sys.stderr)
         return 1

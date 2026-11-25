@@ -1,0 +1,1158 @@
+use crate::bench::{Bench, Mark};
+use crate::comparison_control::{Select, comparison_control};
+use crate::glyph::Glyph;
+use crate::pane::{DiffPane, DiffPaneEvent};
+use crate::sidebar::{LoadedChanges, Sidebar, SidebarEvent};
+use diffpilot_core::changes;
+use diffpilot_core::claude::{ClaudeCliReplier, Replier, Reviewer, ScriptedReplier, reviewer_from_env};
+use diffpilot_core::comparison::{self, Comparison};
+use diffpilot_core::diff::{self, FileDiff};
+use diffpilot_core::refs::Refs;
+use diffpilot_core::settings::Settings;
+use diffpilot_core::tree;
+use diffpilot_core::viewed::{ViewedFiles, ViewedKey, ViewedStore};
+use diffpilot_core::watcher::{self, WatchGuard};
+use diffpilot_review_ui::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
+use gpui::prelude::*;
+use gpui::{
+    Context, Entity, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render,
+    SharedString, Styled, Subscription, Task, Window, WindowControlArea, div, px,
+};
+use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::{ActiveTheme, Icon, InteractiveElementExt as _, Selectable, Sizable, StyledExt, h_flex, v_flex};
+use std::cell::Cell;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
+
+const MIN_SIDEBAR: f32 = 240.0;
+const IDEAL_SIDEBAR: f32 = 272.0;
+const MAX_SIDEBAR: f32 = 480.0;
+const TOOLBAR_HEIGHT: f32 = 38.0;
+const TRAFFIC_LIGHTS: f32 = 78.0;
+
+#[derive(Clone, PartialEq)]
+struct SessionKey {
+    comparison: Comparison,
+    branch: Option<String>,
+}
+
+struct ViewedState {
+    files: Mutex<ViewedFiles>,
+    version: AtomicU64,
+}
+
+impl ViewedState {
+    fn mutate(&self, change: impl FnOnce(&mut ViewedFiles)) -> (u64, HashSet<String>) {
+        let mut files = self.files.lock().unwrap_or_else(PoisonError::into_inner);
+        change(&mut files);
+        (self.version.fetch_add(1, Ordering::SeqCst) + 1, files.paths())
+    }
+}
+
+struct DiffLoaded {
+    files: Vec<FileDiff>,
+    signature: Signature,
+    git_and_parse: Duration,
+    fingerprints: Duration,
+}
+
+fn load_changes(repo: &std::path::Path, comparison: &Comparison) -> LoadedChanges {
+    let started = Instant::now();
+    let changes = changes::load(repo, comparison).unwrap_or_default();
+    let root = tree::build(&changes);
+    let files = tree::files(&root);
+    LoadedChanges {
+        changes,
+        root,
+        files,
+        elapsed: started.elapsed(),
+    }
+}
+
+fn load_diff(repo: &std::path::Path, comparison: &Comparison) -> DiffLoaded {
+    let started = Instant::now();
+    let files = diff::load(repo, comparison).unwrap_or_default();
+    let git_and_parse = started.elapsed();
+    let started = Instant::now();
+    let signature = files
+        .iter()
+        .map(|file| (file.path.clone(), file.fingerprint()))
+        .collect();
+    DiffLoaded {
+        files,
+        signature,
+        git_and_parse,
+        fingerprints: started.elapsed(),
+    }
+}
+
+/// What a session asks when Claude reviews or replies.
+#[derive(Clone)]
+pub struct Claude {
+    pub reviewer: Arc<dyn Reviewer>,
+    pub replier: Arc<dyn Replier>,
+}
+
+impl Claude {
+    /// `DIFFPILOT_REVIEWER=scripted` swaps the `claude` command for canned answers.
+    pub fn from_env(repo: &std::path::Path) -> Self {
+        let scripted = std::env::var("DIFFPILOT_REVIEWER").is_ok_and(|kind| kind == "scripted");
+        let replier: Arc<dyn Replier> = if scripted {
+            Arc::new(ScriptedReplier::default())
+        } else {
+            Arc::new(ClaudeCliReplier::new(repo))
+        };
+        Self {
+            reviewer: Arc::from(reviewer_from_env()),
+            replier,
+        }
+    }
+}
+
+type Signature = Vec<(String, String)>;
+
+struct ClearJob {
+    fingerprints: HashMap<String, String>,
+    signature: Signature,
+}
+
+struct Session {
+    id: u64,
+    key: SessionKey,
+    viewed: Option<Arc<ViewedState>>,
+    applied_viewed: u64,
+    fingerprints: HashMap<String, String>,
+    shown: Option<Signature>,
+    cleared: Option<Signature>,
+    sidebar: Entity<Sidebar>,
+    pane: Entity<DiffPane>,
+    pill: Entity<ReviewPill>,
+    load_task: Option<Task<()>>,
+    _subscriptions: Vec<Subscription>,
+}
+
+pub struct RepoView {
+    repo: PathBuf,
+    folder_name: SharedString,
+    settings: Arc<Settings>,
+    viewed_store: Arc<ViewedStore>,
+    claude: Claude,
+    viewed_states: HashMap<ViewedKey, Arc<ViewedState>>,
+    refs: Option<Refs>,
+    comparison: Option<Comparison>,
+    session: Option<Session>,
+    next_session_id: u64,
+    sidebar_open: bool,
+    sidebar_width: Pixels,
+    resizing: bool,
+    should_move: Rc<Cell<bool>>,
+    wrap: bool,
+    compact_toolbar: bool,
+    visible_file: Option<String>,
+    watch: Option<WatchGuard>,
+    refs_task: Option<Task<()>>,
+    _watch_task: Option<Task<()>>,
+}
+
+impl RepoView {
+    pub fn new(
+        repo: PathBuf,
+        settings: Arc<Settings>,
+        viewed_store: Arc<ViewedStore>,
+        claude: Claude,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let folder_name = repo.file_name().map_or_else(
+            || repo.to_string_lossy().into_owned(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        window.set_window_title(&folder_name);
+        let mut this = Self {
+            repo,
+            folder_name: folder_name.into(),
+            settings,
+            viewed_store,
+            claude,
+            viewed_states: HashMap::new(),
+            refs: None,
+            comparison: None,
+            session: None,
+            next_session_id: 0,
+            sidebar_open: true,
+            sidebar_width: px(IDEAL_SIDEBAR),
+            resizing: false,
+            should_move: Rc::new(Cell::new(false)),
+            wrap: false,
+            compact_toolbar: false,
+            visible_file: None,
+            watch: None,
+            refs_task: None,
+            _watch_task: None,
+        };
+        this.load_refs(window, cx);
+        this.start_watching(window, cx);
+        this
+    }
+
+    pub fn set_compact_toolbar(&mut self, compact: bool, cx: &mut Context<Self>) {
+        if self.compact_toolbar != compact {
+            self.compact_toolbar = compact;
+            cx.notify();
+        }
+    }
+
+    fn show_comment_counts(&mut self, review: &Entity<ReviewSession>, cx: &mut Context<Self>) {
+        let counts: HashMap<String, usize> = review.read(cx).comment_counts().into_iter().collect();
+        if let Some(session) = &self.session {
+            session
+                .sidebar
+                .update(cx, |sidebar, cx| sidebar.set_comments(counts, cx));
+        }
+    }
+
+    pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_open = !self.sidebar_open;
+        cx.notify();
+    }
+
+    fn load_refs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let repo = self.repo.clone();
+        let settings = self.settings.clone();
+        let task = cx.background_spawn(async move { comparison::load_comparison(&repo, &settings) });
+        self.refs_task = Some(cx.spawn_in(window, async move |this, cx| {
+            let (refs, comparison) = task.await;
+            this.update_in(cx, |this, window, cx| this.apply_refs(refs, comparison, window, cx))
+                .ok();
+        }));
+    }
+
+    fn apply_refs(&mut self, refs: Refs, comparison: Comparison, window: &mut Window, cx: &mut Context<Self>) {
+        self.refs = Some(refs);
+        self.comparison = Some(comparison);
+        if !self.ensure_session(window, cx) {
+            self.start_load(window, cx);
+        }
+        cx.notify();
+    }
+
+    pub fn select_comparison(&mut self, next: Comparison, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(refs), Some(current)) = (self.refs.clone(), self.comparison.clone()) else {
+            return;
+        };
+        if next == current {
+            return;
+        }
+        self.comparison = Some(next.clone());
+        let repo = self.repo.clone();
+        let settings = self.settings.clone();
+        cx.background_spawn(async move {
+            comparison::select_comparison(&settings, &repo, &refs, &current, next);
+        })
+        .detach();
+        self.ensure_session(window, cx);
+        cx.notify();
+    }
+
+    fn ensure_session(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let (Some(refs), Some(comparison)) = (&self.refs, &self.comparison) else {
+            return false;
+        };
+        let key = SessionKey {
+            comparison: comparison.clone(),
+            branch: refs.checked_out.clone(),
+        };
+        if self.session.as_ref().is_some_and(|session| session.key == key) {
+            return false;
+        }
+        let (branch_name, comparison) = (refs.checked_out.clone(), comparison.clone());
+        self.next_session_id += 1;
+        let sidebar = cx.new(|cx| Sidebar::new(window, cx));
+        let pane = cx.new(|cx| DiffPane::new(window, cx));
+        let wrap = self.wrap;
+        pane.update(cx, |pane, cx| pane.set_wrap(wrap, cx));
+        let mut host = ReviewHost::new(Some(self.repo.clone()), comparison);
+        host.branch_name = branch_name;
+        let review = {
+            let (settings, claude) = (self.settings.clone(), self.claude.clone());
+            cx.new(|_| ReviewSession::new(host, settings, claude.reviewer, claude.replier))
+        };
+        pane.update(cx, |pane, cx| pane.set_review(review.clone(), window, cx));
+        let pill = cx.new(|cx| ReviewPill::new(review.clone(), window, cx));
+        self.compact_toolbar = false;
+        let subscriptions = vec![
+            cx.subscribe_in(&review, window, |this, review, event: &ReviewEvent, _, cx| {
+                if matches!(event, ReviewEvent::ThreadsChanged(change) if !matches!(change, diffpilot_review_ui::ThreadChange::Updated(_))) {
+                    this.show_comment_counts(review, cx);
+                }
+            }),
+            cx.subscribe_in(&pill, window, |this, _, event: &PillEvent, window, cx| match event {
+                PillEvent::NeedsRoomChanged(room) => this.set_compact_toolbar(*room, cx),
+                PillEvent::CommentOnFile(id) => {
+                    if let Some(session) = &this.session {
+                        session.pane.update(cx, |pane, cx| pane.focus_thread(*id, window, cx));
+                    }
+                }
+            }),
+            cx.subscribe_in(
+                &sidebar,
+                window,
+                |this, _, event: &SidebarEvent, window, cx| match event {
+                    SidebarEvent::Select(path) => {
+                        if let Some(session) = &this.session {
+                            session.pane.update(cx, |pane, cx| pane.reveal(path, cx));
+                        }
+                    }
+                    SidebarEvent::ToggleViewed(path) => this.toggle_viewed(path.clone(), window, cx),
+                },
+            ),
+            cx.subscribe_in(
+                &pane,
+                window,
+                |this, _, event: &DiffPaneEvent, window, cx| match event {
+                    DiffPaneEvent::ToggleViewed(path) => this.toggle_viewed(path.clone(), window, cx),
+                    DiffPaneEvent::VisibleFile(path) => this.visible_file = Some(path.clone()),
+                    DiffPaneEvent::FirstPaint => Bench::mark_now(cx, Mark::FirstDiffPaint),
+                },
+            ),
+        ];
+        self.session = Some(Session {
+            id: self.next_session_id,
+            key,
+            viewed: None,
+            applied_viewed: 0,
+            fingerprints: HashMap::new(),
+            shown: None,
+            cleared: None,
+            sidebar,
+            pane,
+            pill,
+            load_task: None,
+            _subscriptions: subscriptions,
+        });
+        self.start_load(window, cx);
+        true
+    }
+
+    fn start_load(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = self.session.as_mut() else { return };
+        let id = session.id;
+        let comparison = session.key.comparison.clone();
+        let refs = self.refs.clone();
+        let repo = self.repo.clone();
+
+        let changes_task = cx.background_spawn({
+            let (repo, comparison) = (repo.clone(), comparison.clone());
+            async move { load_changes(&repo, &comparison) }
+        });
+        let diff_task = cx.background_spawn({
+            let (repo, comparison) = (repo.clone(), comparison.clone());
+            async move { load_diff(&repo, &comparison) }
+        });
+        let existing = session.viewed.clone();
+        let viewed_task = existing.is_none().then(|| {
+            let store = self.viewed_store.clone();
+            cx.background_spawn(async move {
+                let key = ViewedKey::for_comparison(&repo, &comparison, refs.as_ref());
+                let files = ViewedFiles::new(key.clone(), store);
+                let paths = files.paths();
+                (
+                    key,
+                    Arc::new(ViewedState {
+                        files: Mutex::new(files),
+                        version: AtomicU64::new(0),
+                    }),
+                    paths,
+                )
+            })
+        });
+
+        session.load_task = Some(cx.spawn_in(window, async move |this, cx| {
+            let loaded = changes_task.await;
+            this.update(cx, |this, cx| this.apply_changes(id, loaded, cx)).ok();
+
+            let viewed = match viewed_task {
+                Some(task) => {
+                    let (key, loaded, paths) = task.await;
+                    let Ok(state) = this.update(cx, |this, cx| this.install_viewed(id, key, loaded, paths, cx)) else {
+                        return;
+                    };
+                    state
+                }
+                None => match existing {
+                    Some(state) => state,
+                    None => return,
+                },
+            };
+
+            let diff = diff_task.await;
+            let Ok(Some(ClearJob {
+                fingerprints,
+                signature,
+            })) = this.update(cx, |this, cx| this.apply_diff(id, diff, cx))
+            else {
+                return;
+            };
+            let (version, paths) = cx
+                .background_spawn(async move {
+                    viewed.mutate(|files| {
+                        let current: HashMap<String, String> = files
+                            .paths()
+                            .into_iter()
+                            .filter_map(|path| fingerprints.get(&path).map(|print| (path, print.clone())))
+                            .collect();
+                        files.clear_changed(&current);
+                    })
+                })
+                .await;
+            this.update(cx, |this, cx| this.finish_clear(id, signature, version, paths, cx))
+                .ok();
+        }));
+    }
+
+    fn session_mut(&mut self, id: u64) -> Option<&mut Session> {
+        self.session.as_mut().filter(|session| session.id == id)
+    }
+
+    fn apply_changes(&mut self, id: u64, loaded: LoadedChanges, cx: &mut Context<Self>) {
+        Bench::note_stage(cx, "changes_git_and_tree", loaded.elapsed);
+        if let Some(session) = self.session_mut(id) {
+            session
+                .sidebar
+                .update(cx, |sidebar, cx| sidebar.set_changes(loaded, cx));
+        }
+    }
+
+    /// One `ViewedFiles` owns each key for the whole run. A second session on the same key shares it, so a
+    /// save from the first can never be overwritten by a copy the second loaded earlier.
+    fn install_viewed(
+        &mut self,
+        id: u64,
+        key: ViewedKey,
+        loaded: Arc<ViewedState>,
+        paths: HashSet<String>,
+        cx: &mut Context<Self>,
+    ) -> Arc<ViewedState> {
+        let known = self.viewed_states.contains_key(&key);
+        let state = self.viewed_states.entry(key).or_insert(loaded).clone();
+        let Some(session) = self.session_mut(id) else {
+            return state;
+        };
+        session.viewed = Some(state.clone());
+        if known {
+            let task = cx.background_spawn({
+                let state = state.clone();
+                async move { state.mutate(|_| {}) }
+            });
+            cx.spawn(async move |this, cx| {
+                let (version, paths) = task.await;
+                this.update(cx, |this, cx| this.apply_viewed(id, version, paths, cx))
+                    .ok();
+            })
+            .detach();
+        } else {
+            session
+                .sidebar
+                .update(cx, |sidebar, cx| sidebar.set_viewed(paths.clone(), cx));
+            session.pane.update(cx, |pane, cx| pane.set_viewed(paths, cx));
+        }
+        state
+    }
+
+    /// Shows the diff if it changed. Returns the viewed-mark cleanup still owed for it: `cleared` is only set once
+    /// that cleanup has run, so a load that replaces this one retries it.
+    fn apply_diff(&mut self, id: u64, diff: DiffLoaded, cx: &mut Context<Self>) -> Option<ClearJob> {
+        Bench::note_stage(cx, "diff_git_and_parse", diff.git_and_parse);
+        Bench::note_stage(cx, "diff_fingerprints", diff.fingerprints);
+        let session = self.session_mut(id)?;
+        if session.cleared.as_ref() == Some(&diff.signature) {
+            return None;
+        }
+        let fingerprints: HashMap<String, String> = diff.signature.iter().cloned().collect();
+        if session.shown.as_ref() != Some(&diff.signature) {
+            session.fingerprints = fingerprints.clone();
+            session.shown = Some(diff.signature.clone());
+            session.pane.update(cx, |pane, cx| pane.set_files(diff.files, cx));
+        }
+        Some(ClearJob {
+            fingerprints,
+            signature: diff.signature,
+        })
+    }
+
+    fn finish_clear(
+        &mut self,
+        id: u64,
+        signature: Signature,
+        version: u64,
+        paths: HashSet<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(session) = self.session_mut(id)
+            && session.shown.as_ref() == Some(&signature)
+        {
+            session.cleared = Some(signature);
+        }
+        self.apply_viewed(id, version, paths, cx);
+    }
+
+    fn apply_viewed(&mut self, id: u64, version: u64, paths: HashSet<String>, cx: &mut Context<Self>) {
+        let Some(session) = self.session_mut(id) else { return };
+        if version <= session.applied_viewed {
+            return;
+        }
+        session.applied_viewed = version;
+        session
+            .sidebar
+            .update(cx, |sidebar, cx| sidebar.set_viewed(paths.clone(), cx));
+        session.pane.update(cx, |pane, cx| pane.set_viewed(paths, cx));
+    }
+
+    fn toggle_viewed(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = &self.session else { return };
+        let Some(state) = session.viewed.clone() else { return };
+        let id = session.id;
+        let fingerprint = session.fingerprints.get(&path).cloned();
+        let task =
+            cx.background_spawn(async move { state.mutate(|files| files.toggle(&path, fingerprint.as_deref())) });
+        cx.spawn_in(window, async move |this, cx| {
+            let (version, paths) = task.await;
+            this.update(cx, |this, cx| this.apply_viewed(id, version, paths, cx))
+                .ok();
+        })
+        .detach();
+    }
+
+    fn start_watching(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let repo = self.repo.clone();
+        let task = cx.background_spawn(async move { watcher::watch(&repo) });
+        self._watch_task = Some(cx.spawn_in(window, async move |this, cx| {
+            let Ok((guard, changes)) = task.await else { return };
+            this.update(cx, |this, _| this.watch = Some(guard)).ok();
+            while let Ok(change) = changes.recv().await {
+                let mut head_changed = change.head_changed;
+                while let Ok(more) = changes.try_recv() {
+                    head_changed |= more.head_changed;
+                }
+                let applied = this.update_in(cx, |this, window, cx| this.on_repo_change(head_changed, window, cx));
+                if applied.is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+
+    fn on_repo_change(&mut self, head_changed: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if head_changed {
+            self.load_refs(window, cx);
+        } else {
+            self.start_load(window, cx);
+        }
+    }
+
+    pub fn sidebar_scroll(&self, cx: &gpui::App) -> Option<(gpui::UniformListScrollHandle, usize)> {
+        let session = self.session.as_ref()?;
+        let sidebar = session.sidebar.read(cx);
+        Some((sidebar.scroll_handle(), sidebar.row_count()))
+    }
+}
+
+fn drag_region(
+    should_move: &Rc<Cell<bool>>,
+) -> impl FnOnce(gpui::Stateful<gpui::Div>) -> gpui::Stateful<gpui::Div> + use<> {
+    let state = should_move.clone();
+    move |region| {
+        let (down, up, moved) = (state.clone(), state.clone(), state);
+        region
+            .window_control_area(WindowControlArea::Drag)
+            .on_double_click(|_, window, _| window.titlebar_double_click())
+            .on_mouse_down(MouseButton::Left, move |_, _, _| down.set(true))
+            .on_mouse_up(MouseButton::Left, move |_, _, _| up.set(false))
+            .on_mouse_move(move |_, window, _| {
+                if moved.replace(false) {
+                    window.start_window_move();
+                }
+            })
+    }
+}
+
+fn sidebar_toggle(cx: &mut Context<RepoView>) -> Button {
+    Button::new("toggle-sidebar")
+        .ghost()
+        .small()
+        .icon(Icon::new(Glyph::PanelLeft).size_4())
+        .tooltip("Toggle Sidebar")
+        .selected(false)
+        .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx)))
+}
+
+impl RepoView {
+    fn toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let theme = cx.theme();
+        let (border, muted) = (theme.border, theme.muted_foreground);
+        let wrap = self.wrap;
+        let view = cx.entity().downgrade();
+        let select: Select = Rc::new(move |next, window, cx| {
+            view.update(cx, |this, cx| this.select_comparison(next, window, cx))
+                .ok();
+        });
+        let control = match (&self.refs, &self.comparison) {
+            (Some(refs), Some(comparison)) => {
+                Some(comparison_control(refs, comparison, self.compact_toolbar, select, cx).into_any_element())
+            }
+            _ => None,
+        };
+        let drag = drag_region(&self.should_move);
+        let leading = (!self.sidebar_open).then(|| sidebar_toggle(cx));
+        let _ = (window, muted);
+        drag(
+            h_flex()
+                .id("toolbar")
+                .h(px(TOOLBAR_HEIGHT))
+                .flex_shrink_0()
+                .px_3()
+                .gap_2()
+                .border_b_1()
+                .border_color(border)
+                .when(!self.sidebar_open, |this| this.pl(px(TRAFFIC_LIGHTS))),
+        )
+        .children(leading)
+        .child(
+            div()
+                .text_size(px(15.))
+                .font_semibold()
+                .whitespace_nowrap()
+                .child(self.folder_name.clone()),
+        )
+        .child(
+            h_flex()
+                .flex_1()
+                .min_w_0()
+                .justify_center()
+                .gap_2()
+                .child(
+                    div()
+                        .id("toolbar-claude-slot")
+                        .children(self.session.as_ref().map(|session| session.pill.clone())),
+                )
+                .children(control),
+        )
+        .child(
+            Button::new("toggle-wrap")
+                .ghost()
+                .small()
+                .icon(Icon::new(Glyph::TextWrap).size_4())
+                .tooltip("Wrap lines")
+                .selected(wrap)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.wrap = !this.wrap;
+                    let wrap = this.wrap;
+                    if let Some(session) = &this.session {
+                        session.pane.update(cx, |pane, cx| pane.set_wrap(wrap, cx));
+                    }
+                    cx.notify();
+                })),
+        )
+        .into_any_element()
+    }
+}
+
+impl Render for RepoView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let (background, sidebar_bg, sidebar_border, muted) = (
+            theme.background,
+            theme.sidebar,
+            theme.sidebar_border,
+            theme.muted_foreground,
+        );
+        let width = self.sidebar_width;
+        let drag = drag_region(&self.should_move);
+        let toggle = sidebar_toggle(cx);
+        let toolbar = self.toolbar(window, cx);
+
+        let sidebar_content = match &self.session {
+            Some(session) => session.sidebar.clone().into_any_element(),
+            None => div().flex_1().into_any_element(),
+        };
+        let detail_content = match &self.session {
+            Some(session) => session.pane.clone().into_any_element(),
+            None => div().into_any_element(),
+        };
+        let _ = muted;
+
+        h_flex()
+            .id("repo-view")
+            .size_full()
+            .bg(background)
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                if !this.resizing {
+                    return;
+                }
+                if event.pressed_button != Some(MouseButton::Left) {
+                    this.resizing = false;
+                    return;
+                }
+                this.sidebar_width = event.position.x.clamp(px(MIN_SIDEBAR), px(MAX_SIDEBAR));
+                cx.notify();
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _: &MouseUpEvent, _, _| this.resizing = false),
+            )
+            .when(self.sidebar_open, |this| {
+                this.child(
+                    v_flex()
+                        .id("sidebar-column")
+                        .w(width)
+                        .flex_shrink_0()
+                        .h_full()
+                        .bg(sidebar_bg)
+                        .child(
+                            drag(
+                                h_flex()
+                                    .id("sidebar-top")
+                                    .h(px(TOOLBAR_HEIGHT))
+                                    .flex_shrink_0()
+                                    .px_2()
+                                    .justify_end(),
+                            )
+                            .child(toggle),
+                        )
+                        .child(div().flex_1().min_h_0().child(sidebar_content)),
+                )
+                .child(
+                    div()
+                        .id("sidebar-handle")
+                        .w(px(1.))
+                        .h_full()
+                        .flex_shrink_0()
+                        .bg(sidebar_border)
+                        .relative()
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .bottom_0()
+                                .left(px(-3.))
+                                .w(px(7.))
+                                .cursor_col_resize()
+                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, _| this.resizing = true)),
+                        ),
+                )
+            })
+            .child(
+                v_flex()
+                    .id("detail")
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .child(toolbar)
+                    .child(div().flex_1().min_h_0().child(detail_content)),
+            )
+    }
+}
+
+#[cfg(test)]
+impl RepoView {
+    fn current(&self) -> &Session {
+        self.session.as_ref().expect("a session")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use diffpilot_core::cancel::CancelToken;
+    use diffpilot_core::claude::{ReviewError, Reviewer};
+    use diffpilot_core::review::{Finding, ReviewRequest, ReviewResult, Severity};
+    use gpui::TestAppContext;
+    use std::process::Command;
+
+    struct Canned;
+
+    impl Reviewer for Canned {
+        fn review(&self, _: &ReviewRequest, _: &CancelToken) -> Result<ReviewResult, ReviewError> {
+            let finding = |path: &str, line, severity, title: &str| Finding {
+                path: path.into(),
+                line,
+                severity,
+                title: title.into(),
+                body: format!("{title} body"),
+            };
+            Ok(ReviewResult {
+                summary: "Fine overall.".into(),
+                findings: vec![
+                    finding("base.txt", Some(2), Severity::MustFix, "Edited"),
+                    finding("src/staged.rs", None, Severity::Nit, "Name"),
+                    finding("docs/committed.md", None, Severity::Suggestion, "Doc"),
+                    finding("src/staged.rs", Some(5), Severity::Question, "Why"),
+                ],
+            })
+        }
+    }
+
+    fn claude() -> Claude {
+        Claude {
+            reviewer: Arc::new(Canned),
+            replier: Arc::new(ScriptedReplier::default()),
+        }
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let binary = diffpilot_core::git::binary().expect("git");
+        let status = Command::new(binary)
+            .arg("-C")
+            .arg(dir)
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git {args:?}");
+    }
+
+    fn write(dir: &std::path::Path, path: &str, text: &str) {
+        let file = dir.join(path);
+        std::fs::create_dir_all(file.parent().expect("parent")).expect("mkdir");
+        std::fs::write(file, text).expect("write");
+    }
+
+    fn fixture() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = dir.path();
+        git(repo, &["init", "-q", "-b", "main"]);
+        write(repo, "base.txt", "base\n");
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-q", "-m", "base"]);
+        git(repo, &["checkout", "-q", "-b", "feature"]);
+        write(repo, "docs/committed.md", "committed\n");
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-q", "-m", "committed"]);
+        write(repo, "base.txt", "base\nedited\n");
+        write(repo, "src/staged.rs", &"let value = 1;\n".repeat(300));
+        git(repo, &["add", "src/staged.rs"]);
+        dir
+    }
+
+    struct Opened {
+        view: Entity<RepoView>,
+        store: Arc<ViewedStore>,
+        _dir: tempfile::TempDir,
+    }
+
+    fn open(cx: &mut TestAppContext) -> (Opened, &mut gpui::VisualTestContext) {
+        cx.update(gpui_component::init);
+        let dir = fixture();
+        let repo = dir.path().to_path_buf();
+        let store = Arc::new(ViewedStore::in_memory());
+        let settings = Arc::new(Settings::in_memory());
+        let shared = store.clone();
+        let mut view = None;
+        let handle = cx.add_window(|window, cx| {
+            let entity = cx.new(|cx| RepoView::new(repo, settings, shared, claude(), window, cx));
+            view = Some(entity.clone());
+            gpui_component::Root::new(entity, window, cx)
+        });
+        let cx = gpui::VisualTestContext::from_window(handle.into(), cx).into_mut();
+        let view = view.expect("the window builds the view");
+        cx.executor().allow_parking();
+        cx.run_until_parked();
+        (Opened { view, store, _dir: dir }, cx)
+    }
+
+    fn sidebar_paths(opened: &Opened, cx: &mut gpui::VisualTestContext) -> Vec<String> {
+        let sidebar = opened.view.read_with(cx, |view, _| view.current().sidebar.clone());
+        sidebar.read_with(cx, |sidebar, _| sidebar.paths())
+    }
+
+    #[gpui::test]
+    fn opens_on_the_checked_out_branch_compared_to_main(cx: &mut TestAppContext) {
+        let (opened, cx) = open(cx);
+        opened.view.read_with(cx, |view, _| {
+            assert_eq!(view.comparison, Some(Comparison::checked_out("main", true)));
+            assert_eq!(
+                view.refs.as_ref().and_then(|refs| refs.checked_out.as_deref()),
+                Some("feature")
+            );
+        });
+        let paths = sidebar_paths(&opened, cx);
+        assert_eq!(paths, ["docs", "docs/committed.md", "src", "src/staged.rs", "base.txt"]);
+        let sidebar = opened.view.read_with(cx, |view, _| view.current().sidebar.clone());
+        sidebar.read_with(cx, |sidebar, _| assert_eq!(sidebar.summary().file_count, 3));
+    }
+
+    #[gpui::test]
+    fn picking_a_comparison_starts_a_new_session_and_remembers_it(cx: &mut TestAppContext) {
+        let (opened, cx) = open(cx);
+        let first = opened.view.read_with(cx, |view, _| view.current().id);
+
+        opened.view.update_in(cx, |view, window, cx| {
+            view.select_comparison(Comparison::Staged, window, cx)
+        });
+        cx.run_until_parked();
+
+        let second = opened.view.read_with(cx, |view, _| view.current().id);
+        assert_ne!(first, second);
+        assert_eq!(sidebar_paths(&opened, cx), ["src", "src/staged.rs"]);
+
+        opened.view.update_in(cx, |view, window, cx| {
+            view.select_comparison(Comparison::WorkingTree, window, cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(sidebar_paths(&opened, cx), ["src", "src/staged.rs", "base.txt"]);
+
+        let saved = opened.view.read_with(cx, |view, _| {
+            let key = comparison::store_key(&view.repo, Some("feature"));
+            view.settings.comparison(&key)
+        });
+        assert_eq!(saved, Some(Comparison::WorkingTree));
+    }
+
+    #[gpui::test]
+    fn selecting_the_same_comparison_keeps_the_session(cx: &mut TestAppContext) {
+        let (opened, cx) = open(cx);
+        let first = opened.view.read_with(cx, |view, _| view.current().id);
+        opened.view.update_in(cx, |view, window, cx| {
+            view.select_comparison(Comparison::checked_out("main", true), window, cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(opened.view.read_with(cx, |view, _| view.current().id), first);
+    }
+
+    #[gpui::test]
+    fn reviewing_another_branch_shows_its_changes(cx: &mut TestAppContext) {
+        let (opened, cx) = open(cx);
+        opened.view.update_in(cx, |view, window, cx| {
+            view.select_comparison(Comparison::branch("feature", "main"), window, cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(sidebar_paths(&opened, cx), ["docs", "docs/committed.md"]);
+    }
+
+    #[gpui::test]
+    fn toggling_viewed_updates_the_sidebar_and_the_store(cx: &mut TestAppContext) {
+        let (opened, cx) = open(cx);
+        opened
+            .view
+            .update_in(cx, |view, window, cx| view.toggle_viewed("base.txt".into(), window, cx));
+        cx.run_until_parked();
+
+        let sidebar = opened.view.read_with(cx, |view, _| view.current().sidebar.clone());
+        sidebar.read_with(cx, |sidebar, _| assert_eq!(sidebar.summary().viewed, 1));
+        let key = opened.view.read_with(cx, |view, _| {
+            ViewedKey::for_comparison(&view.repo, &Comparison::checked_out("main", true), view.refs.as_ref())
+        });
+        let saved = opened.store.load(&key);
+        let fingerprint = saved.get("base.txt").expect("saved");
+        assert!(!fingerprint.is_empty(), "the file fingerprint is stored with the mark");
+
+        opened
+            .view
+            .update_in(cx, |view, window, cx| view.toggle_viewed("base.txt".into(), window, cx));
+        cx.run_until_parked();
+        sidebar.read_with(cx, |sidebar, _| assert_eq!(sidebar.summary().viewed, 0));
+        assert!(opened.store.load(&key).is_empty());
+    }
+
+    #[gpui::test]
+    fn the_sidebar_selection_reveals_the_file_in_the_pane(cx: &mut TestAppContext) {
+        let (opened, cx) = open(cx);
+        let (sidebar, pane) = opened.view.read_with(cx, |view, _| {
+            let session = view.current();
+            (session.sidebar.clone(), session.pane.clone())
+        });
+        assert_eq!(pane.read_with(cx, |pane, _| pane.state().scroll()), 0.0);
+
+        sidebar.update_in(cx, |sidebar, window, cx| sidebar.select_index(3, window, cx));
+        cx.run_until_parked();
+
+        pane.read_with(cx, |pane, _| {
+            assert!(pane.state().scroll() > 0.0, "the pane scrolled");
+            assert_eq!(pane.state().visible_path(), Some("src/staged.rs"));
+        });
+    }
+
+    #[gpui::test]
+    fn a_change_on_disk_reloads_the_sidebar(cx: &mut TestAppContext) {
+        let (opened, cx) = open(cx);
+        let repo = opened.view.read_with(cx, |view, _| view.repo.clone());
+        write(&repo, "added.txt", "new\n");
+        git(&repo, &["add", "added.txt"]);
+        opened
+            .view
+            .update_in(cx, |view, window, cx| view.on_repo_change(false, window, cx));
+        cx.run_until_parked();
+        assert!(sidebar_paths(&opened, cx).contains(&"added.txt".to_string()));
+    }
+
+    #[gpui::test]
+    fn a_head_change_picks_up_the_new_branch(cx: &mut TestAppContext) {
+        let (opened, cx) = open(cx);
+        let (repo, first) = opened
+            .view
+            .read_with(cx, |view, _| (view.repo.clone(), view.current().id));
+        git(&repo, &["stash", "-q", "-u"]);
+        git(&repo, &["checkout", "-q", "main"]);
+        opened
+            .view
+            .update_in(cx, |view, window, cx| view.on_repo_change(true, window, cx));
+        cx.run_until_parked();
+        let (branch, second) = opened.view.read_with(cx, |view, _| {
+            (
+                view.refs.as_ref().and_then(|refs| refs.checked_out.clone()),
+                view.current().id,
+            )
+        });
+        assert_eq!(branch.as_deref(), Some("main"));
+        assert_ne!(first, second);
+    }
+
+    fn loaded(signature: &[(&str, &str)]) -> DiffLoaded {
+        DiffLoaded {
+            files: Vec::new(),
+            signature: signature
+                .iter()
+                .map(|(path, print)| (path.to_string(), print.to_string()))
+                .collect(),
+            git_and_parse: Duration::ZERO,
+            fingerprints: Duration::ZERO,
+        }
+    }
+
+    #[gpui::test]
+    fn a_diff_is_cleaned_of_stale_viewed_marks_until_the_cleanup_finishes(cx: &mut TestAppContext) {
+        let (opened, cx) = open(cx);
+        opened.view.read_with(cx, |view, _| {
+            let session = view.current();
+            assert!(session.cleared.is_some() && session.cleared == session.shown);
+        });
+        opened.view.update(cx, |view, cx| {
+            let id = view.current().id;
+            let next = [("base.txt", "changed")];
+            assert!(view.apply_diff(id, loaded(&next), cx).is_some());
+            assert!(
+                view.apply_diff(id, loaded(&next), cx).is_some(),
+                "the same diff arriving again, before its cleanup finished, still owes the cleanup"
+            );
+            let job = view.apply_diff(id, loaded(&next), cx).expect("still owed");
+            view.finish_clear(id, job.signature, 1, HashSet::new(), cx);
+            assert!(view.apply_diff(id, loaded(&next), cx).is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn two_sessions_on_one_branch_share_one_set_of_viewed_marks(cx: &mut TestAppContext) {
+        let (opened, cx) = open(cx);
+        opened
+            .view
+            .update_in(cx, |view, window, cx| view.toggle_viewed("base.txt".into(), window, cx));
+        opened.view.update_in(cx, |view, window, cx| {
+            view.select_comparison(Comparison::Staged, window, cx)
+        });
+        cx.run_until_parked();
+        let (first, second) = opened.view.read_with(cx, |view, _| {
+            let session = view.current();
+            (view.viewed_states.len(), session.viewed.clone().expect("viewed"))
+        });
+        assert_eq!(first, 1, "one owner for the feature branch");
+        opened.view.update_in(cx, |view, window, cx| {
+            view.toggle_viewed("src/staged.rs".into(), window, cx)
+        });
+        cx.run_until_parked();
+        let key = opened.view.read_with(cx, |view, _| {
+            ViewedKey::for_comparison(&view.repo, &Comparison::Staged, view.refs.as_ref())
+        });
+        let saved = opened.store.load(&key);
+        assert!(
+            saved.contains_key("base.txt") && saved.contains_key("src/staged.rs"),
+            "{saved:?}"
+        );
+        assert_eq!(second.files.lock().unwrap().paths().len(), 2);
+    }
+
+    fn review_session(opened: &Opened, cx: &mut gpui::VisualTestContext) -> Entity<ReviewSession> {
+        let pane = opened.view.read_with(cx, |view, _| view.current().pane.clone());
+        pane.read_with(cx, |pane, _| pane.review().cloned().expect("a review session"))
+    }
+
+    fn run_review(opened: &Opened, cx: &mut gpui::VisualTestContext) {
+        review_session(opened, cx).update(cx, |session, cx| session.start_review(cx));
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn review_findings_become_rows_in_the_pane_and_counts_in_the_sidebar(cx: &mut TestAppContext) {
+        let (opened, cx) = open(cx);
+        run_review(&opened, cx);
+        let (sidebar, pane) = opened.view.read_with(cx, |view, _| {
+            let session = view.current();
+            (session.sidebar.clone(), session.pane.clone())
+        });
+        let counts = sidebar.read_with(cx, |sidebar, _| sidebar.comments().clone());
+        assert_eq!(counts.get("base.txt"), Some(&1));
+        assert_eq!(counts.get("src/staged.rs"), Some(&2));
+        assert_eq!(counts.get("docs/committed.md"), Some(&1));
+        assert_eq!(counts.get(""), Some(&1), "the summary belongs to the whole change");
+        let slots = pane.read_with(cx, |pane, _| pane.state().threads.len());
+        assert_eq!(slots, 5);
+
+        let session = review_session(&opened, cx);
+        let first = session.read_with(cx, |session, _| session.threads().next().map(|thread| thread.id));
+        session.update(cx, |session, cx| session.remove_thread(first.expect("a thread"), cx));
+        let counts = sidebar.read_with(cx, |sidebar, _| sidebar.comments().clone());
+        assert_eq!(counts.values().sum::<usize>(), 4);
+        assert_eq!(pane.read_with(cx, |pane, _| pane.state().threads.len()), 4);
+    }
+
+    #[gpui::test]
+    fn the_session_knows_the_comparison_branch_and_files(cx: &mut TestAppContext) {
+        let (opened, cx) = open(cx);
+        let review = review_session(&opened, cx);
+        review.read_with(cx, |session, _| {
+            assert_eq!(session.host().comparison, Comparison::checked_out("main", true));
+            assert_eq!(session.host().branch_name.as_deref(), Some("feature"));
+            assert_eq!(session.file_count(), 3);
+            assert!(session.host().visible_path.is_some());
+        });
+    }
+
+    #[gpui::test]
+    fn the_toolbar_compacts_while_a_review_runs_and_while_its_result_shows(cx: &mut TestAppContext) {
+        let (opened, cx) = open(cx);
+        let compact = |cx: &mut gpui::VisualTestContext| opened.view.read_with(cx, |view, _| view.compact_toolbar);
+        assert!(!compact(cx));
+        review_session(&opened, cx).update(cx, |session, cx| session.start_review(cx));
+        assert!(compact(cx), "running");
+        cx.run_until_parked();
+        assert!(compact(cx), "the result shows for a few seconds");
+        cx.executor()
+            .advance_clock(Duration::from_secs(diffpilot_review_ui::pill::RESULT_SECONDS + 1));
+        cx.run_until_parked();
+        assert!(!compact(cx), "the result is gone");
+    }
+
+    #[gpui::test]
+    fn the_pill_comments_on_the_top_file_and_the_pane_shows_the_thread(cx: &mut TestAppContext) {
+        let (opened, cx) = open(cx);
+        let (pill, pane) = opened.view.read_with(cx, |view, _| {
+            let session = view.current();
+            (session.pill.clone(), session.pane.clone())
+        });
+        pill.update(cx, |pill, cx| pill.comment_on_file(cx));
+        cx.run_until_parked();
+        let review = review_session(&opened, cx);
+        let id = review.read_with(cx, |session, _| session.threads().next().map(|thread| thread.id));
+        assert!(pane.read_with(cx, |pane, _| pane.card(id.expect("a thread")).is_some()));
+    }
+}

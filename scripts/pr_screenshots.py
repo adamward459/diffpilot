@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Capture screenshots of the features the current branch's PR touches and show them in the PR.
+"""Capture screenshots of the crates the current branch's PR touches and show them in the PR.
 
-Runs `scripts/test.py screenshot` for those features, commits screenshots/feature/<Feature>/,
-pushes, and replaces the screenshots section of the PR body.
+Runs `scripts/test.py screenshot` for those crates (the release app, light and dark, on the fixture
+repo), commits screenshots/feature/<crate>/, pushes, and replaces the screenshots section of the PR body.
+Needs Screen Recording permission for the terminal.
 
-  scripts/pr_screenshots.py [feature...]   default: features touched relative to the PR base branch
+  scripts/pr_screenshots.py [crate...]   default: crates touched relative to the PR base branch
 """
 
 from __future__ import annotations
@@ -48,15 +49,15 @@ def section(repo: str, sha: str, names: list[str]) -> str:
 def main(argv: list[str]) -> int:
     pr = json.loads(sh("gh", "pr", "view", "--json", "number,baseRefName,body,headRefName"))
     repo = sh("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner")
-    manifest = tests.load_manifest()
     if argv:
         names = argv
     else:
         sh("git", "fetch", "--quiet", "origin", pr["baseRefName"])
-        touched, _ = tests.touched_features(f"origin/{pr['baseRefName']}")
-        names = tests.screenshot_features(manifest, touched)
+        crates = tests.workspace()
+        touched = tests.touched_crates(crates, tests.changed_files(f"origin/{pr['baseRefName']}"))
+        names = tests.screenshot_crates(touched)
     if not names:
-        print("No touched feature has a screenshot test.", file=sys.stderr)
+        print("No touched crate has a window to capture.", file=sys.stderr)
         return 0
 
     code = tests.main(["screenshot", *names])

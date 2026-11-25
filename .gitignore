@@ -1,6 +1,5 @@
 /.fixtures/
-/web/node_modules/
 __pycache__/
-xcuserdata
 .DS_Store
 default.profraw
+target/

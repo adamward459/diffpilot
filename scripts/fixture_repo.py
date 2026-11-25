@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Build the git repo that UI tests pass to the app in DIFFPILOT_REPO.
+"""Build the git repo that screenshots and bench runs pass to the app in DIFFPILOT_REPO.
 
-The repo lives in .fixtures/ at the repo root. Xcode test builds give the sandboxed app read access to /.
+The repo lives in .fixtures/ at the repo root.
 Branch `main` holds the base files; branch `feature` holds committed changes, and the
 working tree holds uncommitted ones. .fixtures/large-viewed.json lists the viewed files; the UI
-tests pass it to the app in DIFFPILOT_VIEWED_SEED.
+scripts pass it to the app in DIFFPILOT_VIEWED_SEED.
 
   scripts/fixture_repo.py           build it if the script changed since the last build
   scripts/fixture_repo.py --force   rebuild it

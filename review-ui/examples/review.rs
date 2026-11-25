@@ -1,0 +1,383 @@
+//! Shows the review pill and a few thread cards.
+//!
+//! `DIFFPILOT_REVIEWER=scripted` and `DIFFPILOT_REVIEW_SECONDS` pick the scripted reviewer's delay.
+//! `DIFFPILOT_APPEARANCE=light|dark` picks the theme.
+//! `DIFFPILOT_DEMO_START=1` starts a review at launch. `DIFFPILOT_DEMO_POPOVER=1` opens the popover.
+//! `DIFFPILOT_BENCH=1` runs a hidden window and prints frame times as JSON on stdout.
+
+use diffpilot_core::changes::FileStatus;
+use diffpilot_core::claude::{Replier, Reviewer, ScriptedReplier, ScriptedReviewer, reviewer_from_env};
+use diffpilot_core::comparison::Comparison;
+use diffpilot_core::diff::{DiffLine, FileDiff, Hunk, LineKind};
+use diffpilot_core::settings::Settings;
+use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
+use diffpilot_review_ui::{
+    PillEvent, ReviewAssets, ReviewEvent, ReviewHost, ReviewPill, ReviewSession, ThreadCard, ThreadChange,
+};
+use gpui::{
+    App, AppContext, Application, AsyncApp, Bounds, Context, Entity, InteractiveElement, IntoElement, ParentElement,
+    Pixels, Render, StatefulInteractiveElement, Styled, Subscription, Window, WindowBounds, WindowOptions, canvas, div,
+    point, px, size,
+};
+use gpui_component::{ActiveTheme, Root, Theme, ThemeMode, h_flex, v_flex};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+const CARD_WIDTH: f32 = 720.0;
+
+type Heights = Rc<RefCell<HashMap<ThreadId, Pixels>>>;
+
+fn archive_file() -> FileDiff {
+    let mut file = FileDiff::new("docs/archive.md", FileStatus::Added);
+    file.additions = 19;
+    file.hunks.push(Hunk {
+        header: "@@ -0,0 +1,19 @@".into(),
+        lines: (0..19)
+            .map(|n| DiffLine {
+                kind: LineKind::Added,
+                old: None,
+                new: Some(n + 1),
+                text: format!("docs/archive.md new {n}"),
+            })
+            .collect(),
+    });
+    file
+}
+
+struct Gallery {
+    pill: Entity<ReviewPill>,
+    cards: Vec<Entity<ThreadCard>>,
+    heights: Heights,
+    room: bool,
+    show_cards: bool,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl Gallery {
+    fn new(session: Entity<ReviewSession>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let pill = cx.new(|cx| ReviewPill::new(session.clone(), window, cx));
+        let subscriptions = vec![
+            cx.subscribe(&session, |this, session, event, cx| match event {
+                ReviewEvent::ThreadsChanged(ThreadChange::Added(id)) => {
+                    let card = cx.new(|cx| ThreadCard::new(session.clone(), *id, cx));
+                    this.cards.push(card);
+                    cx.notify();
+                }
+                ReviewEvent::ThreadsChanged(ThreadChange::Removed(id)) => {
+                    this.cards.retain(|card| card.read(cx).thread_id() != *id);
+                    cx.notify();
+                }
+                _ => {}
+            }),
+            cx.subscribe(&pill, |this, _, event, cx| match event {
+                PillEvent::NeedsRoomChanged(room) => {
+                    this.room = *room;
+                    cx.notify();
+                }
+                PillEvent::CommentOnFile(_) => {}
+            }),
+        ];
+        Self {
+            pill,
+            cards: Vec::new(),
+            heights: Heights::default(),
+            room: false,
+            show_cards: true,
+            _subscriptions: subscriptions,
+        }
+    }
+}
+
+impl Render for Gallery {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let (background, border, muted) = (theme.background, theme.border, theme.muted_foreground);
+        let room = if self.room { "pill has room" } else { "compact" };
+        v_flex()
+            .size_full()
+            .bg(background)
+            .child(
+                h_flex()
+                    .h(px(44.))
+                    .px_4()
+                    .gap_4()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(border)
+                    .child(div().text_color(muted).child("large"))
+                    .child(self.pill.clone())
+                    .child(div().text_color(muted).text_size(px(11.)).child(room)),
+            )
+            .child(
+                v_flex()
+                    .id("cards")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .p_4()
+                    .gap_3()
+                    .when_cards(self.show_cards, |column| {
+                        column.children(self.cards.iter().map(|card| {
+                            let id = card.read(cx).thread_id();
+                            let heights = self.heights.clone();
+                            div().relative().w(px(CARD_WIDTH)).child(card.clone()).child(
+                                canvas(
+                                    move |bounds: Bounds<Pixels>, _, _| {
+                                        heights.borrow_mut().insert(id, bounds.size.height);
+                                    },
+                                    |_, _, _, _| {},
+                                )
+                                .absolute()
+                                .size_full(),
+                            )
+                        }))
+                    }),
+            )
+    }
+}
+
+trait WhenCards: Sized {
+    fn when_cards(self, show: bool, build: impl FnOnce(Self) -> Self) -> Self {
+        if show { build(self) } else { self }
+    }
+}
+impl<T> WhenCards for T {}
+
+fn session(cx: &mut App, reviewer: Arc<dyn Reviewer>, replier: Arc<dyn Replier>) -> Entity<ReviewSession> {
+    let mut host = ReviewHost::new(
+        Some(PathBuf::from("/tmp/diffpilot-demo")),
+        Comparison::checked_out("main", true),
+    );
+    host.branch_name = Some("feature".into());
+    host.files = Arc::from([Arc::new(archive_file())]);
+    host.visible_path = Some("docs/archive.md".into());
+    cx.new(|_| ReviewSession::new(host, Arc::new(Settings::in_memory()), reviewer, replier))
+}
+
+fn apply_appearance(cx: &mut App) {
+    match std::env::var("DIFFPILOT_APPEARANCE").as_deref() {
+        Ok("dark") => Theme::change(ThemeMode::Dark, None, cx),
+        Ok("light") => Theme::change(ThemeMode::Light, None, cx),
+        _ => Theme::sync_system_appearance(None, cx),
+    }
+}
+
+fn open_gallery(
+    cx: &mut App,
+    hidden: bool,
+    session: Entity<ReviewSession>,
+) -> (gpui::WindowHandle<Root>, Entity<Gallery>) {
+    let options = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+            point(px(80.), px(80.)),
+            size(px(CARD_WIDTH + 80.), px(900.)),
+        ))),
+        show: !hidden,
+        focus: !hidden,
+        ..WindowOptions::default()
+    };
+    let mut made = None;
+    let window = cx
+        .open_window(options, |window, cx| {
+            let gallery = cx.new(|cx| Gallery::new(session, window, cx));
+            made = Some(gallery.clone());
+            cx.new(|cx| Root::new(gallery, window, cx))
+        })
+        .expect("open the window");
+    (window, made.expect("the window builds its root"))
+}
+
+fn run_demo(cx: &mut App) {
+    let session = session(cx, Arc::from(reviewer_from_env()), Arc::new(ScriptedReplier::default()));
+    let (_, gallery) = open_gallery(cx, false, session.clone());
+    let flag = |name: &str| std::env::var(name).is_ok_and(|value| value == "1");
+    if flag("DIFFPILOT_DEMO_POPOVER") {
+        gallery.update(cx, |gallery, cx| {
+            gallery.pill.update(cx, |pill, cx| pill.set_open(true, cx))
+        });
+    }
+    if flag("DIFFPILOT_DEMO_START") {
+        session.update(cx, |session, cx| session.start_review(cx));
+    }
+    session.update(cx, |session, cx| {
+        let id = session.create_thread(ThreadAnchor::line("docs/archive.md", Side::New, 3), cx);
+        session.post(id, "@claude is this line needed?", cx);
+        session.create_thread(ThreadAnchor::file("docs/archive.md"), cx);
+    });
+    cx.activate(true);
+}
+
+fn long_reply(words: usize) -> String {
+    let sentence = "I read the change around this line. The `onDismiss` callback now runs after the sheet animates out, so a caller that reads layout inside it sees the final frame. I would keep it and add a test that dismisses twice in a row. ";
+    sentence.split(' ').cycle().take(words).collect::<Vec<_>>().join(" ")
+}
+
+fn milliseconds(mut samples: Vec<Duration>) -> (f64, f64, f64) {
+    samples.sort();
+    let at = |fraction: f64| samples[((samples.len() - 1) as f64 * fraction).round() as usize].as_secs_f64() * 1000.0;
+    (at(0.5), at(0.95), at(1.0))
+}
+
+async fn bench(cx: &mut AsyncApp) {
+    let words: usize = std::env::var("DIFFPILOT_BENCH_WORDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(240);
+    let replier = Arc::new(ScriptedReplier {
+        text: long_reply(words),
+        interval: Duration::from_millis(33),
+    });
+    let (window, gallery, session) = cx
+        .update(|cx| {
+            let reviewer = Arc::new(ScriptedReviewer {
+                delay: Duration::ZERO,
+                ..ScriptedReviewer::default()
+            });
+            let session = session(cx, reviewer, replier);
+            let (window, gallery) = open_gallery(cx, true, session.clone());
+            (window, gallery, session)
+        })
+        .expect("app is alive");
+    let draw = |cx: &mut AsyncApp| {
+        cx.update_window(window.into(), |_, window, cx| {
+            let started = Instant::now();
+            window.draw(cx).clear();
+            started.elapsed()
+        })
+        .expect("window is alive")
+    };
+    for _ in 0..5 {
+        draw(cx);
+    }
+    let baseline: Vec<Duration> = (0..60).map(|_| draw(cx)).collect();
+
+    let id = session
+        .update(cx, |session, cx| {
+            let id = session.create_thread(ThreadAnchor::line("docs/archive.md", Side::New, 3), cx);
+            session.post(id, "Is this line needed? Please explain in detail.", cx);
+            id
+        })
+        .expect("app is alive");
+    cx.background_executor().timer(Duration::from_millis(50)).await;
+    for _ in 0..5 {
+        draw(cx);
+    }
+    let idle: Vec<Duration> = (0..60).map(|_| draw(cx)).collect();
+
+    session
+        .update(cx, |session, cx| session.ask_claude(id, cx))
+        .expect("app is alive");
+    let mut stream = Vec::new();
+    let mut chars = 0;
+    while session
+        .read_with(cx, |session, _| session.is_replying(id))
+        .expect("app is alive")
+    {
+        cx.background_executor().timer(Duration::from_millis(33)).await;
+        stream.push(draw(cx));
+        chars = session
+            .read_with(cx, |session, _| {
+                session
+                    .thread(id)
+                    .and_then(|t| t.comments.last())
+                    .map_or(0, |c| c.body.len())
+            })
+            .expect("app is alive");
+    }
+    draw(cx);
+
+    session
+        .update(cx, |session, cx| {
+            session.start_review(cx);
+            session.create_thread(ThreadAnchor::file("docs/archive.md"), cx);
+        })
+        .expect("app is alive");
+    cx.background_executor().timer(Duration::from_millis(100)).await;
+    cx.update_window(window.into(), |_, window, cx| {
+        let cards = gallery.read(cx).cards.clone();
+        for card in cards.iter().skip(2).take(2) {
+            card.update(cx, |card, cx| card.focus_composer(window, cx));
+        }
+    })
+    .expect("window is alive");
+    for _ in 0..3 {
+        draw(cx);
+    }
+    let cards = gallery
+        .read_with(cx, |gallery, _| gallery.cards.clone())
+        .expect("app is alive");
+    let (errors, measure_cost) = cx
+        .update_window(window.into(), |_, window, cx| {
+            let heights = gallery.read(cx).heights.borrow().clone();
+            let errors: Vec<(ThreadId, f32, f32)> = cards
+                .iter()
+                .map(|card| {
+                    let id = card.read(cx).thread_id();
+                    let measured = f32::from(card.read(cx).height(px(CARD_WIDTH), window, cx));
+                    (id, measured, f32::from(heights.get(&id).copied().unwrap_or_default()))
+                })
+                .collect();
+            let started = Instant::now();
+            for _ in 0..100 {
+                for card in &cards {
+                    card.read(cx).height(px(CARD_WIDTH), window, cx);
+                }
+            }
+            (errors, started.elapsed() / (100 * cards.len() as u32))
+        })
+        .expect("window is alive");
+    let worst = errors
+        .iter()
+        .map(|(_, measured, rendered)| (measured - rendered).abs())
+        .fold(0.0, f32::max);
+    for (id, measured, rendered) in &errors {
+        let shape = session.read_with(cx, |s, _| {
+            s.thread(*id)
+                .map(|t| (t.finding.as_ref().map(|f| f.severity), t.comments.len()))
+        });
+        eprintln!("card {id:?} {shape:?} measured={measured} rendered={rendered}");
+    }
+
+    let (base_median, ..) = milliseconds(baseline);
+    let (idle_median, idle_p95, idle_max) = milliseconds(idle);
+    let (stream_median, stream_p95, stream_max) = milliseconds(stream.clone());
+    eprintln!("stream frames={} final_chars={chars}", stream.len());
+    let metrics = serde_like(&[
+        ("baseline_frame_median_ms", base_median),
+        ("idle_frame_median_ms", idle_median),
+        ("idle_frame_p95_ms", idle_p95),
+        ("idle_frame_max_ms", idle_max),
+        ("stream_frame_median_ms", stream_median),
+        ("stream_frame_p95_ms", stream_p95),
+        ("stream_frame_max_ms", stream_max),
+        ("measure_us", measure_cost.as_secs_f64() * 1e6),
+        ("measure_error_px", f64::from(worst)),
+    ]);
+    println!("{metrics}");
+    cx.update(|cx| cx.quit()).ok();
+}
+
+fn serde_like(pairs: &[(&str, f64)]) -> String {
+    let body: Vec<String> = pairs
+        .iter()
+        .map(|(name, value)| format!("\"{name}\": {value:.3}"))
+        .collect();
+    format!("{{{}}}", body.join(", "))
+}
+
+fn main() {
+    let benching = std::env::var("DIFFPILOT_BENCH").is_ok_and(|value| value == "1");
+    Application::new().with_assets(ReviewAssets).run(move |cx: &mut App| {
+        gpui_component::init(cx);
+        diffpilot_review_ui::init(cx);
+        apply_appearance(cx);
+        if benching {
+            cx.spawn(async move |cx| bench(cx).await).detach();
+        } else {
+            run_demo(cx);
+        }
+    });
+}
