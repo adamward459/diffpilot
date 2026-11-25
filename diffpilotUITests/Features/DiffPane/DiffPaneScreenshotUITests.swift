@@ -45,6 +45,7 @@ final class DiffPaneScreenshotUITests: XCTestCase {
         XCTAssertTrue(pane.waitUntil(timeout: 20) { pane.review.hasPrefix("done") })
         // The pill shows the result for 5 s only, so capture it before the page scrolls.
         try attach(pane.window, named: "diffpane-review-done-\(appearance)")
+        pane.paneCoordinate(x: pane.paneFrame.minX + 15, y: pane.paneFrame.midY).click()
         pane.app.typeKey(.home, modifierFlags: [])
         XCTAssertTrue(pane.waitUntil { pane.recognizedText().contains("Review summary") })
         try attach(pane.window, named: "diffpane-review-\(appearance)")
