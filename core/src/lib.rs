@@ -9,6 +9,7 @@ pub mod fix;
 pub mod git;
 pub mod github;
 pub mod guard;
+pub mod guide;
 pub mod mcp;
 pub mod policy;
 pub mod prompt;
