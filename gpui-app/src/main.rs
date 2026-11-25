@@ -16,6 +16,7 @@ use diffpilot_core::settings::Settings;
 use diffpilot_core::viewed::ViewedStore;
 use gpui::{Application, Bounds, WindowBounds, WindowOptions, prelude::*, px, size};
 use gpui_component::{Root, TitleBar};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use workspace::Workspace;
@@ -44,7 +45,13 @@ fn main() {
         };
         let settings = Arc::new(settings);
         let viewed_store = Arc::new(viewed_store);
-        let folder = settings.recent_folder();
+        let folder = match folder_argument() {
+            Some(folder) => {
+                settings.remember_folder(&folder);
+                Some(folder)
+            }
+            None => settings.recent_folder(),
+        };
 
         let bounds = Bounds::centered(None, size(px(1100.), px(700.)), cx);
         let options = WindowOptions {
@@ -67,4 +74,14 @@ fn main() {
         .detach();
         cx.activate(true);
     });
+}
+
+fn folder_argument() -> Option<PathBuf> {
+    let path = std::env::args_os()
+        .skip(1)
+        .find(|arg| !arg.to_string_lossy().starts_with('-'))
+        .map(PathBuf::from)?;
+    let path = path.canonicalize().ok().filter(|path| path.is_dir())?;
+    let root = diffpilot_core::git::run(&path, &["rev-parse", "--show-toplevel"]).ok();
+    Some(root.map(|root| PathBuf::from(root.trim())).unwrap_or(path))
 }
