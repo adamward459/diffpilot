@@ -8,8 +8,8 @@ pub const LIST_TOOLS: &str = "__list_tools";
 
 const VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "Tools for the code review open in diffpilot: read the diff, read the review threads, and leave, \
-reply to, resolve or dismiss review comments.";
+const INSTRUCTIONS: &str = "Tools for the code review open in diffpilot: read the diff, read the review threads, leave, \
+reply to, resolve or dismiss review comments, and write the reading guide of the change.";
 
 pub type Forward<'a> = &'a dyn Fn(&str, Value) -> Result<Value, String>;
 

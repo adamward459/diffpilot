@@ -8,6 +8,7 @@ pub mod build;
 #[cfg(test)]
 mod fixtures;
 pub mod mermaid;
+pub mod prompt;
 pub mod stale;
 
 pub use mermaid::{DiagramKind, Graph};

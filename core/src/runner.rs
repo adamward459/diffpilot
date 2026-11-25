@@ -6,16 +6,17 @@
 
 use crate::cancel::CancelToken;
 use crate::claude::{self, ReviewError};
-use crate::diff::FileDiff;
+use crate::diff::{self, FileDiff};
 use crate::fix;
+use crate::guide::build;
 use crate::mcp::{Binding, McpBridge, Notice, PermissionRequest};
 use crate::paths::{sibling_binary, standardized};
 use crate::policy::{EditPermission, PolicyError, ToolPolicy, hook_settings, mcp_config};
 use crate::review::{ReviewModel, ReviewRequest};
-use crate::run::{Progress, Run, RunId, RunKind, RunState, RunSummary};
+use crate::run::{Progress, Run, RunId, RunKind, RunOutcome, RunState, RunSummary};
 use crate::settings::app_support_dir;
 use crate::snapshot::{self, SnapshotError, UndoReport, Until};
-use crate::store::{SessionId, SessionKey, Store, StoreError, now_ms};
+use crate::store::{GuideId, SessionId, SessionKey, Store, StoreError, now_ms};
 use crate::stream::{self, LineBuffer, StreamEvent};
 use crate::threads::ThreadId;
 use std::collections::hash_map::Entry;
@@ -40,6 +41,11 @@ pub enum RunEvent {
     Updated {
         run: RunId,
     },
+    /// The run added to its guide. Read it with `Store::load_draft(run)`, or `Store::current_guide` once it finished.
+    GuideChanged {
+        run: RunId,
+        session: SessionId,
+    },
     /// The run wrote to the threads of this session, so a `ThreadStore` there should `refresh()`.
     ThreadsChanged {
         run: RunId,
@@ -58,6 +64,8 @@ pub enum RunEvent {
 pub enum EngineError {
     #[error("The claude command was not found. Install Claude Code, then try again.")]
     ClaudeNotFound,
+    #[error("Writing a guide needs the diffpilot MCP server, which is not available.")]
+    GuideNeedsMcp,
     #[error("The safety hook {0} is missing or does not block a push, so runs are off.")]
     GuardMissing(PathBuf),
     #[error(transparent)]
@@ -268,6 +276,9 @@ impl RunEngine {
             return Err(EngineError::ClaudeNotFound);
         }
         inner.check_guard()?;
+        if request.kind == RunKind::Guide && !inner.has_mcp() {
+            return Err(EngineError::GuideNeedsMcp);
+        }
         ToolPolicy::new(request.kind, request.edit_permission, inner.has_mcp())?;
         let session = inner.config.store.session(&request.session)?;
         let id = inner.config.store.insert_run(session, request.kind, &request.title)?;
@@ -447,6 +458,7 @@ impl Inner {
     fn notice(&self, run: RunId, session: SessionId, notice: Notice) {
         match notice {
             Notice::ThreadsChanged => self.emit(RunEvent::ThreadsChanged { run, session }),
+            Notice::GuideChanged => self.emit(RunEvent::GuideChanged { run, session }),
             Notice::ThreadAnswered(thread) => self.note_thread_answered(run, thread),
             Notice::Permission(request) => self.emit(RunEvent::PermissionRequest(request)),
         }
@@ -507,7 +519,59 @@ impl Inner {
             return;
         };
         let ending = self.drive(id, &request, &cancel);
+        let ending = if request.kind == RunKind::Guide {
+            self.settle_guide(id, &request, ending)
+        } else {
+            ending
+        };
         self.finish(id, &ending);
+    }
+
+    /// A guide run is done when its guide is saved. A guide Claude built but did not finish is finished here,
+    /// when it has an overview and a chapter. A run that did not end well keeps no draft.
+    fn settle_guide(&self, id: RunId, request: &RunRequest, ending: Ending) -> Ending {
+        let store = &self.config.store;
+        if !matches!(ending, Ending::Done) {
+            let _ = store.discard_draft(id);
+            return ending;
+        }
+        let saved = match store.guide_of_run(id) {
+            Ok(Some(saved)) => Ok(saved),
+            Ok(None) => self.finish_draft(id, request),
+            Err(error) => Err(error.to_string()),
+        };
+        match saved {
+            Ok(guide) => {
+                self.with_run(id, |live| live.run.outcome = Some(RunOutcome::Guide(guide)));
+                self.emit_guide_changed(id);
+                Ending::Done
+            }
+            Err(message) => {
+                let _ = store.discard_draft(id);
+                Ending::Failed(message)
+            }
+        }
+    }
+
+    fn finish_draft(&self, id: RunId, request: &RunRequest) -> Result<GuideId, String> {
+        let store = &self.config.store;
+        let draft = store
+            .load_draft(id)
+            .map_err(|error| error.to_string())?
+            .ok_or("Claude did not write a guide.")?;
+        let mut guide = draft.guide;
+        let files = diff::load_revisions(&request.repo, &request.revisions).map_err(|error| error.to_string())?;
+        build::finish(&mut guide, &files).map_err(|error| format!("Claude did not finish the guide. {error}"))?;
+        store
+            .complete_draft(id, &guide)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "The guide was not saved.".to_string())
+    }
+
+    fn emit_guide_changed(&self, id: RunId) {
+        if let Some(session) = self.with_run(id, |live| live.run.session) {
+            self.emit(RunEvent::GuideChanged { run: id, session });
+        }
     }
 
     fn begin(&self, id: RunId) -> Option<(RunRequest, CancelToken)> {

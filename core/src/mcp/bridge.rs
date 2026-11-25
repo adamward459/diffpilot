@@ -27,6 +27,8 @@ const MAX_SOCKET_PATH: usize = 100;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Notice {
     ThreadsChanged,
+    /// The run added to the guide it is writing.
+    GuideChanged,
     ThreadAnswered(ThreadId),
     Permission(PermissionRequest),
 }

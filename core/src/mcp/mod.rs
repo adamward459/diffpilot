@@ -5,6 +5,7 @@
 //! JSON-RPC methods a client needs.
 
 pub mod bridge;
+mod guide;
 pub mod protocol;
 pub mod tools;
 

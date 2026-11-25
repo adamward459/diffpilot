@@ -2,7 +2,7 @@
 //!
 //! The tool set and the wording of the descriptions come from diffity's `bin/diffity-mcp/tools.rs` and
 //! `agents/tools.rs` (MIT, see THIRD_PARTY_NOTICES). diffpilot adds `title` to `add_comment` and `files` to
-//! `resolve`, and has no guide tool yet.
+//! `resolve`. The guide tools are in `guide`.
 
 use super::bridge::{Binding, Notice};
 use crate::anchor;
@@ -170,6 +170,9 @@ pub fn definitions() -> Vec<ToolDef> {
             false,
         ),
     ]
+    .into_iter()
+    .chain(super::guide::definitions())
+    .collect()
 }
 
 /// The names this run may call.
@@ -181,7 +184,7 @@ pub fn allowed(binding: &Binding) -> Vec<&'static str> {
     names
 }
 
-fn parse<T: for<'de> Deserialize<'de>>(args: Value) -> Result<T, ToolError> {
+pub(super) fn parse<T: for<'de> Deserialize<'de>>(args: Value) -> Result<T, ToolError> {
     serde_json::from_value(args).map_err(|error| ToolError::new(format!("Bad arguments: {error}")))
 }
 
@@ -209,6 +212,7 @@ pub fn call(store: &Store, binding: &Binding, tool: &str, args: Value) -> Result
         "reply" => ctx.reply(parse(args)?),
         "resolve" => ctx.resolve(parse(args)?),
         "dismiss" => ctx.dismiss(parse(args)?),
+        name if super::guide::TOOLS.contains(&name) => super::guide::call(store, binding, name, args),
         _ => Err(ToolError::new(format!("Unknown tool `{tool}`."))),
     }
 }
@@ -581,7 +585,12 @@ mod tests {
                 "reply",
                 "resolve",
                 "dismiss",
-                "approve"
+                "approve",
+                "set_overview",
+                "add_chapter",
+                "add_note",
+                "add_diagram",
+                "finish_guide"
             ]
         );
         assert!(definitions().iter().all(|tool| tool.input_schema["type"] == "object"));

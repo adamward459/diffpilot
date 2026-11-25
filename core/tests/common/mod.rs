@@ -3,6 +3,7 @@
 use diffpilot_core::run::{RunId, RunState};
 use diffpilot_core::runner::{EngineConfig, RunEngine, RunEvent};
 use diffpilot_core::store::{SessionKey, Store};
+use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -87,6 +88,53 @@ pub fn wait_for(what: &str, within: Duration, mut done: impl FnMut() -> bool) {
         std::thread::sleep(Duration::from_millis(10));
     }
     panic!("timed out waiting for {what}");
+}
+
+/// A `claude` that starts the diffpilot-mcp binary from the run's `--mcp-config`, sends `calls` to it as `tools/call`
+/// requests, and keeps what it sent and got in `out/`. `before` and `after` are shell lines around the calls.
+pub fn out(work: &Path) -> PathBuf {
+    work.join("out")
+}
+
+pub fn mcp_claude(work: &Path, before: &str, calls: &[Value], after: &str) -> PathBuf {
+    let out = out(work);
+    std::fs::create_dir_all(&out).unwrap();
+    let mut lines = vec![
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"fake-claude","version":"1"}}}),
+        json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+        json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
+    ];
+    for (index, call) in calls.iter().enumerate() {
+        lines.push(json!({"jsonrpc":"2.0","id":10 + index,"method":"tools/call","params":call}));
+    }
+    let printf: String = lines
+        .iter()
+        .map(|line| format!("  printf '%s\\n' '{line}'\n"))
+        .collect();
+    fake_claude(
+        work,
+        &format!(
+            r#"
+for arg in "$@"; do printf '%s\n' "$arg" >> '{out}/args.txt'; done
+CFG=''
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--mcp-config" ]; then CFG="$2"; fi
+  shift
+done
+cp "$CFG" '{out}/mcp.json'
+CMD=$(sed -n 's/^ *"command": "\(.*\)",\{{0,1\}}$/\1/p' "$CFG")
+SOCK=$(sed -n '/"--socket"/{{n;s/^ *"\(.*\)",\{{0,1\}}$/\1/p;}}' "$CFG")
+TOKEN=$(sed -n '/"--token"/{{n;s/^ *"\(.*\)",\{{0,1\}}$/\1/p;}}' "$CFG")
+echo '{{"type":"system","subtype":"init","session_id":"s-1","model":"m","tools":[],"mcp_servers":[{{"name":"diffpilot","status":"connected"}}]}}'
+{before}
+{{
+{printf}}} | "$CMD" --socket "$SOCK" --token "$TOKEN" > '{out}/mcp.out'
+{after}
+echo '{{"type":"result","subtype":"success","is_error":false,"num_turns":3,"result":"All done."}}'
+"#,
+            out = out.display(),
+        ),
+    )
 }
 
 /// Recorded in the shape of `claude -p --output-format stream-json --verbose`.
