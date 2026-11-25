@@ -2,7 +2,8 @@
 """Capture screenshots of the crates the current branch's PR touches and show them in the PR.
 
 Runs `scripts/test.py screenshot` for those crates (the release app, light and dark, on the fixture
-repo), commits screenshots/feature/<crate>/, pushes, and replaces the screenshots section of the PR body.
+repo), pixel-diffs each image with the base branch's committed copy, commits screenshots/feature/<crate>/,
+pushes, and replaces the screenshots section of the PR body with the images and the list of changed ones.
 Needs Screen Recording permission for the terminal.
 
   scripts/pr_screenshots.py [crate...]   default: crates touched relative to the PR base branch
@@ -31,8 +32,11 @@ def sh(*cmd: str) -> str:
     return subprocess.run(cmd, cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def section(repo: str, sha: str, names: list[str]) -> str:
+def section(repo: str, sha: str, names: list[str], base: str, changed: list[str]) -> str:
     lines = [START, "## Screenshots", ""]
+    lines.append(f"Changed vs `{base}`:" if changed else f"No image changed vs `{base}`.")
+    lines.extend(f"- {line.split(' (diff: ')[0]}" for line in changed)
+    lines.append("")
     for feature in names:
         shots = sorted((tests.SCREENSHOT_DIR / feature).glob("*.png"))
         if not shots:
@@ -63,17 +67,19 @@ def main(argv: list[str]) -> int:
     code = tests.main(["screenshot", *names])
     if code != 0:
         return code
+    base = f"origin/{pr['baseRefName']}"
+    changed = tests.compare_screenshots(tests.resolve(tests.workspace(), names), base)
 
     sh("git", "add", "--", *(str(tests.SCREENSHOT_DIR / n) for n in names))
-    if subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=ROOT).returncode != 0:
+    if subprocess.run(["git", "diff", "--cached", "--quiet"], check=False, cwd=ROOT).returncode != 0:
         sh("git", "commit", "-m", f"docs(screenshots): capture {', '.join(names)}")
     sh("git", "push", "origin", f"HEAD:{pr['headRefName']}")
 
     sha = sh("git", "rev-parse", "HEAD")
     body = pr["body"] or ""
-    block = section(repo, sha, names)
+    block = section(repo, sha, names, base, changed)
     if START in body and END in body:
-        body = re.sub(re.escape(START) + r".*?" + re.escape(END), lambda _: block, body, flags=re.S)
+        body = re.sub(re.escape(START) + r".*?" + re.escape(END), lambda _: block, body, flags=re.DOTALL)
     else:
         body = f"{body.rstrip()}\n\n{block}\n"
     subprocess.run(

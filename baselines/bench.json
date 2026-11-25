@@ -1,0 +1,160 @@
+{
+  "host": {
+    "cpu": "Apple M5",
+    "macos": "26.6.2",
+    "refresh_rate": "60.00Hz",
+    "rustc": "rustc 1.100.0-nightly (8925ea358 2026-08-20)",
+    "profile": "release"
+  },
+  "metrics": {
+    "diff-pane": {
+      "scroll_flick_nowrap_cpu_median_ms": {
+        "median": 2.013,
+        "p95": 2.0338,
+        "runs": 5
+      },
+      "scroll_flick_nowrap_cpu_p95_ms": {
+        "median": 2.825,
+        "p95": 2.854,
+        "runs": 5
+      },
+      "scroll_flick_nowrap_interval_median_ms": {
+        "median": 16.6665,
+        "p95": 16.6679,
+        "runs": 5
+      },
+      "scroll_flick_nowrap_interval_p95_ms": {
+        "median": 18.6238,
+        "p95": 18.6543,
+        "runs": 5
+      },
+      "scroll_flick_nowrap_lines_median_ms": {
+        "median": 0.6004,
+        "p95": 0.6545,
+        "runs": 5
+      },
+      "scroll_flick_nowrap_lines_p95_ms": {
+        "median": 0.8067,
+        "p95": 0.8153,
+        "runs": 5
+      },
+      "scroll_flick_wrap_cpu_median_ms": {
+        "median": 1.4692,
+        "p95": 2.0381,
+        "runs": 5
+      },
+      "scroll_flick_wrap_cpu_p95_ms": {
+        "median": 2.7234,
+        "p95": 2.8861,
+        "runs": 5
+      },
+      "scroll_flick_wrap_interval_median_ms": {
+        "median": 16.6666,
+        "p95": 16.6672,
+        "runs": 5
+      },
+      "scroll_flick_wrap_interval_p95_ms": {
+        "median": 18.6152,
+        "p95": 18.6533,
+        "runs": 5
+      },
+      "scroll_flick_wrap_lines_median_ms": {
+        "median": 0.3767,
+        "p95": 0.6367,
+        "runs": 5
+      },
+      "scroll_flick_wrap_lines_p95_ms": {
+        "median": 0.7942,
+        "p95": 0.8179,
+        "runs": 5
+      },
+      "scroll_sweep_nowrap_cpu_median_ms": {
+        "median": 3.3348,
+        "p95": 3.34,
+        "runs": 5
+      },
+      "scroll_sweep_nowrap_cpu_p95_ms": {
+        "median": 5.83,
+        "p95": 6.1632,
+        "runs": 5
+      },
+      "scroll_sweep_nowrap_interval_median_ms": {
+        "median": 16.666,
+        "p95": 16.6665,
+        "runs": 5
+      },
+      "scroll_sweep_nowrap_interval_p95_ms": {
+        "median": 18.3471,
+        "p95": 18.6369,
+        "runs": 5
+      },
+      "scroll_sweep_nowrap_lines_median_ms": {
+        "median": 1.8624,
+        "p95": 1.901,
+        "runs": 5
+      },
+      "scroll_sweep_nowrap_lines_p95_ms": {
+        "median": 4.4478,
+        "p95": 4.552,
+        "runs": 5
+      },
+      "scroll_sweep_wrap_cpu_median_ms": {
+        "median": 3.7726,
+        "p95": 3.9336,
+        "runs": 5
+      },
+      "scroll_sweep_wrap_cpu_p95_ms": {
+        "median": 6.3556,
+        "p95": 6.6589,
+        "runs": 5
+      },
+      "scroll_sweep_wrap_interval_median_ms": {
+        "median": 16.6661,
+        "p95": 16.6664,
+        "runs": 5
+      },
+      "scroll_sweep_wrap_interval_p95_ms": {
+        "median": 18.38,
+        "p95": 18.6297,
+        "runs": 5
+      },
+      "scroll_sweep_wrap_lines_median_ms": {
+        "median": 2.2475,
+        "p95": 2.3394,
+        "runs": 5
+      },
+      "scroll_sweep_wrap_lines_p95_ms": {
+        "median": 4.8826,
+        "p95": 5.0783,
+        "runs": 5
+      }
+    },
+    "review-ui": {
+      "baseline_frame_median_ms": {
+        "median": 0.046,
+        "p95": 0.049,
+        "runs": 5
+      },
+      "idle_frame_median_ms": {
+        "median": 0.138,
+        "p95": 0.139,
+        "runs": 5
+      },
+      "idle_frame_p95_ms": {
+        "median": 0.144,
+        "p95": 0.149,
+        "runs": 5
+      },
+      "stream_frame_median_ms": {
+        "median": 1.083,
+        "p95": 1.171,
+        "runs": 5
+      },
+      "stream_frame_p95_ms": {
+        "median": 1.536,
+        "p95": 1.585,
+        "runs": 5
+      }
+    }
+  }
+}

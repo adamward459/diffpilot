@@ -1,0 +1,7 @@
+[build]
+# One build dir for every worktree of this repo, so dependencies compile once.
+build-dir = "{cargo-cache-home}/build/diffpilot"
+
+[unstable]
+# A file with the same content in another worktree stays fresh, even though its mtime is newer.
+checksum-freshness = true
