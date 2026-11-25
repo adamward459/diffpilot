@@ -1,0 +1,4 @@
+{"state":"failure","sha":"3f2a91c0d4e5b6a7988776655443322110ffeedd","total_count":2,"statuses":[
+ {"context":"ci/legacy","state":"success","description":"Build passed","target_url":"https://ci.example/1"},
+ {"context":"ci/lint-old","state":"pending","description":"Waiting","target_url":null}
+]}

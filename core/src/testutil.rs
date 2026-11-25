@@ -8,6 +8,9 @@ pub fn git(repo: &Path, args: &[&str]) -> String {
         .arg(repo)
         .args(["-c", "user.name=t", "-c", "user.email=t@t"])
         .args(args)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
         .output()
         .expect("git runs");
     assert!(

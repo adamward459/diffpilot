@@ -1,0 +1,7 @@
+{"id":5002,"run_id":1289,"name":"unit tests","workflow_name":"CI","status":"completed","conclusion":"failure",
+ "started_at":"2026-11-25T10:00:05Z","completed_at":"2026-11-25T10:02:05Z","steps":[
+ {"number":1,"name":"Set up job","status":"completed","conclusion":"success","started_at":"2026-11-25T10:00:05Z","completed_at":"2026-11-25T10:00:07Z"},
+ {"number":2,"name":"Run actions/checkout@v4","status":"completed","conclusion":"success","started_at":"2026-11-25T10:00:07Z","completed_at":"2026-11-25T10:00:10Z"},
+ {"number":3,"name":"Run npm ci","status":"completed","conclusion":"success","started_at":"2026-11-25T10:00:10Z","completed_at":"2026-11-25T10:00:40Z"},
+ {"number":4,"name":"Run npm test","status":"completed","conclusion":"failure","started_at":"2026-11-25T10:00:40Z","completed_at":"2026-11-25T10:02:00Z"}
+]}

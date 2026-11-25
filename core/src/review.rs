@@ -28,6 +28,19 @@ impl Severity {
             Self::Question => "Question",
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MustFix => "must-fix",
+            Self::Suggestion => "suggestion",
+            Self::Nit => "nit",
+            Self::Question => "question",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|severity| severity.as_str() == text)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,6 +121,11 @@ impl ReviewModel {
     pub const STANDARD: ReviewModel = ReviewModel {
         name: ModelName::Opus,
         effort: Effort::High,
+    };
+
+    pub const FIXES: ReviewModel = ReviewModel {
+        name: ModelName::Sonnet,
+        effort: Effort::Medium,
     };
 
     pub fn new(name: ModelName, effort: Effort) -> Self {
@@ -238,7 +256,7 @@ impl ReviewSetup {
     pub fn load(settings: &Settings, repo: &Path) -> Self {
         Self {
             focuses: focus::saved(settings, repo),
-            model: Some(settings.review_model()),
+            model: Some(settings.reviews_model()),
             ..Self::default()
         }
     }
@@ -246,7 +264,7 @@ impl ReviewSetup {
     pub fn save(&self, settings: &Settings, repo: &Path) {
         focus::save(settings, repo, &self.focuses);
         if let Some(model) = self.model {
-            settings.set_review_model(model);
+            settings.set_reviews_model(model);
         }
     }
 

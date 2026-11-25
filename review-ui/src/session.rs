@@ -103,7 +103,7 @@ impl ReviewSession {
         match repo {
             Some(repo) => ReviewSetup::load(settings, repo),
             None => ReviewSetup {
-                model: Some(settings.review_model()),
+                model: Some(settings.reviews_model()),
                 ..ReviewSetup::default()
             },
         }
@@ -200,7 +200,7 @@ impl ReviewSession {
         if self.setup.model != before.model
             && let Some(model) = self.setup.model
         {
-            self.settings.set_review_model(model);
+            self.settings.set_reviews_model(model);
         }
         cx.notify();
     }

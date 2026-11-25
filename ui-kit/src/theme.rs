@@ -321,7 +321,7 @@ pub fn install(window: &mut Window, cx: &mut App) {
         .detach();
 }
 
-fn is_dark(appearance: WindowAppearance) -> bool {
+pub fn is_dark(appearance: WindowAppearance) -> bool {
     matches!(appearance, WindowAppearance::Dark | WindowAppearance::VibrantDark)
 }
 

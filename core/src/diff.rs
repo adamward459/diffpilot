@@ -111,7 +111,10 @@ impl FileDiff {
 }
 
 pub fn load(repo: &Path, comparison: &Comparison) -> Result<Vec<FileDiff>, GitError> {
-    let revisions = comparison.revisions();
+    load_revisions(repo, &comparison.revisions())
+}
+
+pub fn load_revisions(repo: &Path, revisions: &[String]) -> Result<Vec<FileDiff>, GitError> {
     let args: Vec<&str> = DIFF_ARGS
         .iter()
         .copied()
