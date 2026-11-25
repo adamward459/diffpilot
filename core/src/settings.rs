@@ -1,4 +1,5 @@
 use crate::comparison::Comparison;
+use crate::diff::DiffMode;
 use crate::review::ReviewModel;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -15,6 +16,7 @@ struct Data {
     comparisons: BTreeMap<String, Comparison>,
     review_model: Option<ReviewModel>,
     review_focuses: BTreeMap<String, Vec<String>>,
+    diff_mode: Option<DiffMode>,
 }
 
 pub struct Settings {
@@ -106,6 +108,14 @@ impl Settings {
         });
     }
 
+    pub fn diff_mode(&self) -> DiffMode {
+        self.read(|data| data.diff_mode).unwrap_or_default()
+    }
+
+    pub fn set_diff_mode(&self, mode: DiffMode) {
+        self.write(|data| data.diff_mode = Some(mode));
+    }
+
     fn read<T>(&self, get: impl FnOnce(&Data) -> T) -> T {
         get(&self.data.lock().unwrap())
     }
@@ -134,6 +144,7 @@ impl Data {
             comparisons: entries(take("comparisons")),
             review_model: serde_json::from_value(take("reviewModel")).ok().flatten(),
             review_focuses: entries(take("reviewFocuses")),
+            diff_mode: serde_json::from_value(take("diffMode")).ok().flatten(),
         }
     }
 }
@@ -187,6 +198,13 @@ pub fn appearance_override() -> Option<Appearance> {
         .and_then(|value| Appearance::parse(&value))
 }
 
+/// `DIFFPILOT_DIFF_MODE`; `None` means use the saved mode.
+pub fn diff_mode_override() -> Option<DiffMode> {
+    std::env::var("DIFFPILOT_DIFF_MODE")
+        .ok()
+        .and_then(|value| DiffMode::parse(&value))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,6 +255,7 @@ mod tests {
             crate::review::Effort::Low,
         ));
         settings.set_review_focuses(Path::new("/r"), vec!["Tests".into()]);
+        settings.set_diff_mode(DiffMode::Split);
 
         let again = Settings::at(file);
         assert_eq!(again.recent_folder_with(None), Some(PathBuf::from("/work/repo")));
@@ -244,6 +263,29 @@ mod tests {
         assert_eq!(again.review_model().name, crate::review::ModelName::Haiku);
         assert_eq!(again.review_focuses(Path::new("/r")), ["Tests"]);
         assert!(again.review_focuses(Path::new("/other")).is_empty());
+        assert_eq!(again.diff_mode(), DiffMode::Split);
+    }
+
+    #[test]
+    fn the_diff_mode_starts_unified() {
+        assert_eq!(Settings::in_memory().diff_mode(), DiffMode::Unified);
+    }
+
+    #[test]
+    fn a_diff_mode_this_build_cannot_read_falls_back_and_keeps_the_rest() {
+        let (_dir, file) = temp_file();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, r#"{ "recentFolder": "/work/repo", "diffMode": "sideways" }"#).unwrap();
+        let settings = Settings::at(file);
+        assert_eq!(settings.diff_mode(), DiffMode::Unified);
+        assert_eq!(settings.recent_folder_with(None), Some(PathBuf::from("/work/repo")));
+    }
+
+    #[test]
+    fn parses_the_diff_mode_override() {
+        assert_eq!(DiffMode::parse("split"), Some(DiffMode::Split));
+        assert_eq!(DiffMode::parse("unified"), Some(DiffMode::Unified));
+        assert_eq!(DiffMode::parse("Split"), None);
     }
 
     #[test]
