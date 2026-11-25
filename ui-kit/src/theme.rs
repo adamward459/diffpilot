@@ -7,8 +7,13 @@ use gpui_component::{Theme as ComponentTheme, ThemeMode};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Ui {
     pub text: Hsla,
+    pub text2: Hsla,
     pub muted: Hsla,
+    pub faint: Hsla,
     pub line: Hsla,
+    pub line2: Hsla,
+    pub raised: Hsla,
+    pub pop: Hsla,
     pub cap: Hsla,
     pub cap_border: Hsla,
     pub claude: Hsla,
@@ -65,6 +70,7 @@ pub struct Theme {
     pub dark: bool,
     pub background: Hsla,
     pub accent: Hsla,
+    pub accent_text: Hsla,
     pub accent_hover: Hsla,
     pub accent_press: Hsla,
     pub on_accent: Hsla,
@@ -135,51 +141,66 @@ impl Theme {
     pub fn new(dark: bool) -> Self {
         let pick = |light: u32, dark_value: u32| -> Hsla { rgb(if dark { dark_value } else { light }).into() };
         let by_mode = |light: Hsla, dark_value: Hsla| if dark { dark_value } else { light };
-        let background: Hsla = pick(0xffffff, 0x1e1e1e);
-        let text = pick(0x1d1d1f, 0xf2f2f7);
+        let background: Hsla = pick(0xffffff, 0x1f1f1f);
+        let text = pick(0x3b3b3b, 0xcccccc);
         let claude = pick(0xc15f3c, 0xe8916c);
+        let side: Hsla = pick(0xf8f8f8, 0x181818);
+        let line2 = pick(0xcecece, 0x3c3c3c);
+        let (shade, cap_share) = if dark {
+            (Rgba::from(gpui::white()), 0.07)
+        } else {
+            (Rgba::from(gpui::black()), 0.03)
+        };
+        let editor: Rgba = background.into();
+        let claude_tint = by_mode(rgb(0xd97757).into(), claude);
         let ui = Ui {
             text,
-            muted: pick(0x6e6e73, 0x98989d),
-            line: pick(0xe3e3e6, 0x3a3a3c),
-            cap: background.blend(text.opacity(0.07)),
-            cap_border: text.opacity(0.13),
+            text2: pick(0x555555, 0xb4b4b4),
+            muted: pick(0x6e7681, 0x9d9d9d),
+            faint: pick(0x9e9e9e, 0x6e7681),
+            line: pick(0xe5e5e5, 0x2b2b2b),
+            line2,
+            raised: pick(0xffffff, 0x252526),
+            pop: pick(0xf8f8f8, 0x202020),
+            cap: mix(shade, cap_share, editor).into(),
+            cap_border: line2,
             claude,
-            claude_bg: claude.opacity(0.11),
-            claude_border: claude.opacity(0.38),
-            green: pick(0x28cd41, 0x32d74b),
+            claude_bg: mix(claude_tint.into(), if dark { 0.12 } else { 0.10 }, editor).into(),
+            claude_border: claude.opacity(0.35),
+            green: pick(0x2ea043, 0x2ea043),
             user_avatar: rgb(0x616161).into(),
         };
         let chrome = Chrome {
-            label: pick(0x000000, 0xffffff),
-            secondary: pick(0x7d7d7d, 0x9a9a9a),
-            tertiary: pick(0xbcbcbc, 0x585858),
-            glass: pick(0xffffff, 0x1a1a1a),
-            glass_border: by_mode(rgba(0x0000000d).into(), rgba(0xffffff1f).into()),
+            label: text,
+            secondary: ui.muted,
+            tertiary: ui.faint,
+            glass: side,
+            glass_border: ui.line,
             glass_shadow: by_mode(rgba(0x0000001a).into(), rgba(0x00000066).into()),
-            segment: pick(0xe4e4e4, 0x3e3e3e),
-            panel: pick(0xf8f8f8, 0x1f1f1f),
-            panel_border: by_mode(rgba(0x0000000f).into(), rgba(0xffffff1a).into()),
-            gutter: pick(0xf3f3f4, 0x242424),
-            folder: rgb(0xdcb67a).into(),
-            uncommitted: pick(0xe07b00, 0xff9f0a),
+            segment: pick(0xffffff, 0x3c3c3c),
+            panel: side,
+            panel_border: ui.line,
+            gutter: pick(0xf3f3f3, 0x1f1f1f),
+            folder: pick(0xc09553, 0xdcb67a),
+            uncommitted: pick(0xbf8803, 0xcca700),
             badge_fill: by_mode(rgba(0x00000012).into(), rgba(0xffffff1a).into()),
-            badge_uncommitted_fill: by_mode(rgba(0xe07b0029).into(), rgba(0xff9f0a33).into()),
+            badge_uncommitted_fill: by_mode(rgba(0xbf880329).into(), rgba(0xcca70033).into()),
             badge_selected_fill: rgba(0xffffff38).into(),
         };
         Self {
             dark,
             background,
-            accent: pick(0x007aff, 0x0a84ff),
-            accent_hover: pick(0x0066d6, 0x3a9bff),
-            accent_press: pick(0x0058b8, 0x0070e0),
+            accent: pick(0x005fb8, 0x0078d4),
+            accent_text: pick(0x005fb8, 0x4daafc),
+            accent_hover: pick(0x0a6cc7, 0x1a8ae6),
+            accent_press: pick(0x004e99, 0x006abf),
             on_accent: rgb(0xffffff).into(),
             on_accent_dim: rgba(0xffffffcc).into(),
-            success: pick(0x34c759, 0x30d158),
-            danger: pick(0xff3b30, 0xff453a),
-            amber: pick(0xff9500, 0xff9f0a),
-            hover: by_mode(gpui::black().opacity(0.055), gpui::white().opacity(0.10)),
-            press: by_mode(gpui::black().opacity(0.10), gpui::white().opacity(0.16)),
+            success: pick(0x2ea043, 0x2ea043),
+            danger: pick(0xe51400, 0xf14c4c),
+            amber: pick(0xbf8803, 0xcca700),
+            hover: by_mode(gpui::black().opacity(0.04), gpui::white().opacity(0.05)),
+            press: by_mode(gpui::black().opacity(0.08), gpui::white().opacity(0.10)),
             lift_hover: gpui::white().opacity(0.14),
             lift_press: gpui::white().opacity(0.24),
             ui,
@@ -191,59 +212,61 @@ impl Theme {
     fn diff_colors(dark: bool) -> Diff {
         let (text, muted, faint, line, editor) = if dark {
             (
-                channel(255, 255, 255, 0.85),
-                channel(255, 255, 255, 0.55),
-                channel(255, 255, 255, 0.25),
-                channel(255, 255, 255, 0.1),
-                channel(30, 30, 30, 1.0),
+                channel(204, 204, 204, 1.0),
+                channel(157, 157, 157, 1.0),
+                channel(110, 118, 129, 1.0),
+                channel(43, 43, 43, 1.0),
+                channel(31, 31, 31, 1.0),
             )
         } else {
             (
-                channel(0, 0, 0, 0.85),
-                channel(0, 0, 0, 0.5),
-                channel(0, 0, 0, 0.25),
-                channel(0, 0, 0, 0.1),
+                channel(59, 59, 59, 1.0),
+                channel(110, 118, 129, 1.0),
+                channel(158, 158, 158, 1.0),
+                channel(229, 229, 229, 1.0),
                 channel(255, 255, 255, 1.0),
             )
         };
         let accent = if dark {
-            channel(10, 132, 255, 1.0)
+            channel(0, 120, 212, 1.0)
         } else {
-            channel(0, 122, 255, 1.0)
+            channel(0, 95, 184, 1.0)
         };
-        let (ok, err, teal, yellow, purple) = if dark {
+        let (add, add_word, red) = (
+            channel(155, 185, 85, 1.0),
+            channel(156, 204, 44, 1.0),
+            channel(255, 0, 0, 1.0),
+        );
+        let (teal, yellow, purple) = if dark {
             (
-                channel(48, 209, 88, 1.0),
-                channel(255, 69, 58, 1.0),
-                channel(64, 200, 224, 1.0),
-                channel(255, 214, 10, 1.0),
-                channel(191, 90, 242, 1.0),
+                channel(78, 201, 176, 1.0),
+                channel(220, 220, 170, 1.0),
+                channel(197, 134, 192, 1.0),
             )
         } else {
             (
-                channel(52, 199, 89, 1.0),
-                channel(255, 59, 48, 1.0),
-                channel(48, 176, 199, 1.0),
-                channel(255, 204, 0, 1.0),
-                channel(175, 82, 222, 1.0),
+                channel(38, 127, 153, 1.0),
+                channel(121, 94, 38, 1.0),
+                channel(175, 0, 219, 1.0),
             )
         };
-        let label = over(text, editor);
+        let (add_share, add_number, add_word_share) = if dark { (0.15, 0.25, 0.30) } else { (0.20, 0.32, 0.40) };
+        let (del_share, del_number, del_word_share) = if dark { (0.12, 0.20, 0.30) } else { (0.10, 0.18, 0.22) };
         Diff {
             text: text.into(),
             muted: muted.into(),
             faint: faint.into(),
-            secondary: over(muted, editor).into(),
+            secondary: muted.into(),
             line: line.into(),
-            cap: mix(label, 0.07, editor).into(),
-            hunk: mix(accent, 0.07, editor).into(),
-            add_bg: mix(ok, 0.13, editor).into(),
-            add_number: mix(ok, 0.26, editor).into(),
-            add_word: mix(ok, 0.36, editor).into(),
-            del_bg: mix(err, 0.13, editor).into(),
-            del_number: mix(err, 0.23, editor).into(),
-            del_word: mix(err, 0.32, editor).into(),
-            press: mix(label, 0.11, editor).into(),
+            cap: mix(text, 0.07, editor).into(),
+            hunk: mix(accent, if dark { 0.08 } else { 0.06 }, editor).into(),
+            add_bg: mix(add, add_share, editor).into(),
+            add_number: mix(add, add_number, editor).into(),
+            add_word: mix(add_word, add_word_share, editor).into(),
+            del_bg: mix(red, del_share, editor).into(),
+            del_number: mix(red, del_number, editor).into(),
+            del_word: mix(red, del_word_share, editor).into(),
+            press: mix(text, 0.11, editor).into(),
             teal: teal.into(),
             yellow: yellow.into(),
             purple: purple.into(),
@@ -345,33 +368,33 @@ fn apply_to_components(theme: &Theme, cx: &mut App) {
     target.background = theme.background;
     target.foreground = theme.ui.text;
     target.border = theme.ui.line;
-    target.input = pick(0xdcdce0, 0x48484a);
-    target.muted = pick(0xf0f0f2, 0x2c2c2e);
+    target.input = theme.ui.line2;
+    target.muted = theme.ui.cap;
     target.muted_foreground = theme.ui.muted;
-    target.popover = pick(0xfbfbfc, 0x2a2a2c);
+    target.popover = theme.ui.pop;
     target.popover_foreground = theme.ui.text;
-    target.accent = pick(0xe6e6ea, 0x3a3a3c);
+    target.accent = theme.ui.cap;
     target.accent_foreground = theme.ui.text;
     target.primary = theme.accent;
     target.primary_hover = theme.accent_hover;
     target.primary_active = theme.accent_press;
     target.primary_foreground = theme.on_accent;
     target.ring = theme.accent;
-    target.secondary = pick(0xf0f0f2, 0x2c2c2e);
-    target.secondary_hover = pick(0xe6e6ea, 0x3a3a3c);
-    target.secondary_active = pick(0xdcdce0, 0x48484a);
+    target.secondary = theme.ui.cap;
+    target.secondary_hover = theme.pressed(theme.ui.cap);
+    target.secondary_active = theme.pressed(theme.ui.cap);
     target.secondary_foreground = theme.ui.text;
-    target.list_hover = pick(0xececef, 0x2e2e30);
-    target.list_active = pick(0x0a7aff, 0x0a6bd8);
-    target.sidebar = pick(0xf3f3f5, 0x252527);
-    target.sidebar_border = pick(0xe3e3e6, 0x38383a);
+    target.list_hover = theme.hovered(theme.background);
+    target.list_active = theme.accent;
+    target.sidebar = theme.chrome.panel;
+    target.sidebar_border = theme.ui.line;
     target.sidebar_foreground = theme.ui.text;
-    target.title_bar = theme.background;
-    target.title_bar_border = pick(0xe3e3e6, 0x38383a);
-    target.scrollbar_thumb = pick(0xb0b0b6, 0x6a6a6e);
-    target.scrollbar_thumb_hover = pick(0x8e8e93, 0x8a8a8e);
-    target.success = pick(0x28a745, 0x32d74b);
-    target.danger = pick(0xe5483f, 0xff6961);
+    target.title_bar = theme.chrome.glass;
+    target.title_bar_border = theme.ui.line;
+    target.scrollbar_thumb = pick(0xc1c1c1, 0x424242);
+    target.scrollbar_thumb_hover = pick(0x929292, 0x4f4f4f);
+    target.success = theme.success;
+    target.danger = theme.danger;
 }
 
 #[cfg(test)]
@@ -391,12 +414,51 @@ mod tests {
         assert!(close(out.a, 1.0));
     }
 
+    fn hex(color: Hsla) -> u32 {
+        let rgba: Rgba = color.into();
+        let byte = |value: f32| (value * 255.0).round() as u32;
+        (byte(rgba.r) << 16) | (byte(rgba.g) << 8) | byte(rgba.b)
+    }
+
     #[test]
-    fn dark_theme_has_the_macos_dark_editor() {
-        let rgba: Rgba = Theme::new(true).background.into();
-        assert!(close(rgba.r, 30.0 / 255.0));
-        let rgba: Rgba = Theme::new(false).background.into();
-        assert!(close(rgba.r, 1.0));
+    fn dark_plus_surfaces_and_accents() {
+        let dark = Theme::new(true);
+        assert_eq!(hex(dark.background), 0x1f1f1f);
+        assert_eq!(hex(dark.chrome.panel), 0x181818);
+        assert_eq!(hex(dark.ui.raised), 0x252526);
+        assert_eq!(hex(dark.ui.pop), 0x202020);
+        assert_eq!(hex(dark.ui.line), 0x2b2b2b);
+        assert_eq!(hex(dark.ui.line2), 0x3c3c3c);
+        assert_eq!(hex(dark.ui.text), 0xcccccc);
+        assert_eq!(hex(dark.ui.muted), 0x9d9d9d);
+        assert_eq!(hex(dark.accent), 0x0078d4);
+        assert_eq!(hex(dark.accent_text), 0x4daafc);
+        assert_eq!(hex(dark.ui.claude), 0xe8916c);
+        assert_eq!(hex(dark.danger), 0xf14c4c);
+        assert_eq!(hex(dark.amber), 0xcca700);
+    }
+
+    #[test]
+    fn light_plus_surfaces_and_accents() {
+        let light = Theme::new(false);
+        assert_eq!(hex(light.background), 0xffffff);
+        assert_eq!(hex(light.chrome.panel), 0xf8f8f8);
+        assert_eq!(hex(light.ui.pop), 0xf8f8f8);
+        assert_eq!(hex(light.ui.line), 0xe5e5e5);
+        assert_eq!(hex(light.ui.line2), 0xcecece);
+        assert_eq!(hex(light.ui.text), 0x3b3b3b);
+        assert_eq!(hex(light.ui.muted), 0x6e7681);
+        assert_eq!(hex(light.accent), 0x005fb8);
+        assert_eq!(hex(light.ui.claude), 0xc15f3c);
+        assert_eq!(hex(light.danger), 0xe51400);
+        assert_eq!(hex(light.amber), 0xbf8803);
+    }
+
+    #[test]
+    fn diff_colors_blend_over_the_editor() {
+        let dark = Theme::new(true).diff;
+        let expected = mix(channel(155, 185, 85, 1.0), 0.15, channel(31, 31, 31, 1.0));
+        assert_eq!(hex(dark.add_bg), hex(expected.into()));
         assert_ne!(Theme::new(true).diff.add_bg, Theme::new(false).diff.add_bg);
     }
 
