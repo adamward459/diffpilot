@@ -193,10 +193,10 @@ function Composer({ t, api, autoFocus }: { t: ReviewThread; api: ThreadApi; auto
 }
 
 const SEVERITY: Record<Severity, { label: string; icon: IconName; text: string; box: string }> = {
-  'must-fix': { label: 'Must fix', icon: 'mustFix', text: 'text-err', box: 'border-err/35 bg-err/12' },
-  suggestion: { label: 'Suggestion', icon: 'suggestion', text: 'text-amber', box: 'border-amber/35 bg-amber/10' },
-  nit: { label: 'Nit', icon: 'nit', text: 'text-muted', box: 'border-line2 bg-cap' },
-  question: { label: 'Question', icon: 'question', text: 'text-accent', box: 'border-accent/35 bg-accent/10' },
+  'must-fix': { label: 'Must fix', icon: 'mustFix', text: 'text-err', box: 'border-err/45' },
+  suggestion: { label: 'Suggestion', icon: 'suggestion', text: 'text-amber', box: 'border-amber/45' },
+  nit: { label: 'Nit', icon: 'nit', text: 'text-muted', box: 'border-transparent' },
+  question: { label: 'Question', icon: 'question', text: 'text-accent', box: 'border-accent/45' },
 };
 
 function threadLabel(t: ReviewThread): string {
@@ -242,7 +242,7 @@ function FindingBanner({ t, api }: { t: ReviewThread; api: ThreadApi }) {
   const first = t.comments[0];
   const place = findingPlace(t);
   return (
-    <div class={`overflow-hidden rounded-xl border ${sev.box}`}>
+    <div class={`glass-card overflow-hidden rounded-xl border ${sev.box}`}>
       <div class="flex h-[38px] items-center gap-2 pr-2 pl-3 text-[13px] whitespace-nowrap">
         <span class={`flex ${sev.text}`}>
           <Icon name={sev.icon} size={15} />

@@ -37,8 +37,6 @@ struct ClaudePill: View {
     var body: some View {
         HStack(spacing: 0) {
             claude
-                .padding(.horizontal, 10)
-                .frame(height: 28)
                 .popover(isPresented: $showsPopover, arrowEdge: .bottom) {
                     ReviewPopover(model: model) { showsPopover = false }
                 }
@@ -46,16 +44,10 @@ struct ClaudePill: View {
             Button {
                 model.commentOnVisibleFile()
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "bubble.left")
-                    let count = model.threads.threads.count
-                    Text("\(count)").monospacedDigit()
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 28)
-                .contentShape(Rectangle())
+                Label("\(model.threads.threads.count)", systemImage: "bubble.left")
+                    .labelStyle(.titleAndIcon)
+                    .monospacedDigit()
             }
-            .buttonStyle(.plain)
             .help("Comment on file")
             .disabled(model.visiblePath == nil)
             .accessibilityLabel("Comment on file")
@@ -89,11 +81,8 @@ struct ClaudePill: View {
                 Button {
                     model.stopReview()
                 } label: {
-                    Image(systemName: "stop.fill").font(.system(size: 9))
-                        .frame(width: 18, height: 18)
-                        .background(Color.secondary.opacity(0.2), in: Circle())
+                    Image(systemName: "stop.fill").foregroundStyle(.red)
                 }
-                .buttonStyle(.plain)
                 .keyboardShortcut(".", modifiers: .command)
                 .help("Stop Claude (⌘.)")
                 .accessibilityLabel("Stop")
@@ -134,9 +123,8 @@ struct ClaudePill: View {
         Button {
             showsPopover = true
         } label: {
-            HStack(spacing: 6, content: label).contentShape(Rectangle())
+            HStack(spacing: 6, content: label)
         }
-        .buttonStyle(.plain)
     }
 
     private static func elapsed(_ seconds: TimeInterval) -> String {
@@ -176,10 +164,7 @@ private struct ReviewPopover: View {
                 text: $model.reviewInstructions, axis: .vertical
             )
             .lineLimit(2...6)
-            .textFieldStyle(.plain)
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor).opacity(0.5)))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.3)))
+            .textFieldStyle(.roundedBorder)
             .accessibilityIdentifier("review-instructions")
             .padding(.bottom, 10)
             FocusChips(selected: $model.reviewFocuses).padding(.bottom, 16)
@@ -200,7 +185,8 @@ private struct ReviewPopover: View {
             HStack {
                 ModelMenu(choice: $model.reviewModel)
                 Spacer()
-                Button("Cancel", action: dismiss).keyboardShortcut(.cancelAction)
+                Button("Cancel", action: dismiss)
+                    .keyboardShortcut(.cancelAction)
                 Button {
                     dismiss()
                     model.startReview()
@@ -263,27 +249,27 @@ private struct FocusChips: View {
                 Button {
                     if isOn { selected.remove(name) } else { selected.insert(name) }
                 } label: {
-                    HStack(spacing: 4) {
-                        if isOn { Image(systemName: "checkmark").font(.caption.weight(.semibold)) }
-                        Text(name)
-                    }
-                    .font(.callout)
-                    .padding(.horizontal, 10)
-                    .frame(height: 26)
-                    .foregroundStyle(isOn ? Color.accentColor : Color.primary)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6).fill(isOn ? Color.accentColor.opacity(0.18) : Color.clear)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6).strokeBorder(
-                            isOn ? Color.accentColor.opacity(0.35) : Color.secondary.opacity(0.3))
-                    )
-                    .contentShape(Rectangle())
+                    Label(name, systemImage: "checkmark")
+                        .labelStyle(ChipLabelStyle(isOn: isOn))
+                        .font(.callout)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .tint(isOn ? .accentColor : nil)
                 .accessibilityAddTraits(isOn ? .isSelected : [])
                 .accessibilityIdentifier("focus-\(name.lowercased())")
             }
+        }
+    }
+}
+
+private struct ChipLabelStyle: LabelStyle {
+    let isOn: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) {
+            if isOn { configuration.icon.font(.caption.weight(.semibold)) }
+            configuration.title
         }
     }
 }
