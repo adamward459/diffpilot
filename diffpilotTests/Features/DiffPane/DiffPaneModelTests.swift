@@ -288,7 +288,7 @@ struct DiffPaneModelTests {
         #expect(recorder.fileStates == ["a.ts true true"])
     }
 
-    @Test func startsWithTheStoredViewedFiles() {
+    @Test func storedViewedFilesStartCollapsed() {
         let recorder = Recorder()
         let store = ViewedStore()
         let key = ViewedKey(repo: "/r", branch: "b")
@@ -296,7 +296,9 @@ struct DiffPaneModelTests {
         let model = DiffPaneModel(
             repo: nil, viewed: ViewedFiles(key: key, store: store), send: { recorder.commands.append($0) })
         model.handle(.ready)
-        #expect(recorder.fileStates == ["a.ts true false"])
+        #expect(recorder.fileStates == ["a.ts true true"])
+        model.handle(.toggleCollapsed("a.ts"))
+        #expect(recorder.fileStates.last == "a.ts true false")
     }
 
     @Test func countsThreadsPerFile() {

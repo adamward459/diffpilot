@@ -42,6 +42,7 @@ final class DiffPaneModel {
         self.repo = repo
         self.comparison = comparison
         self.viewed = viewed
+        collapsed = viewed.paths
         self.replier = replier
         self.benchScrollDelay = benchScrollDelay
         self.send = send
