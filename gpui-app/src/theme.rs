@@ -1,30 +1,6 @@
 use diffpilot_core::file_kind::FileTint;
-use diffpilot_core::settings::{Appearance, appearance_override};
 use gpui::{App, Hsla, Window, rgb, rgba};
 use gpui_component::{ActiveTheme, Theme, ThemeMode};
-
-pub fn install(window: &mut Window, cx: &mut App) {
-    match appearance_override() {
-        Some(appearance) => set_mode(mode_of(appearance), Some(window), cx),
-        None => {
-            let mode = ThemeMode::from(window.appearance());
-            set_mode(mode, Some(window), cx);
-            window
-                .observe_window_appearance(|window, cx| {
-                    let mode = ThemeMode::from(window.appearance());
-                    set_mode(mode, Some(window), cx);
-                })
-                .detach();
-        }
-    }
-}
-
-fn mode_of(appearance: Appearance) -> ThemeMode {
-    match appearance {
-        Appearance::Light => ThemeMode::Light,
-        Appearance::Dark => ThemeMode::Dark,
-    }
-}
 
 pub fn set_mode(mode: ThemeMode, window: Option<&mut Window>, cx: &mut App) {
     Theme::change(mode, None, cx);

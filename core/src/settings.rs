@@ -82,6 +82,21 @@ impl Settings {
         }
     }
 
+    /// The folder to open at launch. `DIFFPILOT_REPO` always counts; the saved folder only when
+    /// "open the last repository" is on.
+    pub fn launch_folder(&self) -> Option<PathBuf> {
+        let env = std::env::var("DIFFPILOT_REPO").ok();
+        self.launch_folder_with(env.as_deref())
+    }
+
+    pub fn launch_folder_with(&self, env_override: Option<&str>) -> Option<PathBuf> {
+        match env_override.filter(|path| !path.is_empty()) {
+            Some(path) => Some(PathBuf::from(path)),
+            None if self.open_last_repository() => self.read(|data| data.recent_folder.clone()),
+            None => None,
+        }
+    }
+
     pub fn remember_folder(&self, folder: &Path) {
         self.write(|data| data.recent_folder = Some(folder.to_path_buf()));
     }
@@ -446,6 +461,20 @@ mod tests {
 
         again.set_claude_path(None);
         assert_eq!(Settings::at(file).claude_path(), None);
+    }
+
+    #[test]
+    fn the_launch_folder_follows_the_open_last_repository_setting() {
+        let settings = Settings::in_memory();
+        settings.remember_folder(Path::new("/work/repo"));
+        assert_eq!(settings.launch_folder_with(None), Some(PathBuf::from("/work/repo")));
+        settings.set_open_last_repository(false);
+        assert_eq!(settings.launch_folder_with(None), None);
+        assert_eq!(settings.launch_folder_with(Some("")), None);
+        assert_eq!(
+            settings.launch_folder_with(Some("/from/env")),
+            Some(PathBuf::from("/from/env"))
+        );
     }
 
     #[test]

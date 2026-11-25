@@ -47,7 +47,7 @@ impl AssetSource for Assets {
             .iter()
             .find(|(name, _)| *name == path)
             .map(|(_, svg)| Cow::Borrowed(svg.as_bytes()));
-        match own {
+        match own.or_else(|| crate::settings::icons::load(path)) {
             Some(icon) => Ok(Some(icon)),
             None => ReviewAssets.load(path),
         }
@@ -59,6 +59,7 @@ impl AssetSource for Assets {
             .filter(|(name, _)| name.starts_with(path))
             .map(|(name, _)| SharedString::from(*name))
             .collect();
+        names.extend(crate::settings::icons::list(path));
         for name in ReviewAssets.list(path)? {
             if !names.contains(&name) {
                 names.push(name);

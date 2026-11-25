@@ -27,7 +27,11 @@ pub fn init(cx: &mut App) {
     cx.set_menus(vec![
         Menu {
             name: "diffpilot".into(),
-            items: vec![MenuItem::action("Quit diffpilot", Quit)],
+            items: vec![
+                MenuItem::action("Settings…", crate::settings::OpenSettings),
+                MenuItem::separator(),
+                MenuItem::action("Quit diffpilot", Quit),
+            ],
         },
         Menu {
             name: "File".into(),

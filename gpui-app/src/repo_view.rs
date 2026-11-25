@@ -172,6 +172,7 @@ impl RepoView {
             |name| name.to_string_lossy().into_owned(),
         );
         window.set_window_title(&folder_name);
+        let wrap = settings.wrap_lines();
         let mut this = Self {
             repo,
             folder_name: folder_name.into(),
@@ -187,7 +188,7 @@ impl RepoView {
             sidebar_width: px(IDEAL_SIDEBAR),
             resizing: false,
             should_move: Rc::new(Cell::new(false)),
-            wrap: false,
+            wrap,
             compact_toolbar: false,
             visible_file: None,
             watch: None,
