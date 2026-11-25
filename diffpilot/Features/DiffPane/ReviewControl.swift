@@ -34,12 +34,12 @@ struct ClaudePill: View {
     @State private var showsPopover = false
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 6) {
             claude
                 .popover(isPresented: $showsPopover, arrowEdge: .bottom) {
                     ReviewPopover(model: model) { showsPopover = false }
                 }
-            Divider().frame(height: 16)
+            Divider().frame(height: 16).padding(.horizontal, 2)
             Button {
                 model.commentOnVisibleFile()
             } label: {
