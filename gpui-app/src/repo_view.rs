@@ -2,8 +2,6 @@ use crate::bench::{Bench, Mark};
 use crate::comparison_control::{Select, comparison_control};
 use crate::pane::{DiffPane, DiffPaneEvent};
 use crate::sidebar::{LoadedChanges, Sidebar, SidebarEvent};
-use crate::theme::{glass_shadow, palette};
-use crate::ui::{OnSelect, capsule, segmented, toggle_capsule};
 use diffpilot_core::changes;
 use diffpilot_core::claude::{ClaudeCliReplier, Replier, Reviewer, ScriptedReplier, reviewer_from_env};
 use diffpilot_core::comparison::{self, Comparison};
@@ -14,7 +12,8 @@ use diffpilot_core::tree;
 use diffpilot_core::viewed::{ViewedFiles, ViewedKey, ViewedStore};
 use diffpilot_core::watcher::{self, WatchGuard};
 use diffpilot_review_ui::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
-use diffpilot_ui_kit::Glyph;
+use diffpilot_ui_kit::components::{OnSelect, capsule, segmented, toggle_capsule};
+use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{
     Context, Entity, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render,
@@ -626,7 +625,7 @@ impl RepoView {
         });
         let titles = PaneMode::ALL.map(PaneMode::title);
         let selected = PaneMode::ALL.iter().position(|mode| *mode == self.mode).unwrap_or(0);
-        segmented("pane-mode", &titles, selected, GLASS_HEIGHT, &palette(cx), on_select).into_any_element()
+        segmented("pane-mode", &titles, selected, GLASS_HEIGHT, &Theme::of(cx), on_select).into_any_element()
     }
 
     fn wrap_button(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
@@ -636,7 +635,7 @@ impl RepoView {
             "Wrap lines",
             self.wrap,
             GLASS_HEIGHT,
-            &palette(cx),
+            &Theme::of(cx),
             cx.listener(|this, _, _, cx| {
                 this.wrap = !this.wrap;
                 let wrap = this.wrap;
@@ -652,7 +651,7 @@ impl RepoView {
     fn toolbar(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let theme = cx.theme();
         let border = theme.border;
-        let palette = palette(cx);
+        let tokens = Theme::of(cx);
         let view = cx.entity().downgrade();
         let select: Select = Rc::new(move |next, window, cx| {
             view.update(cx, |this, cx| this.select_comparison(next, window, cx))
@@ -660,12 +659,12 @@ impl RepoView {
         });
         let control = match (&self.refs, &self.comparison) {
             (Some(refs), Some(comparison)) => {
-                Some(comparison_control(refs, comparison, self.compact_toolbar, select, &palette).into_any_element())
+                Some(comparison_control(refs, comparison, self.compact_toolbar, select, &tokens).into_any_element())
             }
             _ => None,
         };
         let pill = self.session.as_ref().map(|session| {
-            capsule(&palette, GLASS_HEIGHT)
+            capsule(&tokens, GLASS_HEIGHT)
                 .id("toolbar-claude-slot")
                 .px(px(6.))
                 .child(session.pill.clone())
@@ -717,7 +716,7 @@ impl Render for RepoView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let background = theme.background;
-        let palette = palette(cx);
+        let tokens = Theme::of(cx);
         let width = self.sidebar_width;
         let drag = drag_region(&self.should_move);
         let toggle = sidebar_toggle(cx);
@@ -767,7 +766,7 @@ impl Render for RepoView {
                                 .bottom_0()
                                 .left_0()
                                 .w(px(PANEL_INSET))
-                                .bg(palette.gutter),
+                                .bg(tokens.chrome.gutter),
                         )
                         .child(
                             v_flex()
@@ -778,10 +777,10 @@ impl Render for RepoView {
                                 .right_0()
                                 .rounded(px(PANEL_RADIUS))
                                 .overflow_hidden()
-                                .bg(palette.panel)
+                                .bg(tokens.chrome.panel)
                                 .border_1()
-                                .border_color(palette.panel_border)
-                                .shadow(glass_shadow(&palette))
+                                .border_color(tokens.chrome.panel_border)
+                                .shadow(tokens.glass_shadow())
                                 .child(
                                     drag(
                                         h_flex()

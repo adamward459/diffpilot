@@ -6,8 +6,6 @@ mod pane;
 mod repo_view;
 mod sidebar;
 mod sidebar_rows;
-mod theme;
-mod ui;
 mod workspace;
 
 use bench::Bench;
