@@ -3,6 +3,7 @@ pub mod cancel;
 pub mod changes;
 pub mod claude;
 pub mod comparison;
+pub mod connection;
 pub mod diff;
 pub mod file_kind;
 pub mod fix;
