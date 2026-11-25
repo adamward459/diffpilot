@@ -34,14 +34,15 @@ final class SidebarUITests: XCTestCase {
         while collapsed.count > 0 { collapsed.firstMatch.click() }
     }
 
-    func testLaunchShowsSummaryAndTopFolders() {
+    func testLaunchShowsSummaryAndEveryFolderExpanded() {
         let summary = app.staticTexts["summary"].value as? String ?? ""
         XCTAssertTrue(summary.contains("2,000 files"), summary)
         XCTAssertTrue(summary.contains("493/2,000 viewed"), summary)
         for name in ["docs", "packages", "scripts", "src", "tests"] {
             XCTAssertTrue(row(name).exists, name)
         }
-        XCTAssertFalse(row("client.ts").exists)
+        XCTAssertTrue(row("archive.md").exists)
+        XCTAssertTrue(row("Cache.md").exists)
     }
 
     func testFilterShowsMatchesAndHidesTheRest() {

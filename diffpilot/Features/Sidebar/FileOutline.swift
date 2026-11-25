@@ -23,8 +23,7 @@ struct FileOutline: NSViewRepresentable {
 final class OutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private let outline = NSOutlineView()
     private var top: [FileNode] = []
-    private var expanded: Set<String> = []
-    private var seeded = false
+    private var collapsed: Set<String> = []
     private var isReloading = false
     private var isSelecting = false
     private var selection: Binding<String?> = .constant(nil)
@@ -67,10 +66,6 @@ final class OutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewD
             shownFilter = input.filter
             shownMode = input.mode
             listMode = input.mode == .list
-            if !seeded && !input.root.children.isEmpty {
-                expanded = Set(input.root.children.filter(\.isFolder).map(\.path))
-                seeded = true
-            }
             top =
                 listMode
                 ? FileTree.list(input.files, input.filter)
@@ -88,16 +83,16 @@ final class OutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewD
         if expandAll {
             outline.expandItem(nil, expandChildren: true)
         } else if !listMode {
-            restoreExpansion(top)
+            expandUncollapsed(top)
         }
         isSelecting = false
         isReloading = false
     }
 
-    private func restoreExpansion(_ nodes: [FileNode]) {
-        for node in nodes where node.isFolder && expanded.contains(node.path) {
+    private func expandUncollapsed(_ nodes: [FileNode]) {
+        for node in nodes where node.isFolder && !collapsed.contains(node.path) {
             outline.expandItem(node)
-            restoreExpansion(node.children)
+            expandUncollapsed(node.children)
         }
     }
 
@@ -174,6 +169,6 @@ final class OutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewD
         guard !isReloading, !listMode, shownFilter?.hasQuery != true,
             let node = notification.userInfo?["NSObject"] as? FileNode
         else { return }
-        if isExpanded { expanded.insert(node.path) } else { expanded.remove(node.path) }
+        if isExpanded { collapsed.remove(node.path) } else { collapsed.insert(node.path) }
     }
 }
