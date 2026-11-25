@@ -26,6 +26,7 @@ struct DiffPaneDriver {
     var topFile: String { field("top") }
     var threadCount: Int { Int(field("threads")) ?? 0 }
     var reply: String { field("reply") }
+    var viewedCount: Int { Int(field("viewed")) ?? 0 }
 
     struct ScrollStats {
         var frames: Int
@@ -71,10 +72,10 @@ struct DiffPaneDriver {
         paneCoordinate(x: pane.minX + 71, y: y).click()
     }
 
-    func clickFileCommentButton() {
-        let pane = paneFrame
-        paneCoordinate(x: pane.maxX - 163, y: pane.minY + Self.fileHeaderHeight / 2).click()
-    }
+    var commentButton: XCUIElement { app.descendants(matching: .any)["comment-on-file"].firstMatch }
+    var viewedToggle: XCUIElement { app.descendants(matching: .any)["viewed-toggle"].firstMatch }
+
+    func clickFileCommentButton() { commentButton.click() }
 
     private static func topLeftFrame(_ screen: NSScreen) -> CGRect {
         let primary = NSScreen.screens[0].frame

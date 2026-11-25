@@ -13,17 +13,8 @@ enum Icons {
     static func file(named name: String) -> (image: NSImage, tint: NSColor) {
         let ext = name.lastIndex(of: ".").map { String(name[name.index(after: $0)...]).lowercased() } ?? ""
         if let cached = byExtension[ext] { return cached }
-        let entry: (String, NSColor) =
-            switch ext {
-            case "ts": ("chevron.left.forwardslash.chevron.right", .systemBlue)
-            case "tsx": ("atom", .systemTeal)
-            case "swift": ("swift", .systemOrange)
-            case "md": ("doc.text", .secondaryLabelColor)
-            case "json": ("curlybraces", .systemYellow)
-            case "yaml", "yml": ("list.bullet.indent", .systemPurple)
-            default: ("doc", .secondaryLabelColor)
-            }
-        let value = (symbol(entry.0, size: 13), entry.1)
+        let icon = FileIcon.forFile(named: name)
+        let value = (symbol(icon.symbol, size: 13), icon.tint.color)
         byExtension[ext] = value
         return value
     }

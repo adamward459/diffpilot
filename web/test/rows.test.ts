@@ -6,6 +6,8 @@ import type { LineRow, PageFile, Row } from '../src/rows.ts';
 
 const file = (over: Partial<PageFile> = {}): PageFile => ({
   path: 'src/a.ts',
+  symbol: 'doc',
+  tint: 'secondary',
   status: 'M',
   isBinary: false,
   additions: 2,

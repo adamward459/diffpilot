@@ -12,6 +12,7 @@ nonisolated enum PageMessage: Equatable, Sendable {
     case needMore
     case firstPaint
     case visibleFile(String)
+    case toggleCollapsed(String)
     case scrollStats(ScrollStats)
     case createThread(ThreadAnchor)
     case post(thread: Int, text: String)
@@ -27,6 +28,9 @@ nonisolated enum PageMessage: Equatable, Sendable {
         case "visibleFile":
             guard let path = fields["path"] as? String else { return nil }
             self = .visibleFile(path)
+        case "toggleCollapsed":
+            guard let path = fields["path"] as? String else { return nil }
+            self = .toggleCollapsed(path)
         case "scrollStats":
             guard let frames = fields["frames"] as? Int, let median = fields["p50"] as? Double,
                 let p95 = fields["p95"] as? Double, let max = fields["max"] as? Double
@@ -61,6 +65,8 @@ nonisolated enum HostCommand: Sendable {
     case removeThread(Int)
     case reveal(path: String)
     case setInset(Double)
+    case setTheme(PaneTheme)
+    case fileState(path: String, viewed: Bool, collapsed: Bool)
     case benchScroll
 
     var call: (script: String, arguments: [String: Any]) {
@@ -75,6 +81,10 @@ nonisolated enum HostCommand: Sendable {
             ("dp.reveal(path)", ["path": path])
         case .setInset(let points):
             ("dp.setInset(points)", ["points": points])
+        case .setTheme(let theme):
+            ("dp.setTheme(JSON.parse(json))", ["json": Self.json(theme)])
+        case .fileState(let path, let viewed, let collapsed):
+            ("dp.fileState(path, viewed, collapsed)", ["path": path, "viewed": viewed, "collapsed": collapsed])
         case .benchScroll:
             ("dp.benchScroll()", [:])
         }

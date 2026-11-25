@@ -23,4 +23,31 @@ struct HostCommandTests {
         #expect(HostCommand.reveal(path: "a").call.arguments["path"] as? String == "a")
         #expect(HostCommand.setInset(52).call.arguments["points"] as? Double == 52)
     }
+
+    @Test func setThemePassesTheThemeAsJSONText() throws {
+        let theme = PaneTheme(
+            colors: ["--text": "rgb(0 0 0 / 1)"], isDark: true, increaseContrast: false, reduceTransparency: true)
+        let call = HostCommand.setTheme(theme).call
+        #expect(call.script == "dp.setTheme(JSON.parse(json))")
+        let json = try #require(call.arguments["json"] as? String)
+        let object = try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        #expect((object["colors"] as? [String: String])?["--text"] == "rgb(0 0 0 / 1)")
+        #expect(object["isDark"] as? Bool == true)
+        #expect(object["reduceTransparency"] as? Bool == true)
+    }
+
+    @Test func fileStatePassesTheFlags() {
+        let call = HostCommand.fileState(path: "a", viewed: true, collapsed: false).call
+        #expect(call.script == "dp.fileState(path, viewed, collapsed)")
+        #expect(call.arguments["viewed"] as? Bool == true)
+        #expect(call.arguments["collapsed"] as? Bool == false)
+    }
+
+    @Test func loadedFilesCarryTheSidebarSymbolOfTheirType() throws {
+        let call = HostCommand.load(files: [FileDiff(path: "src/a.ts", status: .modified)][...], done: true).call
+        let json = try #require(call.arguments["json"] as? String)
+        let files = try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]])
+        #expect(files.first?["symbol"] as? String == FileIcon.forFile(named: "a.ts").symbol)
+        #expect(files.first?["tint"] as? String == "blue")
+    }
 }

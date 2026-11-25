@@ -14,6 +14,11 @@ struct PageMessageTests {
         #expect(PageMessage(body: ["type": "visibleFile"]) == nil)
     }
 
+    @Test func parsesCollapseToggles() {
+        #expect(PageMessage(body: ["type": "toggleCollapsed", "path": "a.ts"]) == .toggleCollapsed("a.ts"))
+        #expect(PageMessage(body: ["type": "toggleCollapsed"]) == nil)
+    }
+
     @Test func parsesScrollStats() {
         #expect(
             PageMessage(body: ["type": "scrollStats", "frames": 90, "p50": 8.3, "p95": 9.0, "max": 17.1])
