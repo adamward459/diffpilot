@@ -20,24 +20,56 @@ extension Severity {
     }
 }
 
-struct ReviewControl: View {
+struct ClaudePill: View {
     @Bindable var model: DiffPaneModel
     @State private var showsPopover = false
+    @State private var showsResult = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            switch model.review {
-            case .idle:
-                Button {
-                    showsPopover = true
-                } label: {
-                    Label("Ask Claude", systemImage: "sparkles")
+        HStack(spacing: 0) {
+            claude
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .popover(isPresented: $showsPopover, arrowEdge: .bottom) {
+                    ReviewPopover(model: model) { showsPopover = false }
                 }
-                .accessibilityIdentifier("ask-claude")
-            case .running(let since):
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("Reviewing")
+            Divider().frame(height: 16)
+            Button {
+                model.commentOnVisibleFile()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "bubble.left")
+                    let count = model.threads.threads.count
+                    if count > 0 { Text("\(count)").monospacedDigit() }
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Comment on file")
+            .disabled(model.visiblePath == nil)
+            .accessibilityLabel("Comment on file")
+            .accessibilityIdentifier("comment-on-file")
+        }
+        .onChange(of: model.review) { _, run in
+            if case .failed = run { showsPopover = true }
+            showsResult = if case .done = run { true } else { false }
+        }
+        .task(id: showsResult) {
+            guard showsResult else { return }
+            try? await Task.sleep(for: .seconds(5))
+            showsResult = false
+        }
+    }
+
+    @ViewBuilder private var claude: some View {
+        switch model.review {
+        case .running(let since):
+            HStack(spacing: 7) {
+                ProgressView().controlSize(.small)
+                HStack(spacing: 4) {
+                    Text("Reviewing").fontWeight(.semibold)
                     TimelineView(.periodic(from: since, by: 1)) { context in
                         Text(Self.elapsed(context.date.timeIntervalSince(since))).monospacedDigit()
                             .foregroundStyle(.secondary)
@@ -45,38 +77,54 @@ struct ReviewControl: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("review-status")
-                Button("Stop") { model.stopReview() }
-                    .keyboardShortcut(".", modifiers: .command)
-                    .accessibilityIdentifier("stop-review")
-            case .done(let counts):
                 Button {
-                    showsPopover = true
+                    model.stopReview()
                 } label: {
-                    HStack(spacing: 6) {
-                        Text("Review done")
-                        ForEach(Severity.allCases.filter { counts[$0, default: 0] > 0 }, id: \.self) { severity in
-                            Text("\(counts[severity, default: 0])").foregroundStyle(severity.color)
-                                .help(severity.title)
-                        }
-                    }
+                    Image(systemName: "stop.fill").font(.system(size: 9))
+                        .frame(width: 18, height: 18)
+                        .background(Color.secondary.opacity(0.2), in: Circle())
                 }
-                .accessibilityIdentifier("review-status")
-            case .failed:
-                Button {
-                    showsPopover = true
-                } label: {
-                    Label("Review failed", systemImage: "exclamationmark.triangle")
-                }
-                .accessibilityIdentifier("review-status")
+                .buttonStyle(.plain)
+                .keyboardShortcut(".", modifiers: .command)
+                .help("Stop Claude (⌘.)")
+                .accessibilityLabel("Stop")
+                .accessibilityIdentifier("stop-review")
             }
+        case .done(let counts) where showsResult:
+            pillButton {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text("Review done")
+                ForEach(Severity.allCases.filter { counts[$0, default: 0] > 0 }, id: \.self) { severity in
+                    Text("\(counts[severity, default: 0])").fontWeight(.semibold).monospacedDigit()
+                        .foregroundStyle(severity.color)
+                        .help(severity.title)
+                }
+            }
+            .accessibilityIdentifier("review-status")
+        case .failed:
+            pillButton {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text("Review failed")
+            }
+            .accessibilityIdentifier("review-status")
+        default:
+            pillButton {
+                Image(systemName: "sparkles").foregroundStyle(Color.claude)
+                Text("Ask Claude")
+            }
+            .help("Ask Claude")
+            .disabled(model.visiblePath == nil)
+            .accessibilityIdentifier("ask-claude")
         }
-        .popover(isPresented: $showsPopover, arrowEdge: .bottom) {
-            ReviewPopover(model: model) { showsPopover = false }
+    }
+
+    private func pillButton(@ViewBuilder _ label: () -> some View) -> some View {
+        Button {
+            showsPopover = true
+        } label: {
+            HStack(spacing: 6, content: label).contentShape(Rectangle())
         }
-        .onChange(of: model.review) { _, run in
-            if case .failed = run { showsPopover = true }
-        }
-        .disabled(model.visiblePath == nil && model.review == .idle)
+        .buttonStyle(.plain)
     }
 
     private static func elapsed(_ seconds: TimeInterval) -> String {

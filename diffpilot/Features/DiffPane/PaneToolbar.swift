@@ -11,18 +11,5 @@ struct PaneToolbar: ToolbarContent {
             .pickerStyle(.segmented)
             .accessibilityIdentifier("pane-mode")
         }
-        ToolbarItem(placement: .primaryAction) {
-            Button {
-                model.commentOnVisibleFile()
-            } label: {
-                Label("Comment on file", systemImage: "plus.bubble")
-            }
-            .help("Comment on file")
-            .disabled(model.visiblePath == nil)
-            .accessibilityIdentifier("comment-on-file")
-        }
-        ToolbarItem(placement: .primaryAction) {
-            ReviewControl(model: model)
-        }
     }
 }
