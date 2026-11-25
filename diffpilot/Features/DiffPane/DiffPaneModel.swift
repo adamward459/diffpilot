@@ -22,7 +22,6 @@ final class DiffPaneModel {
     private let replier: any ClaudeReplier
     private let benchScrollDelay: Duration?
     private var files: [FileDiff]?
-    private var fingerprints: [String: String] = [:]
     private var batches: DiffBatches?
     private var isPageReady = false
     private var hasSentFirstBatch = false
@@ -66,8 +65,7 @@ final class DiffPaneModel {
     func load() async {
         let (next, prints) = await readFiles()
         files = next
-        fingerprints = prints
-        clearChangedViewed()
+        clearChangedViewed(prints)
         batches = DiffBatches(next, lineBudget: Self.lineBudget)
         sendFirstBatchIfReady()
     }
@@ -76,8 +74,7 @@ final class DiffPaneModel {
         let (next, prints) = await readFiles()
         guard next != files else { return }
         files = next
-        fingerprints = prints
-        clearChangedViewed()
+        clearChangedViewed(prints)
         batches = DiffBatches(next, lineBudget: Self.lineBudget)
         guard hasSentFirstBatch else {
             sendFirstBatchIfReady()
@@ -94,16 +91,18 @@ final class DiffPaneModel {
     private func readFiles() async -> ([FileDiff], [String: String]) {
         let repo = repo
         let comparison = comparison
+        let viewed = viewed.paths
         return await Task.detached(priority: .userInitiated) {
             guard let repo, let text = try? Git.run(repo, UnifiedDiff.args + comparison.revisions) else {
                 return ([], [:])
             }
             let files = UnifiedDiff.parse(text).inTreeOrder()
-            return (files, Dictionary(files.map { ($0.path, $0.fingerprint) }, uniquingKeysWith: { _, last in last }))
+            let prints = files.filter { viewed.contains($0.path) }.map { ($0.path, $0.fingerprint) }
+            return (files, Dictionary(prints, uniquingKeysWith: { _, last in last }))
         }.value
     }
 
-    private func clearChangedViewed() {
+    private func clearChangedViewed(_ fingerprints: [String: String]) {
         for path in viewed.clearChanged(fingerprints) {
             collapsed.remove(path)
             if isPageReady { sendFileState(path) }
@@ -123,7 +122,8 @@ final class DiffPaneModel {
     }
 
     func toggleViewed(_ path: String) {
-        viewed.toggle(path, fingerprint: fingerprints[path] ?? ViewedFiles.unknown)
+        let fingerprint = files?.first { $0.path == path }?.fingerprint
+        viewed.toggle(path, fingerprint: fingerprint ?? ViewedFiles.unknown)
         if viewed.contains(path) { collapsed.insert(path) } else { collapsed.remove(path) }
         sendFileState(path)
     }

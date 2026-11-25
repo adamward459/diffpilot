@@ -35,15 +35,19 @@ nonisolated extension FileDiff {
     var fingerprint: String {
         var hash = SHA256()
         func add(_ text: String) {
-            hash.update(data: Data(text.utf8))
-            hash.update(data: Data([0]))
+            var text = text
+            text.withUTF8 { hash.update(bufferPointer: UnsafeRawBufferPointer($0)) }
+            withUnsafeBytes(of: UInt8(0)) { hash.update(bufferPointer: $0) }
         }
         add(status.rawValue)
         add(oldPath ?? "")
         add(isBinary ? "binary" : "text")
         for hunk in hunks {
             add(hunk.header)
-            for line in hunk.lines { add(line.kind.rawValue + line.text) }
+            for line in hunk.lines {
+                add(line.kind.rawValue)
+                add(line.text)
+            }
         }
         return hash.finalize().map { String(format: "%02x", $0) }.joined()
     }
