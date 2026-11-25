@@ -177,6 +177,7 @@ enum Drive {
 
 struct Bench {
     drive: Drive,
+    window: gpui::AnyWindowHandle,
     pane: Entity<DiffPane>,
     repo: PathBuf,
     queue: VecDeque<Phase>,
@@ -247,10 +248,7 @@ fn start_phase(bench: &Rc<RefCell<Bench>>, window: &mut Window, cx: &mut App) {
     let drive = bench.borrow().drive;
     match drive {
         Drive::Vsync => schedule(bench.clone(), window),
-        Drive::Draw => {
-            window.draw(cx).clear();
-            tick(bench, window, cx);
-        }
+        Drive::Draw => schedule_draw(bench.clone(), cx),
     }
 }
 
@@ -258,30 +256,45 @@ fn schedule(bench: Rc<RefCell<Bench>>, window: &mut Window) {
     window.on_next_frame(move |window, cx| tick(&bench, window, cx));
 }
 
+fn schedule_draw(bench: Rc<RefCell<Bench>>, cx: &mut App) {
+    let window = bench.borrow().window;
+    cx.spawn(async move |cx| {
+        cx.background_executor().timer(Duration::from_micros(100)).await;
+        cx.update(|cx| {
+            window
+                .update(cx, |_, window, cx| {
+                    window.draw(cx).clear();
+                    tick(&bench, window, cx);
+                })
+                .ok();
+        })
+        .ok();
+    })
+    .detach();
+}
+
 fn tick(bench: &Rc<RefCell<Bench>>, window: &mut Window, cx: &mut App) {
     let pane = bench.borrow().pane.clone();
-    loop {
-        let now = Instant::now();
-        let finished = {
-            let mut guard = bench.borrow_mut();
-            let run = guard.run.as_mut().expect("a phase is running");
-            if let Some(last) = run.last_tick.replace(now) {
-                run.intervals.push(now.duration_since(last).as_secs_f32() * 1000.0);
-            }
-            run.done += 1;
-            run.done > run.phase.frames
-        };
-        if finished {
-            finish_phase(bench, window, cx);
-            return;
+    let now = Instant::now();
+    let finished = {
+        let mut guard = bench.borrow_mut();
+        let run = guard.run.as_mut().expect("a phase is running");
+        if let Some(last) = run.last_tick.replace(now) {
+            run.intervals.push(now.duration_since(last).as_secs_f32() * 1000.0);
         }
-        let step = bench.borrow().run.as_ref().map_or(0.0, |run| run.step_px);
-        pane.update(cx, |pane, cx| pane.scroll_by(step, 0.0, cx));
-        if bench.borrow().drive == Drive::Vsync {
-            schedule(bench.clone(), window);
-            return;
-        }
-        window.draw(cx).clear();
+        run.done += 1;
+        run.done > run.phase.frames
+    };
+    if finished {
+        finish_phase(bench, window, cx);
+        return;
+    }
+    let step = bench.borrow().run.as_ref().map_or(0.0, |run| run.step_px);
+    pane.update(cx, |pane, cx| pane.scroll_by(step, 0.0, cx));
+    let drive = bench.borrow().drive;
+    match drive {
+        Drive::Vsync => schedule(bench.clone(), window),
+        Drive::Draw => schedule_draw(bench.clone(), cx),
     }
 }
 
@@ -325,6 +338,7 @@ fn start_bench(
 ) {
     let bench = Rc::new(RefCell::new(Bench {
         drive,
+        window,
         pane: pane.clone(),
         repo,
         queue: plan(),
