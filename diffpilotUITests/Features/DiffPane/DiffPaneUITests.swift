@@ -36,7 +36,8 @@ final class DiffPaneUITests: XCTestCase {
         pane.app.typeKey(.return, modifierFlags: .command)
 
         var partialReplies = Set<String>()
-        let finished = pane.waitUntil(timeout: 20) {
+        // Each check snapshots the 2,000-row accessibility tree on the main thread the reply streams on.
+        let finished = pane.waitUntil(timeout: 20, pollEvery: 0.5) {
             let reply = pane.reply
             if !reply.isEmpty, !reply.contains("any code yet.") { partialReplies.insert(reply) }
             return reply.contains("did not change any code yet.")
@@ -57,14 +58,34 @@ final class DiffPaneUITests: XCTestCase {
         XCTAssertEqual(pane.reply, "")
     }
 
-    func testViewedToggleInTheToolbarMarksAndUnmarksTheTopFile() {
+    func testViewedCheckboxInTheFileHeaderMarksAndUnmarksTheTopFile() {
         XCTAssertTrue(pane.waitUntil { pane.topFile == "docs/archive.md" }, pane.stateValue)
-        XCTAssertTrue(pane.viewedToggle.waitForExistence(timeout: 5))
         let before = pane.viewedCount
-        pane.viewedToggle.click()
+        pane.clickTopFileViewedCheckbox()
         XCTAssertTrue(pane.waitUntil { pane.viewedCount != before }, pane.stateValue)
-        pane.viewedToggle.click()
+        pane.clickTopFileViewedCheckbox()
         XCTAssertTrue(pane.waitUntil { pane.viewedCount == before }, pane.stateValue)
+    }
+
+    func testScriptedReviewShowsFindingsAsThreads() {
+        XCTAssertTrue(pane.waitUntil { pane.topFile == "docs/archive.md" }, pane.stateValue)
+        XCTAssertEqual(pane.review, "idle")
+        pane.startReview()
+        XCTAssertTrue(pane.waitUntil { pane.review == "running" }, pane.stateValue)
+        XCTAssertTrue(pane.element("stop-review").exists)
+        XCTAssertTrue(pane.waitUntil(timeout: 20) { pane.review == "done:1/1/1/1" }, pane.stateValue)
+        XCTAssertEqual(pane.threadCount, 5, pane.stateValue)
+        XCTAssertTrue(pane.element("review-status").exists)
+        XCTAssertTrue(pane.waitUntil { pane.recognizedText().contains("Review summary") })
+    }
+
+    func testStoppingAReviewReturnsToIdle() {
+        XCTAssertTrue(pane.waitUntil { pane.topFile == "docs/archive.md" }, pane.stateValue)
+        pane.startReview()
+        XCTAssertTrue(pane.waitUntil { pane.review == "running" }, pane.stateValue)
+        pane.element("stop-review").click()
+        XCTAssertTrue(pane.waitUntil { pane.review == "idle" }, pane.stateValue)
+        XCTAssertEqual(pane.threadCount, 0)
     }
 
     func testToolbarControlsAreNativeAndSitAboveThePane() {

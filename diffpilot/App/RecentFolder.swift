@@ -11,18 +11,16 @@ nonisolated enum RecentFolder {
         var isStale = false
         guard
             let url = try? URL(
-                resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil,
+                resolvingBookmarkData: data, options: [], relativeTo: nil,
                 bookmarkDataIsStale: &isStale)
         else { return nil }
-        guard url.startAccessingSecurityScopedResource() else { return nil }
         if isStale { remember(url, defaults: defaults) }
         return url
     }
 
     static func remember(_ url: URL, defaults: UserDefaults = .standard) {
         let data = try? url.bookmarkData(
-            options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess], includingResourceValuesForKeys: nil,
-            relativeTo: nil)
+            options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
         defaults.set(data, forKey: key)
     }
 }

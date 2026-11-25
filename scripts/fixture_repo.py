@@ -98,8 +98,15 @@ def generated(count: int, taken: set[str]) -> list[Spec]:
     return specs
 
 
+LONG_LINE_PATH = "src/components/inbox/MessageRow.tsx"
+LONG_LINE_TAIL = " the quick brown fox jumps over the lazy dog" * 12
+
+
 def lines(spec: Spec, kind: str, count: int) -> list[str]:
-    return [f"{spec.path} {kind} {i}" for i in range(count)]
+    out = [f"{spec.path} {kind} {i}" for i in range(count)]
+    if spec.path == LONG_LINE_PATH and kind == "new" and out:
+        out[0] += LONG_LINE_TAIL
+    return out
 
 
 def shared_lines(spec: Spec) -> list[str]:

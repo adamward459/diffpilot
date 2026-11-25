@@ -36,7 +36,6 @@ final class RecentFolderTests: XCTestCase {
     func testRememberThenRestoreReturnsSameFolder() throws {
         RecentFolder.remember(folder, defaults: defaults)
         let restored = try XCTUnwrap(RecentFolder.restore(defaults: defaults, environment: [:]))
-        defer { restored.stopAccessingSecurityScopedResource() }
         XCTAssertEqual(restored.resolvingSymlinksInPath().path, folder.resolvingSymlinksInPath().path)
     }
 
@@ -49,7 +48,6 @@ final class RecentFolderTests: XCTestCase {
     func testEmptyEnvironmentValueFallsBackToBookmark() throws {
         RecentFolder.remember(folder, defaults: defaults)
         let restored = try XCTUnwrap(RecentFolder.restore(defaults: defaults, environment: ["DIFFPILOT_REPO": ""]))
-        defer { restored.stopAccessingSecurityScopedResource() }
         XCTAssertEqual(restored.resolvingSymlinksInPath().path, folder.resolvingSymlinksInPath().path)
     }
 }

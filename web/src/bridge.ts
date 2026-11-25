@@ -21,7 +21,14 @@ export interface FileDiff {
 
 export type ThreadAnchor =
   | { kind: 'file'; path: string }
-  | { kind: 'line'; path: string; side: Side; line: number };
+  | { kind: 'line'; path: string; side: Side; line: number }
+  | { kind: 'change' };
+export type Severity = 'must-fix' | 'suggestion' | 'nit' | 'question';
+export interface FindingMeta {
+  severity: Severity;
+  title: string;
+  location?: string;
+}
 export interface ThreadComment {
   id: number;
   author: string;
@@ -32,6 +39,7 @@ export interface ReviewThread {
   id: number;
   anchor: ThreadAnchor;
   comments: ThreadComment[];
+  finding?: FindingMeta;
 }
 
 export interface Theme {

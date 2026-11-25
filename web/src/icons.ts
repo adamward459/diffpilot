@@ -5,6 +5,12 @@ export const SYMBOLS = {
   plus: 'plus',
   check: 'checkmark',
   sparkle: 'sparkles',
+  chevU: 'chevron.up',
+  copy: 'doc.on.doc',
+  mustFix: 'xmark.circle.fill',
+  suggestion: 'exclamationmark.triangle.fill',
+  nit: 'circle.fill',
+  question: 'questionmark.circle.fill',
 } as const;
 export type IconName = keyof typeof SYMBOLS;
 

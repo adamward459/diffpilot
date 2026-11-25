@@ -7,6 +7,12 @@ enum PaneSymbol: String, CaseIterable {
     case plus
     case checkmark
     case sparkles
+    case chevronUp = "chevron.up"
+    case copy = "doc.on.doc"
+    case mustFix = "xmark.circle.fill"
+    case suggestion = "exclamationmark.triangle.fill"
+    case nit = "circle.fill"
+    case question = "questionmark.circle.fill"
 }
 
 enum SymbolImages {
