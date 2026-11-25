@@ -8,7 +8,7 @@ use diffpilot_core::diff::{FileDiff, LineKind};
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use diffpilot_review_ui::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange};
-use diffpilot_ui_kit::components::{BadgeTone, status_badge, viewed_toggle};
+use diffpilot_ui_kit::components::{BadgeTone, State, status_badge, viewed_toggle};
 use diffpilot_ui_kit::{Theme, painted};
 use gpui::{
     AnyView, App, AppContext as _, ClickEvent, Context, Div, Entity, EventEmitter, FontWeight, Hsla,
@@ -568,14 +568,18 @@ impl DiffPane {
             .h(px(FILE_HEADER))
             .w_full()
             .pl(px(10.0))
-            .pr(px(12.0))
+            .pr(px(6.0))
             .child(left)
             .child(
-                viewed_toggle(theme, (if pinned { "pinned-viewed" } else { "viewed" }, file), viewed).on_click(
-                    cx.listener(move |_, _: &ClickEvent, _, cx| {
-                        cx.emit(DiffPaneEvent::ToggleViewed(viewed_path.clone()))
-                    }),
-                ),
+                viewed_toggle(
+                    theme,
+                    (if pinned { "pinned-viewed" } else { "viewed" }, file),
+                    viewed,
+                    State::Normal,
+                )
+                .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                    cx.emit(DiffPaneEvent::ToggleViewed(viewed_path.clone()))
+                })),
             );
         let bar = bar.id((id, file));
         match glass {

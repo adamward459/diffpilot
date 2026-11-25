@@ -1,3 +1,4 @@
+use super::interaction::{DISABLED_OPACITY, State};
 use crate::icons::Glyph;
 use crate::theme::Theme;
 use gpui::prelude::FluentBuilder;
@@ -39,6 +40,8 @@ pub struct Button {
     children: Vec<AnyElement>,
     look: Look,
     scale: Scale,
+    caret: bool,
+    state: State,
     disabled: bool,
     selected: bool,
     on_click: Option<Handler>,
@@ -56,6 +59,8 @@ impl Button {
             children: Vec::new(),
             look: Look::Plain,
             scale: Scale::Compact,
+            caret: false,
+            state: State::Normal,
             disabled: false,
             selected: false,
             on_click: None,
@@ -94,6 +99,16 @@ impl Button {
 
     pub fn regular(mut self) -> Self {
         self.scale = Scale::Regular;
+        self
+    }
+
+    pub fn caret(mut self, caret: bool) -> Self {
+        self.caret = caret;
+        self
+    }
+
+    pub fn state(mut self, state: State) -> Self {
+        self.state = state;
         self
     }
 
@@ -149,13 +164,14 @@ struct Colors {
 
 fn colors(look: Look, theme: &Theme) -> Colors {
     let ui = &theme.ui;
+    let clear = gpui::transparent_black();
     match look {
         Look::Plain => Colors {
             fill: ui.cap,
             border: ui.cap_border,
             text: ui.text,
-            hover: theme.background.blend(ui.text.opacity(0.11)),
-            press: theme.background.blend(ui.text.opacity(0.17)),
+            hover: theme.hovered(ui.cap),
+            press: theme.pressed(ui.cap),
         },
         Look::Claude => Colors {
             fill: ui.claude_bg,
@@ -166,10 +182,10 @@ fn colors(look: Look, theme: &Theme) -> Colors {
         },
         Look::Primary => Colors {
             fill: theme.accent,
-            border: gpui::transparent_black(),
+            border: clear,
             text: gpui::white(),
-            hover: theme.accent_hover,
-            press: theme.accent_press,
+            hover: theme.lifted(theme.accent, false),
+            press: theme.lifted(theme.accent, true),
         },
         Look::Tint => Colors {
             fill: theme.accent.opacity(0.14),
@@ -179,11 +195,11 @@ fn colors(look: Look, theme: &Theme) -> Colors {
             press: theme.accent.opacity(0.3),
         },
         Look::Ghost => Colors {
-            fill: gpui::transparent_black(),
-            border: gpui::transparent_black(),
+            fill: clear,
+            border: clear,
             text: ui.text,
-            hover: ui.text.opacity(0.07),
-            press: ui.text.opacity(0.12),
+            hover: theme.hover,
+            press: theme.press,
         },
     }
 }
@@ -195,9 +211,14 @@ impl RenderOnce for Button {
             Scale::Compact => (12., FontWeight::MEDIUM, 8., 5.),
             Scale::Regular => (13., FontWeight::NORMAL, 10., 6.),
         };
-        let disabled = self.disabled;
+        let disabled = self.disabled || self.state == State::Disabled;
         let selected = self.selected && self.look == Look::Ghost;
         let on_click = self.on_click.filter(|_| !disabled);
+        let (fill, live) = match self.state {
+            State::Hover => (c.hover, false),
+            State::Pressed => (c.press, false),
+            _ => (if selected { c.hover } else { c.fill }, !disabled),
+        };
         self.base
             .flex()
             .flex_none()
@@ -209,15 +230,14 @@ impl RenderOnce for Button {
             .rounded(px(radius))
             .border_1()
             .border_color(c.border)
-            .bg(if selected { c.hover } else { c.fill })
+            .bg(fill)
             .text_color(c.text)
             .text_size(px(size))
             .font_weight(weight)
             .whitespace_nowrap()
-            .when(disabled, |b| b.opacity(0.45))
-            .when(!disabled, |b| {
-                b.cursor_pointer().hover(|s| s.bg(c.hover)).active(|s| s.bg(c.press))
-            })
+            .when(disabled, |b| b.opacity(DISABLED_OPACITY))
+            .when(!disabled, |b| b.cursor_pointer())
+            .when(live, |b| b.hover(|s| s.bg(c.hover)).active(|s| s.bg(c.press)))
             .refine_style(&self.style)
             .when_some(on_click, |b, handler| {
                 b.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
@@ -235,6 +255,7 @@ impl RenderOnce for Button {
             })
             .children(self.label)
             .children(self.children)
+            .when(self.caret, |b| b.child(Icon::new(Glyph::ChevronDown).size(px(12.))))
             .when_some(self.hint, |b, hint| {
                 b.child(div().text_size(px(10.)).opacity(0.75).child(hint))
             })
@@ -247,6 +268,7 @@ pub fn icon_button(id: impl Into<ElementId>, glyph: Glyph, color: Hsla) -> Butto
         .icon_color(glyph, 11., color)
         .w(px(22.))
         .px(px(0.))
+        .rounded_full()
 }
 
 pub fn chip(name: &'static str, on: bool) -> Button {

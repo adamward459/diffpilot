@@ -168,6 +168,7 @@ impl ReviewPill {
         let button = Button::new("claude-pill")
             .look(Look::Ghost)
             .regular()
+            .rounded_full()
             .h(px(24.))
             .gap(px(6.));
         match run {
@@ -221,6 +222,7 @@ impl ReviewPill {
             .child(
                 Button::new("stop-review")
                     .look(Look::Ghost)
+                    .rounded_full()
                     .w(px(22.))
                     .px(px(0.))
                     .tooltip("Stop Claude (⌘.)")
@@ -265,6 +267,7 @@ impl Render for ReviewPill {
                 Button::new("comment-on-file")
                     .look(Look::Ghost)
                     .regular()
+                    .rounded_full()
                     .h(px(24.))
                     .gap(px(6.))
                     .icon(Glyph::MessageSquare, 16.)

@@ -6,7 +6,7 @@ use crate::sidebar_rows::{
 use diffpilot_core::changes::{ChangeSummary, FileChange};
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::tree::{FileEntry, FileFilter, Folder, SidebarMode};
-use diffpilot_ui_kit::components::{BadgeTone, filter_field, glass_button, status_badge, viewed_check};
+use diffpilot_ui_kit::components::{BadgeTone, State, filter_field, glass_button, status_badge, viewed_check};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::{
     AnyElement, App, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
@@ -326,6 +326,7 @@ impl Sidebar {
                 Glyph::Pencil,
                 "Only uncommitted",
                 uncommitted,
+                State::Normal,
                 &tokens,
                 cx.listener(|this, _, _, cx| this.toggle_uncommitted(cx)),
             ))
@@ -334,6 +335,7 @@ impl Sidebar {
                 Glyph::Eye,
                 "Hide viewed",
                 hide_viewed,
+                State::Normal,
                 &tokens,
                 cx.listener(|this, _, _, cx| this.toggle_hide_viewed(cx)),
             ))
@@ -342,6 +344,7 @@ impl Sidebar {
                 if list_mode { Glyph::List } else { Glyph::ListTree },
                 if list_mode { "Switch to tree" } else { "Switch to list" },
                 false,
+                State::Normal,
                 &tokens,
                 cx.listener(move |this, _, _, cx| {
                     this.set_mode(
@@ -450,7 +453,7 @@ impl Sidebar {
         } else {
             tokens.chrome.segment
         };
-        let hover_bg = cx.theme().list_hover;
+        let hover_bg = tokens.hover;
         let path = row.path.clone();
         let depth = row.depth as f32;
 

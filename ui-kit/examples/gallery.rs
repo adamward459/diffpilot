@@ -2,13 +2,13 @@
 
 use diffpilot_core::review::Severity;
 use diffpilot_ui_kit::components::{
-    BadgeTone, Button, Look, avatar, capsule, card_shell, chip, filled_check, filter_field, glass_button, icon_button,
-    segmented, severity_badge, status_badge, toggle_capsule, viewed_check, viewed_toggle,
+    BadgeTone, Button, Fills, Look, State, avatar, capsule, card_shell, chip, filled_check, filter_field, glass_button,
+    icon_button, interactive, segmented, severity_badge, status_badge, toggle_capsule, viewed_check, viewed_toggle,
 };
 use diffpilot_ui_kit::{Assets, Glyph, Theme, painted};
 use gpui::{
-    App, Application, Bounds, Context, IntoElement, ParentElement, Render, Styled, Window, WindowBounds, WindowOptions,
-    div, font, point, prelude::*, px, size,
+    AnyElement, App, Application, Bounds, Context, IntoElement, ParentElement, Render, Styled, Window, WindowBounds,
+    WindowOptions, div, font, point, prelude::*, px, size,
 };
 use gpui_component::{Icon, Root, Selectable, h_flex, v_flex};
 use std::rc::Rc;
@@ -84,14 +84,31 @@ fn glass(theme: &Theme) -> impl IntoElement {
             h_flex()
                 .gap(px(10.))
                 .items_center()
-                .child(glass_button("g-off", Glyph::Pencil, "off", false, theme, |_, _, _| {}))
-                .child(glass_button("g-on", Glyph::Eye, "on", true, theme, |_, _, _| {}))
+                .child(glass_button(
+                    "g-off",
+                    Glyph::Pencil,
+                    "off",
+                    false,
+                    State::Normal,
+                    theme,
+                    |_, _, _| {},
+                ))
+                .child(glass_button(
+                    "g-on",
+                    Glyph::Eye,
+                    "on",
+                    true,
+                    State::Normal,
+                    theme,
+                    |_, _, _| {},
+                ))
                 .child(toggle_capsule(
                     "t-off",
                     Glyph::TextWrap,
                     "off",
                     false,
                     35.,
+                    State::Normal,
                     theme,
                     |_, _, _| {},
                 ))
@@ -101,6 +118,7 @@ fn glass(theme: &Theme) -> impl IntoElement {
                     "on",
                     true,
                     35.,
+                    State::Normal,
                     theme,
                     |_, _, _| {},
                 ))
@@ -122,6 +140,7 @@ fn glass(theme: &Theme) -> impl IntoElement {
                     &["Diff", "Edit"],
                     0,
                     35.,
+                    State::Normal,
                     theme,
                     Rc::new(|_, _, _| {}),
                 ))
@@ -193,8 +212,8 @@ fn checks(theme: &Theme) -> impl IntoElement {
                     |_, _, _| {},
                 )),
         )
-        .child(viewed_toggle(theme, "toggle-off", false).ml_0())
-        .child(viewed_toggle(theme, "toggle-on", true).ml_0())
+        .child(viewed_toggle(theme, "toggle-off", false, State::Normal).ml_0())
+        .child(viewed_toggle(theme, "toggle-on", true, State::Normal).ml_0())
 }
 
 fn painted_icons(theme: &Theme) -> impl IntoElement {
@@ -227,15 +246,211 @@ fn card(theme: &Theme) -> impl IntoElement {
     )
 }
 
+const STATES: [(&str, State); 4] = [
+    ("Normal", State::Normal),
+    ("Hover", State::Hover),
+    ("Pressed", State::Pressed),
+    ("Disabled", State::Disabled),
+];
+
+fn button_cell(look: Look) -> impl Fn(&Theme, State, usize) -> AnyElement {
+    move |_, state, column| {
+        Button::new(("state-button", column + 10 * look as usize))
+            .label("Label")
+            .look(look)
+            .state(state)
+            .on_click(|_, _, _| {})
+            .into_any_element()
+    }
+}
+
+type Cell = Box<dyn Fn(&Theme, State, usize) -> AnyElement>;
+
+fn state_rows() -> Vec<(&'static str, Cell)> {
+    let mut rows: Vec<(&'static str, Cell)> = vec![
+        ("Button plain", Box::new(button_cell(Look::Plain))),
+        ("Button claude", Box::new(button_cell(Look::Claude))),
+        ("Button primary", Box::new(button_cell(Look::Primary))),
+        ("Button ghost", Box::new(button_cell(Look::Ghost))),
+        ("Button tint", Box::new(button_cell(Look::Tint))),
+    ];
+    rows.push((
+        "Pill (ghost capsule)",
+        Box::new(|_, state, column| {
+            Button::new(("state-pill", column))
+                .look(Look::Ghost)
+                .regular()
+                .rounded_full()
+                .h(px(24.))
+                .icon(Glyph::Sparkles, 16.)
+                .label("Ask Claude")
+                .state(state)
+                .on_click(|_, _, _| {})
+                .into_any_element()
+        }),
+    ));
+    rows.push((
+        "Icon button",
+        Box::new(|theme, state, column| {
+            icon_button(("state-icon", column), Glyph::Copy, theme.ui.muted)
+                .state(state)
+                .on_click(|_, _, _| {})
+                .into_any_element()
+        }),
+    ));
+    rows.push((
+        "Chip off",
+        Box::new(|_, state, _| {
+            chip("Off", false)
+                .state(state)
+                .on_click(|_, _, _| {})
+                .into_any_element()
+        }),
+    ));
+    rows.push((
+        "Chip on",
+        Box::new(|_, state, _| chip("On", true).state(state).on_click(|_, _, _| {}).into_any_element()),
+    ));
+    rows.push((
+        "Glass button",
+        Box::new(|theme, state, column| {
+            glass_button(
+                ["sg0", "sg1", "sg2", "sg3"][column],
+                Glyph::Pencil,
+                "t",
+                false,
+                state,
+                theme,
+                |_, _, _| {},
+            )
+            .into_any_element()
+        }),
+    ));
+    rows.push((
+        "Glass button on",
+        Box::new(|theme, state, column| {
+            glass_button(
+                ["so0", "so1", "so2", "so3"][column],
+                Glyph::Eye,
+                "t",
+                true,
+                state,
+                theme,
+                |_, _, _| {},
+            )
+            .into_any_element()
+        }),
+    ));
+    rows.push((
+        "Toggle capsule",
+        Box::new(|theme, state, column| {
+            toggle_capsule(
+                ["tc0", "tc1", "tc2", "tc3"][column],
+                Glyph::TextWrap,
+                "t",
+                false,
+                35.,
+                state,
+                theme,
+                |_, _, _| {},
+            )
+            .into_any_element()
+        }),
+    ));
+    rows.push((
+        "Toggle capsule on",
+        Box::new(|theme, state, column| {
+            toggle_capsule(
+                ["tn0", "tn1", "tn2", "tn3"][column],
+                Glyph::TextWrap,
+                "t",
+                true,
+                35.,
+                state,
+                theme,
+                |_, _, _| {},
+            )
+            .into_any_element()
+        }),
+    ));
+    rows.push((
+        "Segmented (right item)",
+        Box::new(|theme, state, _| {
+            segmented("ss", &["Diff", "Edit"], 0, 35., state, theme, Rc::new(|_, _, _| {})).into_any_element()
+        }),
+    ));
+    rows.push((
+        "Viewed toggle",
+        Box::new(|theme, state, column| {
+            viewed_toggle(theme, ("sv", column), false, state)
+                .ml_0()
+                .into_any_element()
+        }),
+    ));
+    rows.push((
+        "List row (inset)",
+        Box::new(|theme, state, column| {
+            let clear = gpui::transparent_black();
+            interactive(
+                h_flex()
+                    .id(("sr", column))
+                    .w(px(120.))
+                    .h(px(26.))
+                    .px(px(8.))
+                    .rounded(px(8.))
+                    .items_center()
+                    .text_size(px(12.))
+                    .child("archive.md"),
+                Fills {
+                    rest: clear,
+                    hover: theme.hover,
+                    press: theme.press,
+                },
+                state,
+            )
+            .into_any_element()
+        }),
+    ));
+    rows
+}
+
+fn states(theme: &Theme) -> impl IntoElement {
+    let header = h_flex()
+        .gap(px(14.))
+        .child(div().w(px(150.)))
+        .children(STATES.map(|(name, _)| {
+            div()
+                .w(px(120.))
+                .text_size(px(11.))
+                .text_color(theme.ui.muted)
+                .child(name.to_uppercase())
+        }));
+    let rows = state_rows().into_iter().map(|(label, cell)| {
+        h_flex()
+            .gap(px(14.))
+            .items_center()
+            .child(
+                div()
+                    .w(px(150.))
+                    .text_size(px(12.))
+                    .text_color(theme.ui.muted)
+                    .child(label),
+            )
+            .children(
+                STATES
+                    .iter()
+                    .enumerate()
+                    .map(|(column, (_, state))| div().w(px(120.)).child(cell(theme, *state, column))),
+            )
+    });
+    v_flex().gap(px(10.)).child(header).children(rows)
+}
+
 impl Render for Gallery {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::of(cx);
-        v_flex()
-            .size_full()
-            .bg(theme.background)
-            .text_color(theme.ui.text)
-            .text_size(px(13.))
-            .p(px(20.))
+        let left = v_flex()
+            .w(px(680.))
             .gap(px(18.))
             .child(section(&theme, "Button", buttons()))
             .child(section(&theme, "Icon button and chip", small_controls(&theme)))
@@ -248,7 +463,22 @@ impl Render for Gallery {
             .child(section(&theme, "Viewed", checks(&theme)))
             .child(section(&theme, "Painted icons", painted_icons(&theme)))
             .child(section(&theme, "Glyphs", glyphs(&theme)))
-            .child(section(&theme, "Card", card(&theme)))
+            .child(section(&theme, "Card", card(&theme)));
+        let right = div().p(px(14.)).rounded(px(10.)).bg(theme.chrome.panel).child(section(
+            &theme,
+            "Interaction states",
+            states(&theme),
+        ));
+        h_flex()
+            .size_full()
+            .bg(theme.background)
+            .text_color(theme.ui.text)
+            .text_size(px(13.))
+            .p(px(20.))
+            .gap(px(24.))
+            .items_start()
+            .child(left)
+            .child(right)
     }
 }
 
@@ -258,7 +488,7 @@ fn main() {
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::new(
                 point(px(80.), px(80.)),
-                size(px(720.), px(900.)),
+                size(px(1500.), px(900.)),
             ))),
             ..WindowOptions::default()
         };

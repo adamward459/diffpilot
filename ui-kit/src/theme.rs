@@ -72,6 +72,10 @@ pub struct Theme {
     pub success: Hsla,
     pub danger: Hsla,
     pub amber: Hsla,
+    pub hover: Hsla,
+    pub press: Hsla,
+    pub lift_hover: Hsla,
+    pub lift_press: Hsla,
     pub ui: Ui,
     pub chrome: Chrome,
     pub diff: Diff,
@@ -101,6 +105,23 @@ pub fn mix(foreground: Rgba, share: f32, background: Rgba) -> Rgba {
 
 fn over(foreground: Rgba, background: Rgba) -> Rgba {
     mix(Rgba { a: 1.0, ..foreground }, foreground.a, background)
+}
+
+/// `top` laid over `base`, both with alpha.
+pub fn composite(base: Hsla, top: Hsla) -> Hsla {
+    let (base, top): (Rgba, Rgba) = (base.into(), top.into());
+    let alpha = top.a + base.a * (1.0 - top.a);
+    if alpha <= 0.0 {
+        return gpui::transparent_black();
+    }
+    let channel = |t: f32, b: f32| (t * top.a + b * base.a * (1.0 - top.a)) / alpha;
+    Rgba {
+        r: channel(top.r, base.r),
+        g: channel(top.g, base.g),
+        b: channel(top.b, base.b),
+        a: alpha,
+    }
+    .into()
 }
 
 const LIGHT_GLASS_SHARE: f32 = 0.85;
@@ -157,6 +178,10 @@ impl Theme {
             success: pick(0x34c759, 0x30d158),
             danger: pick(0xff3b30, 0xff453a),
             amber: pick(0xff9500, 0xff9f0a),
+            hover: by_mode(gpui::black().opacity(0.055), gpui::white().opacity(0.10)),
+            press: by_mode(gpui::black().opacity(0.10), gpui::white().opacity(0.16)),
+            lift_hover: gpui::white().opacity(0.14),
+            lift_press: gpui::white().opacity(0.24),
             ui,
             chrome,
             diff: Self::diff_colors(dark),
@@ -249,6 +274,20 @@ impl Theme {
     pub fn pinned_glass(&self, backdrop: Hsla) -> Hsla {
         let share = if self.dark { DARK_GLASS_SHARE } else { LIGHT_GLASS_SHARE };
         mix(backdrop.into(), share, self.background.into()).into()
+    }
+
+    /// The control fill with the soft highlight a hovered glass control gets. It follows the fill's own shape.
+    pub fn hovered(&self, fill: Hsla) -> Hsla {
+        composite(fill, self.hover)
+    }
+
+    pub fn pressed(&self, fill: Hsla) -> Hsla {
+        composite(fill, self.press)
+    }
+
+    /// The same highlight for an accent-colored fill, which brightens instead of darkening.
+    pub fn lifted(&self, fill: Hsla, pressed: bool) -> Hsla {
+        composite(fill, if pressed { self.lift_press } else { self.lift_hover })
     }
 
     pub fn glass_shadow(&self) -> Vec<BoxShadow> {
@@ -359,6 +398,16 @@ mod tests {
         let rgba: Rgba = Theme::new(false).background.into();
         assert!(close(rgba.r, 1.0));
         assert_ne!(Theme::new(true).diff.add_bg, Theme::new(false).diff.add_bg);
+    }
+
+    #[test]
+    fn composite_lays_one_color_over_another() {
+        let white: Hsla = rgb(0xffffff).into();
+        let over = composite(white, gpui::black().opacity(0.5));
+        let rgba: Rgba = over.into();
+        assert!(close(rgba.r, 0.5) && close(rgba.a, 1.0));
+        let on_clear = composite(gpui::transparent_black(), gpui::black().opacity(0.25));
+        assert!(close(on_clear.a, 0.25));
     }
 
     #[test]

@@ -12,15 +12,14 @@ use diffpilot_core::tree;
 use diffpilot_core::viewed::{ViewedFiles, ViewedKey, ViewedStore};
 use diffpilot_core::watcher::{self, WatchGuard};
 use diffpilot_review_ui::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
-use diffpilot_ui_kit::components::{OnSelect, capsule, segmented, toggle_capsule};
+use diffpilot_ui_kit::components::{Button, Look, OnSelect, State, capsule, segmented, toggle_capsule};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{
     Context, Entity, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render,
     SharedString, Styled, Subscription, Task, Window, WindowControlArea, div, px,
 };
-use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::{ActiveTheme, Icon, InteractiveElementExt as _, Selectable, Sizable, StyledExt, h_flex, v_flex};
+use gpui_component::{ActiveTheme, InteractiveElementExt as _, StyledExt, h_flex, v_flex};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -605,11 +604,11 @@ fn drag_region(
 
 fn sidebar_toggle(cx: &mut Context<RepoView>) -> Button {
     Button::new("toggle-sidebar")
-        .ghost()
-        .small()
-        .icon(Icon::new(Glyph::PanelLeft).size_4())
+        .look(Look::Ghost)
+        .icon(Glyph::PanelLeft, 16.)
+        .size(px(28.))
+        .rounded_full()
         .tooltip("Toggle Sidebar")
-        .selected(false)
         .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx)))
 }
 
@@ -625,7 +624,16 @@ impl RepoView {
         });
         let titles = PaneMode::ALL.map(PaneMode::title);
         let selected = PaneMode::ALL.iter().position(|mode| *mode == self.mode).unwrap_or(0);
-        segmented("pane-mode", &titles, selected, GLASS_HEIGHT, &Theme::of(cx), on_select).into_any_element()
+        segmented(
+            "pane-mode",
+            &titles,
+            selected,
+            GLASS_HEIGHT,
+            State::Normal,
+            &Theme::of(cx),
+            on_select,
+        )
+        .into_any_element()
     }
 
     fn wrap_button(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
@@ -635,6 +643,7 @@ impl RepoView {
             "Wrap lines",
             self.wrap,
             GLASS_HEIGHT,
+            State::Normal,
             &Theme::of(cx),
             cx.listener(|this, _, _, cx| {
                 this.wrap = !this.wrap;

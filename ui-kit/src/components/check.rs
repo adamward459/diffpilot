@@ -1,3 +1,4 @@
+use super::interaction::{Fills, State, interactive};
 use crate::icons::Glyph;
 use crate::painted;
 use crate::theme::Theme;
@@ -35,7 +36,7 @@ pub fn viewed_check(
 }
 
 /// A filled checkbox with a "Viewed" label. For file headers.
-pub fn viewed_toggle(theme: &Theme, id: impl Into<ElementId>, viewed: bool) -> Stateful<Div> {
+pub fn viewed_toggle(theme: &Theme, id: impl Into<ElementId>, viewed: bool, state: State) -> Stateful<Div> {
     let mut checkbox = div()
         .flex()
         .items_center()
@@ -47,16 +48,28 @@ pub fn viewed_toggle(theme: &Theme, id: impl Into<ElementId>, viewed: bool) -> S
     if viewed {
         checkbox = checkbox.bg(theme.accent).child(painted::check(10.0, theme.on_accent));
     }
-    div()
-        .id(id)
-        .flex()
-        .flex_none()
-        .items_center()
-        .gap(px(6.0))
-        .ml_auto()
-        .cursor_pointer()
-        .text_size(px(11.0))
-        .text_color(theme.diff.muted)
-        .child(checkbox)
-        .child("Viewed")
+    let clear = gpui::transparent_black();
+    interactive(
+        div()
+            .id(id)
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(6.0))
+            .ml_auto()
+            .h(px(22.0))
+            .px(px(6.0))
+            .rounded_full()
+            .cursor_pointer()
+            .text_size(px(11.0))
+            .text_color(theme.diff.muted),
+        Fills {
+            rest: clear,
+            hover: theme.hover,
+            press: theme.press,
+        },
+        state,
+    )
+    .child(checkbox)
+    .child("Viewed")
 }

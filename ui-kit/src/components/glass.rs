@@ -1,3 +1,4 @@
+use super::interaction::{Fills, State, interactive};
 use crate::icons::Glyph;
 use crate::theme::Theme;
 use gpui::prelude::*;
@@ -7,6 +8,14 @@ use gpui_component::{Icon, h_flex};
 use std::rc::Rc;
 
 pub type OnSelect = Rc<dyn Fn(usize, &mut Window, &mut App)>;
+
+fn glass_fills(theme: &Theme, rest: gpui::Hsla) -> Fills {
+    Fills {
+        rest,
+        hover: theme.hovered(rest),
+        press: theme.pressed(rest),
+    }
+}
 
 pub fn glass_surface(row: Div, theme: &Theme) -> Div {
     row.items_center()
@@ -44,16 +53,30 @@ pub fn glass_button(
     glyph: Glyph,
     tooltip: &'static str,
     on: bool,
+    state: State,
     theme: &Theme,
     click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
-    glass_surface(
-        h_flex().size(px(28.)).flex_shrink_0().justify_center().rounded_full(),
-        theme,
+    let fills = if on {
+        Fills {
+            rest: theme.accent,
+            hover: theme.lifted(theme.accent, false),
+            press: theme.lifted(theme.accent, true),
+        }
+    } else {
+        glass_fills(theme, theme.chrome.glass)
+    };
+    interactive(
+        glass_surface(
+            h_flex().size(px(28.)).flex_shrink_0().justify_center().rounded_full(),
+            theme,
+        )
+        .id(id)
+        .cursor_pointer()
+        .when(on, |this| this.border_color(theme.accent)),
+        fills,
+        state,
     )
-    .id(id)
-    .cursor_pointer()
-    .when(on, |this| this.bg(theme.accent).border_color(theme.accent))
     .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
     .on_click(click)
     .child(
@@ -68,44 +91,59 @@ pub fn segmented(
     titles: &[&'static str],
     selected: usize,
     height: f32,
+    state: State,
     theme: &Theme,
     on_select: OnSelect,
 ) -> Stateful<Div> {
     let segments = titles.iter().enumerate().map(|(index, title)| {
         let on_select = on_select.clone();
-        div()
-            .id(*title)
-            .h(px(height - 8.))
-            .px(px(11.))
-            .flex()
-            .items_center()
-            .rounded_full()
-            .text_size(px(13.))
-            .text_color(theme.chrome.label)
-            .cursor_pointer()
-            .when(index == selected, |this| this.bg(theme.chrome.segment))
-            .on_click(move |_, window, cx| on_select(index, window, cx))
-            .child(SharedString::from(*title))
+        let fills = if index == selected {
+            glass_fills(theme, theme.chrome.segment)
+        } else {
+            glass_fills(theme, gpui::transparent_black())
+        };
+        interactive(
+            div()
+                .id(*title)
+                .h(px(height - 8.))
+                .px(px(11.))
+                .flex()
+                .items_center()
+                .rounded_full()
+                .text_size(px(13.))
+                .text_color(theme.chrome.label)
+                .cursor_pointer(),
+            fills,
+            if index == selected { State::Normal } else { state },
+        )
+        .on_click(move |_, window, cx| on_select(index, window, cx))
+        .child(SharedString::from(*title))
     });
     capsule(theme, height).id(id).px(px(4.)).children(segments)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn toggle_capsule(
     id: &'static str,
     glyph: Glyph,
     tooltip: &'static str,
     on: bool,
     height: f32,
+    state: State,
     theme: &Theme,
     click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
-    capsule(theme, height)
-        .id(id)
-        .w(px(height))
-        .justify_center()
-        .cursor_pointer()
-        .when(on, |this| this.bg(theme.chrome.segment))
-        .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
-        .on_click(click)
-        .child(Icon::new(glyph).size_4().text_color(theme.chrome.label))
+    let rest = if on { theme.chrome.segment } else { theme.chrome.glass };
+    interactive(
+        capsule(theme, height)
+            .id(id)
+            .w(px(height))
+            .justify_center()
+            .cursor_pointer(),
+        glass_fills(theme, rest),
+        state,
+    )
+    .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
+    .on_click(click)
+    .child(Icon::new(glyph).size_4().text_color(theme.chrome.label))
 }

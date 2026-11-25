@@ -5,12 +5,11 @@ use crate::comparison_menu::{
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::refs::Refs;
 use diffpilot_ui_kit::Theme;
-use diffpilot_ui_kit::components::capsule;
+use diffpilot_ui_kit::components::{Button, Look, capsule};
 use gpui::prelude::*;
 use gpui::{App, IntoElement, ParentElement, Styled, Window, div, px};
-use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
-use gpui_component::{ActiveTheme, Icon, h_flex};
+use gpui_component::{ActiveTheme, h_flex};
 use std::rc::Rc;
 
 pub type Select = Rc<dyn Fn(Comparison, &mut Window, &mut App)>;
@@ -30,14 +29,9 @@ pub fn comparison_control(
         .px(px(4.))
         .gap(px(4.))
         .child(
-            Button::new("comparison-branch")
-                .ghost()
-                .compact()
-                .px(px(4.))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .icon(Icon::new(branch_glyph(comparison)).size(px(16.)))
+            segment("comparison-branch", tokens)
+                .icon(branch_glyph(comparison), 16.)
                 .label(branch_title(refs, comparison))
-                .dropdown_caret(true)
                 .tooltip(branch_tooltip(comparison))
                 .dropdown_menu(move |menu, window, cx| fill(menu, &branch_sections, &branch_select, window, cx)),
         )
@@ -50,17 +44,25 @@ pub fn comparison_control(
             )
         })
         .child(
-            Button::new("comparison-base")
-                .ghost()
-                .compact()
-                .px(px(4.))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .icon(Icon::new(base_glyph(comparison)).size(px(16.)))
+            segment("comparison-base", tokens)
+                .icon(base_glyph(comparison), 16.)
                 .label(base_title(comparison))
-                .dropdown_caret(true)
                 .tooltip("Compared to")
                 .dropdown_menu(move |menu, window, cx| fill(menu, &base_sections, &base_select, window, cx)),
         )
+}
+
+fn segment(id: &'static str, tokens: &Theme) -> Button {
+    Button::new(id)
+        .look(Look::Ghost)
+        .regular()
+        .h(px(27.))
+        .px(px(8.))
+        .gap(px(5.))
+        .rounded_full()
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(tokens.chrome.label)
+        .caret(true)
 }
 
 fn fill(
