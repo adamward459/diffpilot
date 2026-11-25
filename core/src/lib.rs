@@ -9,11 +9,13 @@ pub mod prompt;
 pub mod refs;
 pub mod review;
 pub mod settings;
+pub mod stage;
 pub mod threads;
 pub mod tree;
 pub mod viewed;
 pub mod watcher;
 
+mod exec;
 mod paths;
 
 #[cfg(test)]
