@@ -14,6 +14,7 @@ struct DiffPaneDriver {
         app = XCUIApplication()
         app.launchEnvironment["DIFFPILOT_REPO"] = Fixture.large
         app.launchEnvironment["DIFFPILOT_VIEWED_SEED"] = Fixture.viewedSeed
+        app.launchEnvironment["DIFFPILOT_REVIEWER"] = "scripted"
         if let appearance { app.launchEnvironment["DIFFPILOT_APPEARANCE"] = appearance }
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
     }
@@ -27,6 +28,7 @@ struct DiffPaneDriver {
     var topFile: String { field("top") }
     var threadCount: Int { Int(field("threads")) ?? 0 }
     var reply: String { field("reply") }
+    var review: String { field("review") }
     var viewedCount: Int { Int(field("viewed")) ?? 0 }
 
     struct ScrollStats {
@@ -74,6 +76,17 @@ struct DiffPaneDriver {
     }
 
     var commentButton: XCUIElement { app.descendants(matching: .any)["comment-on-file"].firstMatch }
+
+    func element(_ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
+
+    func startReview() {
+        let ask = element("ask-claude")
+        XCTAssertTrue(ask.waitForExistence(timeout: 10))
+        ask.click()
+        let start = element("start-review")
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.click()
+    }
 
     func clickTopFileViewedCheckbox() {
         let pane = paneFrame

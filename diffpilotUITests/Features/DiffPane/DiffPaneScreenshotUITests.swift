@@ -35,6 +35,12 @@ final class DiffPaneScreenshotUITests: XCTestCase {
         XCTAssertTrue(pane.waitUntil(timeout: 20) { pane.reply.contains("did not change any code yet.") })
         XCTAssertTrue(pane.waitUntil { pane.recognizedText().contains("change any code") })
         try attach(pane.window, named: "diffpane-thread-\(appearance)")
+
+        pane.startReview()
+        XCTAssertTrue(pane.waitUntil(timeout: 20) { pane.review.hasPrefix("done") })
+        pane.app.typeKey(.home, modifierFlags: [])
+        XCTAssertTrue(pane.waitUntil { pane.recognizedText().contains("Review summary") })
+        try attach(pane.window, named: "diffpane-review-\(appearance)")
     }
 
     private func attach(_ window: XCUIElement, named name: String) throws {

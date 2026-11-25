@@ -66,6 +66,27 @@ final class DiffPaneUITests: XCTestCase {
         XCTAssertTrue(pane.waitUntil { pane.viewedCount == before }, pane.stateValue)
     }
 
+    func testScriptedReviewShowsFindingsAsThreads() {
+        XCTAssertTrue(pane.waitUntil { pane.topFile == "docs/archive.md" }, pane.stateValue)
+        XCTAssertEqual(pane.review, "idle")
+        pane.startReview()
+        XCTAssertTrue(pane.waitUntil { pane.review == "running" }, pane.stateValue)
+        XCTAssertTrue(pane.element("stop-review").exists)
+        XCTAssertTrue(pane.waitUntil(timeout: 20) { pane.review == "done:1/1/1/1" }, pane.stateValue)
+        XCTAssertEqual(pane.threadCount, 5, pane.stateValue)
+        XCTAssertTrue(pane.element("review-status").exists)
+        XCTAssertTrue(pane.waitUntil { pane.recognizedText().contains("Review summary") })
+    }
+
+    func testStoppingAReviewReturnsToIdle() {
+        XCTAssertTrue(pane.waitUntil { pane.topFile == "docs/archive.md" }, pane.stateValue)
+        pane.startReview()
+        XCTAssertTrue(pane.waitUntil { pane.review == "running" }, pane.stateValue)
+        pane.element("stop-review").click()
+        XCTAssertTrue(pane.waitUntil { pane.review == "idle" }, pane.stateValue)
+        XCTAssertEqual(pane.threadCount, 0)
+    }
+
     func testToolbarControlsAreNativeAndSitAboveThePane() {
         XCTAssertTrue(pane.waitUntil { pane.topFile == "docs/archive.md" }, pane.stateValue)
         XCTAssertTrue(pane.commentButton.waitForExistence(timeout: 5))
