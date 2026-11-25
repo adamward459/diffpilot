@@ -6,6 +6,7 @@
 
 pub mod bridge;
 mod guide;
+pub mod launch;
 pub mod protocol;
 pub mod tools;
 

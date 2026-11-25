@@ -55,25 +55,23 @@ impl Link {
     }
 }
 
-/// An MCP server over stdio. `claude` starts it from the run's `--mcp-config`.
+/// An MCP server over stdio. `claude` starts it from a run's `--mcp-config`, or from a terminal agent's `claude mcp add`.
 fn main() -> ExitCode {
-    let mut socket = std::env::var("DIFFPILOT_MCP_SOCKET").ok();
-    let mut token = std::env::var("DIFFPILOT_MCP_TOKEN").ok();
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--socket" => socket = args.next(),
-            "--token" => token = args.next(),
-            _ => {}
+    let launch = diffpilot_core::mcp::launch::parse(
+        std::env::args().skip(1),
+        std::env::var("DIFFPILOT_MCP_SOCKET").ok(),
+        std::env::var("DIFFPILOT_MCP_TOKEN").ok(),
+    );
+    let launch = match launch {
+        Ok(launch) => launch,
+        Err(message) => {
+            eprintln!("{message}");
+            return ExitCode::from(2);
         }
-    }
-    let (Some(socket), Some(token)) = (socket, token) else {
-        eprintln!("diffpilot-mcp needs --socket and --token.");
-        return ExitCode::from(2);
     };
     let link = Link {
-        socket,
-        token,
+        socket: launch.socket.to_string_lossy().into_owned(),
+        token: launch.token,
         stream: RefCell::new(None),
     };
     let forward = |tool: &str, args: Value| link.call(tool, args);
