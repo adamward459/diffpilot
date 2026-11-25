@@ -33,11 +33,10 @@ nonisolated struct FileDiff: Equatable, Sendable, Encodable {
 
 nonisolated extension FileDiff {
     var fingerprint: String {
-        var hash = SHA256()
+        var bytes: [UInt8] = []
         func add(_ text: String) {
-            var text = text
-            text.withUTF8 { hash.update(bufferPointer: UnsafeRawBufferPointer($0)) }
-            withUnsafeBytes(of: UInt8(0)) { hash.update(bufferPointer: $0) }
+            bytes.append(contentsOf: text.utf8)
+            bytes.append(0)
         }
         add(status.rawValue)
         add(oldPath ?? "")
@@ -49,7 +48,7 @@ nonisolated extension FileDiff {
                 add(line.text)
             }
         }
-        return hash.finalize().map { String(format: "%02x", $0) }.joined()
+        return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
     }
 }
 

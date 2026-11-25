@@ -27,6 +27,15 @@ final class DiffPanePerformanceTests: XCTestCase {
         XCTAssertGreaterThan(files.reduce(0) { $0 + $1.additions + $1.deletions }, 40_000)
     }
 
+    func testFingerprintLargeDiff() {
+        let parsed = UnifiedDiff.parse(diffText)
+        var prints: [String] = []
+        measure(metrics: [XCTClockMetric()], options: options) {
+            prints = parsed.map(\.fingerprint)
+        }
+        XCTAssertEqual(Set(prints).count, 2000)
+    }
+
     func testOrderAndBatchLargeDiff() {
         let parsed = UnifiedDiff.parse(diffText)
         var batches = 0

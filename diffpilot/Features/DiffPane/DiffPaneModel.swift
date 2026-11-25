@@ -63,18 +63,18 @@ final class DiffPaneModel {
     }
 
     func load() async {
-        let (next, prints) = await readFiles()
+        let next = await readFiles()
         files = next
-        clearChangedViewed(prints)
         batches = DiffBatches(next, lineBudget: Self.lineBudget)
         sendFirstBatchIfReady()
+        await clearChangedViewed(next)
     }
 
     func reload() async {
-        let (next, prints) = await readFiles()
+        let next = await readFiles()
         guard next != files else { return }
         files = next
-        clearChangedViewed(prints)
+        await clearChangedViewed(next)
         batches = DiffBatches(next, lineBudget: Self.lineBudget)
         guard hasSentFirstBatch else {
             sendFirstBatchIfReady()
@@ -88,22 +88,25 @@ final class DiffPaneModel {
         }
     }
 
-    private func readFiles() async -> ([FileDiff], [String: String]) {
+    private func readFiles() async -> [FileDiff] {
         let repo = repo
         let comparison = comparison
-        let viewed = viewed.paths
         return await Task.detached(priority: .userInitiated) {
             guard let repo, let text = try? Git.run(repo, UnifiedDiff.args + comparison.revisions) else {
-                return ([], [:])
+                return []
             }
-            let files = UnifiedDiff.parse(text).inTreeOrder()
-            let prints = files.filter { viewed.contains($0.path) }.map { ($0.path, $0.fingerprint) }
-            return (files, Dictionary(prints, uniquingKeysWith: { _, last in last }))
+            return UnifiedDiff.parse(text).inTreeOrder()
         }.value
     }
 
-    private func clearChangedViewed(_ fingerprints: [String: String]) {
-        for path in viewed.clearChanged(fingerprints) {
+    private func clearChangedViewed(_ files: [FileDiff]) async {
+        let viewed = viewed.paths
+        let fingerprints = await Task.detached(priority: .utility) {
+            Dictionary(
+                files.filter { viewed.contains($0.path) }.map { ($0.path, $0.fingerprint) },
+                uniquingKeysWith: { _, last in last })
+        }.value
+        for path in self.viewed.clearChanged(fingerprints) {
             collapsed.remove(path)
             if isPageReady { sendFileState(path) }
         }
