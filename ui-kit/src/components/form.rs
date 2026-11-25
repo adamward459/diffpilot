@@ -103,7 +103,7 @@ impl Row {
         }
     }
 
-    pub fn sub(mut self, sub: impl IntoElement) -> Self {
+    pub fn subtitle(mut self, sub: impl IntoElement) -> Self {
         self.sub = Some(sub.into_any_element());
         self
     }

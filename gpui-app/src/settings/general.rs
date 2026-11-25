@@ -16,7 +16,7 @@ pub fn general(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWind
             t,
             vec![
                 Row::new(t, "Open the last repository on launch")
-                    .sub(caption(
+                    .subtitle(caption(
                         t,
                         "Without it, diffpilot starts with no folder until you press ⌘O.",
                     ))
@@ -63,7 +63,7 @@ pub fn appearance(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsW
             t,
             vec![
                 Row::new(t, "Appearance")
-                    .sub(caption(t, "System follows macOS. Every open window changes at once."))
+                    .subtitle(caption(t, "System follows macOS. Every open window changes at once."))
                     .control(control)
                     .into_any_element(),
             ],
@@ -82,7 +82,7 @@ pub fn diff(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>
             t,
             vec![
                 Row::new(t, "Wrap lines by default")
-                    .sub(caption(t, "Applies to repositories you open from now on."))
+                    .subtitle(caption(t, "Applies to repositories you open from now on."))
                     .control(
                         tag(switch(t, "wrap-lines", wrap, true), "wrap-lines").on_click(cx.listener(
                             move |this, _, _, cx| {
@@ -93,7 +93,7 @@ pub fn diff(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>
                     )
                     .into_any_element(),
                 Row::new(t, "Layout")
-                    .sub(caption(t, "Applies to repositories you open from now on."))
+                    .subtitle(caption(t, "Applies to repositories you open from now on."))
                     .control(segmented_control(
                         t,
                         "layout",

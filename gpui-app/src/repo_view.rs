@@ -33,13 +33,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-const PANEL_INSET: f32 = 8.0;
-const PANEL_RADIUS: f32 = 20.0;
-const MIN_SIDEBAR: f32 = 240.0 + PANEL_INSET;
-const IDEAL_SIDEBAR: f32 = 272.0 + PANEL_INSET;
-const MAX_SIDEBAR: f32 = 480.0 + PANEL_INSET;
+const MIN_SIDEBAR: f32 = 240.0;
+const IDEAL_SIDEBAR: f32 = 272.0;
+const MAX_SIDEBAR: f32 = 480.0;
 const TOOLBAR_HEIGHT: f32 = 52.0;
-const GLASS_HEIGHT: f32 = 35.0;
+const GLASS_HEIGHT: f32 = 28.0;
 const TRAFFIC_LIGHTS: f32 = 96.0;
 
 const DIFF_MODES: [(DiffMode, &str); 2] = [(DiffMode::Unified, "Unified"), (DiffMode::Split, "Split")];
@@ -129,6 +127,18 @@ impl Claude {
             })
         };
         Self { reviewer, replier }
+    }
+}
+
+fn home_relative(path: &std::path::Path) -> String {
+    relative_to(path, std::env::var_os("HOME").as_deref().map(std::path::Path::new))
+}
+
+fn relative_to(path: &std::path::Path, home: Option<&std::path::Path>) -> String {
+    match home.and_then(|home| path.strip_prefix(home).ok()) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".into(),
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
     }
 }
 
@@ -684,8 +694,6 @@ impl RepoView {
     }
 
     fn toolbar(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
-        let theme = cx.theme();
-        let border = theme.border;
         let tokens = Theme::of(cx);
         let view = cx.entity().downgrade();
         let select: Select = Rc::new(move |next, window, cx| {
@@ -714,22 +722,37 @@ impl RepoView {
                 .h(px(TOOLBAR_HEIGHT))
                 .flex_shrink_0()
                 .gap_2()
+                .bg(tokens.chrome.glass)
                 .border_b_1()
-                .border_color(border),
+                .border_color(tokens.ui.line),
         )
         .child(
             h_flex()
                 .flex_1()
                 .min_w_0()
-                .pl(px(if self.sidebar_open { 20. } else { TRAFFIC_LIGHTS }))
+                .pl(px(if self.sidebar_open { 16. } else { TRAFFIC_LIGHTS }))
                 .gap_2()
                 .children(leading)
                 .child(
-                    div()
-                        .text_size(px(15.))
-                        .font_semibold()
-                        .whitespace_nowrap()
-                        .child(self.folder_name.clone()),
+                    v_flex()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .text_size(px(13.))
+                                .font_semibold()
+                                .text_color(tokens.ui.text)
+                                .whitespace_nowrap()
+                                .child(self.folder_name.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(11.))
+                                .text_color(tokens.ui.muted)
+                                .whitespace_nowrap()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .child(home_relative(&self.repo)),
+                        ),
                 ),
         )
         .child(h_flex().flex_shrink_0().gap(px(8.)).children(pill).children(control))
@@ -787,50 +810,27 @@ impl Render for RepoView {
             )
             .when(self.sidebar_open, |this| {
                 this.child(
-                    div()
+                    v_flex()
                         .id("sidebar-column")
                         .relative()
                         .w(width)
                         .flex_shrink_0()
                         .h_full()
-                        .bg(background)
+                        .bg(tokens.chrome.panel)
+                        .border_r_1()
+                        .border_color(tokens.chrome.panel_border)
                         .child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .bottom_0()
-                                .left_0()
-                                .w(px(PANEL_INSET))
-                                .bg(tokens.chrome.gutter),
+                            drag(
+                                h_flex()
+                                    .id("sidebar-top")
+                                    .h(px(TOOLBAR_HEIGHT))
+                                    .flex_shrink_0()
+                                    .pl(px(TRAFFIC_LIGHTS))
+                                    .items_center(),
+                            )
+                            .child(toggle),
                         )
-                        .child(
-                            v_flex()
-                                .absolute()
-                                .top(px(PANEL_INSET))
-                                .bottom(px(PANEL_INSET))
-                                .left(px(PANEL_INSET))
-                                .right_0()
-                                .rounded(px(PANEL_RADIUS))
-                                .overflow_hidden()
-                                .bg(tokens.chrome.panel)
-                                .border_1()
-                                .border_color(tokens.chrome.panel_border)
-                                .shadow(tokens.glass_shadow())
-                                .child(
-                                    drag(
-                                        h_flex()
-                                            .id("sidebar-top")
-                                            .h(px(37.))
-                                            .flex_shrink_0()
-                                            .pr(px(14.))
-                                            .justify_end()
-                                            .items_start()
-                                            .pt(px(PANEL_INSET - 1.)),
-                                    )
-                                    .child(toggle),
-                                )
-                                .child(div().flex_1().min_h_0().child(sidebar_content)),
-                        )
+                        .child(div().flex_1().min_h_0().child(sidebar_content))
                         .child(
                             div()
                                 .id("sidebar-handle")
@@ -865,6 +865,16 @@ impl RepoView {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_toolbar_path_starts_at_the_home_folder() {
+        use std::path::Path;
+        let home = Some(Path::new("/Users/me"));
+        assert_eq!(relative_to(Path::new("/Users/me/code/app"), home), "~/code/app");
+        assert_eq!(relative_to(Path::new("/Users/me"), home), "~");
+        assert_eq!(relative_to(Path::new("/srv/app"), home), "/srv/app");
+        assert_eq!(relative_to(Path::new("/Users/me/app"), None), "/Users/me/app");
+    }
+
     use super::*;
     use diffpilot_core::cancel::CancelToken;
     use diffpilot_core::claude::{ReviewError, Reviewer};

@@ -136,7 +136,7 @@ fn connection(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
     let mut rows = vec![
         Row::new(t, "Claude Code on this Mac")
             .leading(Glyph::Laptop)
-            .sub(sub)
+            .subtitle(sub)
             .control(control)
             .into_any_element(),
     ];
@@ -220,11 +220,11 @@ fn models(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) 
         t,
         vec![
             Row::new(t, "Reviews and guides")
-                .sub(caption(t, "Review, Guide"))
+                .subtitle(caption(t, "Review, Guide"))
                 .control(model_picker(window, t, cx, Menu::Reviews, "model-reviews", reviews))
                 .into_any_element(),
             Row::new(t, "Fixes and replies")
-                .sub(caption(
+                .subtitle(caption(
                     t,
                     "Fix Comments, Make Changes, Ask Claude, @claude, Finish Review",
                 ))
@@ -265,7 +265,7 @@ fn editing(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>)
         t,
         vec![
             Row::new(t, "When Claude edits files")
-                .sub(caption(
+                .subtitle(caption(
                     t,
                     "Applies to Fix Comments, Make Changes and @claude replies. Reviews never edit.",
                 ))
@@ -315,7 +315,7 @@ fn terminal_agents(window: &SettingsWindow, t: &Theme, cx: &mut Context<Settings
         );
     let mut rows = vec![
         Row::new(t, "Allow terminal agents")
-            .sub(caption(
+            .subtitle(caption(
                 t,
                 "Claude Code in your terminal can read and answer the comments you leave here.",
             ))
@@ -326,7 +326,7 @@ fn terminal_agents(window: &SettingsWindow, t: &Theme, cx: &mut Context<Settings
             .into_any_element(),
         Row::new(t, "Claude Code")
             .leading(Glyph::SquareTerminal)
-            .sub(
+            .subtitle(
                 div()
                     .flex()
                     .items_center()

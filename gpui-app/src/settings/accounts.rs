@@ -88,11 +88,11 @@ pub fn render(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
     let mut rows = vec![
         Row::new(t, "github.com")
             .leading(Glyph::Github)
-            .sub(caption(t, sub))
+            .subtitle(caption(t, sub))
             .control(control)
             .into_any_element(),
         Row::new(t, "Personal access token")
-            .sub(caption(
+            .subtitle(caption(
                 t,
                 "Paste a token. diffpilot checks it with GitHub, then saves it in your keychain.",
             ))
