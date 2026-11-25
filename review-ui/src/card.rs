@@ -1,7 +1,8 @@
 use crate::assets;
 use crate::markup::{Markup, SpanKind, pending_mention};
-use crate::palette::{Palette, accent_variant, severity_badge};
+use crate::palette::Palette;
 use crate::session::{ReviewEvent, ReviewSession, ThreadChange};
+use crate::ui::{Btn, Look, avatar, card_shell, icon_button, severity_badge};
 use diffpilot_core::threads::{CLAUDE_NAME, ReviewThread, ThreadAnchor, ThreadComment, ThreadId, mentions_claude};
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -9,9 +10,8 @@ use gpui::{
     InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Render, SharedString, Styled, StyledText,
     Subscription, TextRun, Window, div, font, px,
 };
-use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::{ActiveTheme, Disableable, Icon, Sizable, h_flex, v_flex};
+use gpui_component::{ActiveTheme, Icon, h_flex, v_flex};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -35,8 +35,8 @@ pub mod metrics {
     pub const COMMENT_BOTTOM: f32 = 8.0;
     pub const COMPOSER_TOP: f32 = 8.0;
     pub const COMPOSER_BOTTOM: f32 = 10.0;
-    pub const INPUT_ROW: f32 = 20.0;
-    pub const INPUT_PAD: f32 = 18.0;
+    pub const INPUT_ROW: f32 = 18.0;
+    pub const INPUT_PAD: f32 = 10.0;
     pub const ACTIONS: f32 = 24.0;
     pub const ACTIONS_GAP: f32 = 8.0;
     pub const SUGGEST: f32 = 26.0;
@@ -431,49 +431,15 @@ impl ThreadCard {
         }
     }
 
-    fn button(&self, label: &'static str, key: &'static str) -> Button {
-        Button::new((key, self.id.0 as usize)).label(label).small()
+    fn button(&self, label: &'static str, key: &'static str) -> Btn {
+        Btn::new((key, self.id.0 as usize)).label(label)
     }
 
-    fn icon_button(&self, key: &'static str, path: &'static str) -> Button {
-        Button::new((key, self.id.0 as usize))
-            .icon(Icon::empty().path(path).size_3())
-            .ghost()
-            .xsmall()
-    }
-
-    fn ask_button(&self, palette: Palette, cx: &App, busy: bool) -> Button {
-        let style = ButtonCustomVariant::new(cx)
-            .color(palette.claude_bg)
-            .foreground(palette.claude)
-            .border(palette.claude_border)
-            .hover(palette.claude.opacity(0.18))
-            .active(palette.claude.opacity(0.25));
+    fn ask_button(&self, busy: bool) -> Btn {
         self.button("Ask Claude", "ask")
-            .icon(Icon::empty().path(assets::SPARKLES).size_3())
-            .custom(style)
+            .look(Look::Claude)
+            .icon(assets::SPARKLES, 12.)
             .disabled(busy)
-    }
-
-    fn avatar(&self, author: &str, palette: Palette) -> AnyElement {
-        let base = div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .justify_center()
-            .size(px(m::AVATAR))
-            .rounded_full()
-            .text_color(gpui::white())
-            .text_size(px(10.))
-            .font_weight(FontWeight::BOLD);
-        if author == CLAUDE_NAME {
-            base.bg(palette.claude)
-                .child(Icon::empty().path(assets::SPARKLES).size(px(13.)))
-                .into_any_element()
-        } else {
-            let initials: String = author.split(' ').filter_map(|word| word.chars().next()).collect();
-            base.bg(palette.user_avatar).child(initials).into_any_element()
-        }
     }
 
     fn comment(&self, comment: &ThreadComment, first: bool, fonts: &Fonts) -> AnyElement {
@@ -485,7 +451,12 @@ impl ThreadCard {
             .pt(px(m::COMMENT_TOP))
             .pb(px(m::COMMENT_BOTTOM))
             .when(!first, |row| row.border_t_1().border_color(palette.line))
-            .child(self.avatar(&comment.author, palette))
+            .child(avatar(
+                &comment.author,
+                comment.author == CLAUDE_NAME,
+                palette,
+                m::AVATAR,
+            ))
             .child(
                 v_flex()
                     .flex_1()
@@ -519,7 +490,14 @@ impl ThreadCard {
         let field = match &self.composer {
             Some(composer) => div()
                 .min_h(px(rows as f32 * m::INPUT_ROW + m::INPUT_PAD))
-                .child(Input::new(&composer.input).appearance(true))
+                .child(
+                    Input::new(&composer.input)
+                        .appearance(true)
+                        .text_size(px(12.5))
+                        .line_height(px(m::INPUT_ROW))
+                        .px(px(9.))
+                        .py(px(4.)),
+                )
                 .into_any_element(),
             None => div()
                 .id(("composer", self.id.0 as usize))
@@ -598,8 +576,9 @@ impl ThreadCard {
                             )
                         })
                         .child(
-                            self.button(if draft { "Comment  ⌘↩" } else { "Reply  ⌘↩" }, "post")
-                                .custom(accent_variant(cx))
+                            self.button(if draft { "Comment" } else { "Reply" }, "post")
+                                .look(Look::Primary)
+                                .hint("⌘↩")
                                 .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
                         ),
                 )
@@ -664,13 +643,14 @@ impl ThreadCard {
                         )
                     })
                     .child(
-                        self.icon_button(
-                            "fold",
+                        icon_button(
+                            ("fold", self.id.0 as usize),
                             if collapsed {
                                 assets::CHEVRON_DOWN
                             } else {
                                 assets::CHEVRON_UP
                             },
+                            palette.muted,
                         )
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_collapsed(cx))),
                     ),
@@ -706,7 +686,7 @@ impl ThreadCard {
                     col.child(self.composer_view(thread, palette, window, cx))
                 })
         });
-        card_shell(palette, border)
+        card_shell(palette, border, cx.theme().is_dark())
             .child(header)
             .children(body)
             .into_any_element()
@@ -741,7 +721,7 @@ impl ThreadCard {
                     .gap_1()
                     .child(
                         self.button("Copy as Markdown", "copy")
-                            .icon(Icon::empty().path(assets::COPY).size_3())
+                            .icon(assets::COPY, 11.)
                             .on_click(move |_, _, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()))
                             }),
@@ -755,7 +735,7 @@ impl ThreadCard {
                             .on_click(cx.listener(|this, _, _, cx| this.resolve(cx))),
                     ),
             );
-        card_shell(palette, palette.claude_border)
+        card_shell(palette, palette.claude_border, cx.theme().is_dark())
             .child(header)
             .child(div().px(px(m::SIDE)).pb(px(m::SUMMARY_BOTTOM)).child(first.map_or_else(
                 || div().h(px(m::LINE)).into_any_element(),
@@ -814,12 +794,9 @@ impl ThreadCard {
             .child(
                 h_flex()
                     .gap_1()
-                    .child(
-                        self.ask_button(palette, cx, busy)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.session.update(cx, |session, cx| session.ask_claude(id, cx));
-                            })),
-                    )
+                    .child(self.ask_button(busy).on_click(cx.listener(move |this, _, _, cx| {
+                        this.session.update(cx, |session, cx| session.ask_claude(id, cx));
+                    })))
                     .when(!thread.comments.is_empty(), |row| {
                         row.child(
                             self.button("Resolve", "resolve")
@@ -827,17 +804,21 @@ impl ThreadCard {
                         )
                     }),
             );
-        card_shell(palette, if claude { palette.claude_border } else { palette.line })
-            .child(header)
-            .children(
-                thread
-                    .comments
-                    .iter()
-                    .enumerate()
-                    .map(|(index, c)| self.comment(c, index == 0, fonts)),
-            )
-            .child(self.composer_view(thread, palette, window, cx))
-            .into_any_element()
+        card_shell(
+            palette,
+            if claude { palette.claude_border } else { palette.line },
+            cx.theme().is_dark(),
+        )
+        .child(header)
+        .children(
+            thread
+                .comments
+                .iter()
+                .enumerate()
+                .map(|(index, c)| self.comment(c, index == 0, fonts)),
+        )
+        .child(self.composer_view(thread, palette, window, cx))
+        .into_any_element()
     }
 }
 
@@ -856,17 +837,6 @@ fn display_markup(comment: &ThreadComment) -> Markup {
     markup.spans.push((start..text.len(), SpanKind::Caret));
     markup.text = text.into();
     markup
-}
-
-fn card_shell(palette: Palette, border: Hsla) -> gpui::Div {
-    v_flex()
-        .w_full()
-        .overflow_hidden()
-        .rounded(px(12.))
-        .border_1()
-        .border_color(border)
-        .bg(palette.card)
-        .text_color(palette.text)
 }
 
 impl Render for ThreadCard {

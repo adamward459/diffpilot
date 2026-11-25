@@ -5,6 +5,7 @@ pub mod palette;
 pub mod pill;
 pub mod popover;
 pub mod session;
+mod ui;
 
 pub use assets::ReviewAssets;
 pub use card::{CardEvent, ThreadCard, metrics};

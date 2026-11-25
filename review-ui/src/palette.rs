@@ -1,7 +1,6 @@
 use diffpilot_core::review::Severity;
-use gpui::{AnyElement, App, FontWeight, Hsla, IntoElement, ParentElement, Styled, div, px, rgb};
+use gpui::{App, Hsla, rgb};
 use gpui_component::ActiveTheme;
-use gpui_component::button::ButtonCustomVariant;
 
 #[derive(Clone, Copy)]
 pub struct Palette {
@@ -14,6 +13,10 @@ pub struct Palette {
     pub card: Hsla,
     pub field: Hsla,
     pub accent: Hsla,
+    pub accent_hover: Hsla,
+    pub accent_press: Hsla,
+    pub cap: Hsla,
+    pub cap_border: Hsla,
     pub red: Hsla,
     pub amber: Hsla,
     pub green: Hsla,
@@ -23,7 +26,9 @@ pub struct Palette {
 impl Palette {
     pub fn of(cx: &App) -> Self {
         let theme = cx.theme();
-        let claude: Hsla = if theme.is_dark() { rgb(0xe8916c) } else { rgb(0xc15f3c) }.into();
+        let dark = theme.is_dark();
+        let pick = |light: u32, dark_value: u32| -> Hsla { rgb(if dark { dark_value } else { light }).into() };
+        let claude = pick(0xc15f3c, 0xe8916c);
         Self {
             claude,
             claude_bg: claude.opacity(0.11),
@@ -31,12 +36,16 @@ impl Palette {
             text: theme.foreground,
             muted: theme.muted_foreground,
             line: theme.border,
-            card: theme.popover,
+            card: theme.background,
             field: theme.background,
-            accent: rgb(0x007aff).into(),
-            red: rgb(0xff3b30).into(),
-            amber: rgb(0xff9500).into(),
-            green: rgb(0x28cd41).into(),
+            accent: theme.primary,
+            accent_hover: theme.primary_hover,
+            accent_press: theme.primary_active,
+            cap: theme.background.blend(theme.foreground.opacity(0.07)),
+            cap_border: theme.foreground.opacity(0.13),
+            red: pick(0xff3b30, 0xff453a),
+            amber: pick(0xff9500, 0xff9f0a),
+            green: pick(0x28cd41, 0x32d74b),
             user_avatar: rgb(0x616161).into(),
         }
     }
@@ -49,39 +58,4 @@ impl Palette {
             Severity::Question => self.accent,
         }
     }
-}
-
-pub fn severity_glyph(severity: Severity) -> &'static str {
-    match severity {
-        Severity::MustFix => "×",
-        Severity::Suggestion => "!",
-        Severity::Nit => "",
-        Severity::Question => "?",
-    }
-}
-
-pub fn severity_badge(severity: Severity, palette: Palette, size: f32) -> AnyElement {
-    div()
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .size(px(size))
-        .rounded_full()
-        .bg(palette.severity(severity))
-        .text_color(gpui::white())
-        .text_size(px(size * 0.73))
-        .font_weight(FontWeight::BOLD)
-        .child(severity_glyph(severity))
-        .into_any_element()
-}
-
-pub fn accent_variant(cx: &App) -> ButtonCustomVariant {
-    let accent: Hsla = rgb(0x007aff).into();
-    ButtonCustomVariant::new(cx)
-        .color(accent)
-        .foreground(gpui::white())
-        .border(accent)
-        .hover(accent.opacity(0.9))
-        .active(accent.opacity(0.8))
 }

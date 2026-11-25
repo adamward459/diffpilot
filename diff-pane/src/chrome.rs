@@ -7,7 +7,7 @@ use gpui::{
     AnyElement, FontWeight, HighlightStyle, InteractiveElement as _, IntoElement, ParentElement as _, Styled as _,
     StyledText, div, px,
 };
-use gpui::{Div, Hsla, Stateful};
+use gpui::{Div, Font, Hsla, Stateful};
 
 const MINIBAR_CELLS: usize = 5;
 
@@ -46,7 +46,7 @@ pub fn minibar(palette: &Palette, additions: u32, deletions: u32) -> impl IntoEl
         } else {
             palette.press
         };
-        bar = bar.child(div().size(px(6.0)).rounded(px(1.5)).bg(color));
+        bar = bar.child(div().flex_none().size(px(6.0)).rounded(px(1.5)).bg(color));
     }
     bar
 }
@@ -65,7 +65,7 @@ pub fn path_text(palette: &Palette, file: &FileDiff) -> AnyElement {
         highlights.push((
             0..text.len(),
             HighlightStyle {
-                color: Some(palette.muted),
+                color: Some(palette.secondary),
                 ..HighlightStyle::default()
             },
         ));
@@ -76,7 +76,7 @@ pub fn path_text(palette: &Palette, file: &FileDiff) -> AnyElement {
         highlights.push((
             folder_start..text.len(),
             HighlightStyle {
-                color: Some(palette.muted),
+                color: Some(palette.secondary),
                 ..HighlightStyle::default()
             },
         ));
@@ -101,8 +101,9 @@ pub fn path_text(palette: &Palette, file: &FileDiff) -> AnyElement {
         .into_any_element()
 }
 
-pub fn status_badge(palette: &Palette, status: FileStatus) -> impl IntoElement {
+pub fn status_badge(palette: &Palette, mono: &Font, status: FileStatus) -> impl IntoElement {
     div()
+        .font(mono.clone())
         .flex()
         .flex_none()
         .items_center()
@@ -118,14 +119,32 @@ pub fn status_badge(palette: &Palette, status: FileStatus) -> impl IntoElement {
         .child(status_letter(status))
 }
 
-pub fn counts(palette: &Palette, additions: u32, deletions: u32) -> impl IntoElement {
+pub fn counts(palette: &Palette, mono: &Font, additions: u32, deletions: u32) -> impl IntoElement {
+    let added = format!("+{additions}");
+    let deleted = format!("\u{2212}{deletions}");
+    let text = format!("{added} {deleted}");
+    let highlights = [
+        (
+            0..added.len(),
+            HighlightStyle {
+                color: Some(palette.ok),
+                ..HighlightStyle::default()
+            },
+        ),
+        (
+            added.len() + 1..text.len(),
+            HighlightStyle {
+                color: Some(palette.err),
+                ..HighlightStyle::default()
+            },
+        ),
+    ];
     div()
-        .flex()
         .flex_none()
-        .gap(px(4.0))
+        .font(mono.clone())
         .text_size(px(11.5))
-        .child(div().text_color(palette.ok).child(format!("+{additions}")))
-        .child(div().text_color(palette.err).child(format!("\u{2212}{deletions}")))
+        .text_color(palette.text)
+        .child(StyledText::new(text).with_highlights(highlights))
 }
 
 pub fn viewed_toggle(palette: &Palette, id: impl Into<gpui::ElementId>, viewed: bool) -> Stateful<Div> {

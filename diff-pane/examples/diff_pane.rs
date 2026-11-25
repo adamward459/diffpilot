@@ -376,6 +376,12 @@ fn run_window(repo: PathBuf, launch: Instant, bench_mode: bool) {
                 let started = Instant::now();
                 pane.set_files(files, cx);
                 pane.set_viewed(viewed.borrow().clone(), cx);
+                if let Some(offset) = std::env::var("DIFFPILOT_SCROLL")
+                    .ok()
+                    .and_then(|text| text.parse().ok())
+                {
+                    pane.scroll_to(offset, cx);
+                }
                 let mut timeline = timeline.borrow_mut();
                 timeline.insert("diff_loaded_ms".into(), json!(loaded_ms));
                 timeline.insert("set_files_ms".into(), json!(ms(started)));

@@ -3,6 +3,8 @@ use crate::comparison_control::{Select, comparison_control};
 use crate::glyph::Glyph;
 use crate::pane::{DiffPane, DiffPaneEvent};
 use crate::sidebar::{LoadedChanges, Sidebar, SidebarEvent};
+use crate::theme::{glass_shadow, palette};
+use crate::ui::{OnSelect, capsule, segmented, toggle_capsule};
 use diffpilot_core::changes;
 use diffpilot_core::claude::{ClaudeCliReplier, Replier, Reviewer, ScriptedReplier, reviewer_from_env};
 use diffpilot_core::comparison::{self, Comparison};
@@ -28,11 +30,31 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-const MIN_SIDEBAR: f32 = 240.0;
-const IDEAL_SIDEBAR: f32 = 272.0;
-const MAX_SIDEBAR: f32 = 480.0;
-const TOOLBAR_HEIGHT: f32 = 38.0;
-const TRAFFIC_LIGHTS: f32 = 78.0;
+const PANEL_INSET: f32 = 8.0;
+const PANEL_RADIUS: f32 = 20.0;
+const MIN_SIDEBAR: f32 = 240.0 + PANEL_INSET;
+const IDEAL_SIDEBAR: f32 = 272.0 + PANEL_INSET;
+const MAX_SIDEBAR: f32 = 480.0 + PANEL_INSET;
+const TOOLBAR_HEIGHT: f32 = 52.0;
+const GLASS_HEIGHT: f32 = 35.0;
+const TRAFFIC_LIGHTS: f32 = 96.0;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PaneMode {
+    Diff,
+    Edit,
+}
+
+impl PaneMode {
+    const ALL: [PaneMode; 2] = [PaneMode::Diff, PaneMode::Edit];
+
+    fn title(self) -> &'static str {
+        match self {
+            PaneMode::Diff => "Diff",
+            PaneMode::Edit => "Edit",
+        }
+    }
+}
 
 #[derive(Clone, PartialEq)]
 struct SessionKey {
@@ -151,6 +173,7 @@ pub struct RepoView {
     resizing: bool,
     should_move: Rc<Cell<bool>>,
     wrap: bool,
+    mode: PaneMode,
     compact_toolbar: bool,
     visible_file: Option<String>,
     watch: Option<WatchGuard>,
@@ -188,6 +211,7 @@ impl RepoView {
             resizing: false,
             should_move: Rc::new(Cell::new(false)),
             wrap: false,
+            mode: PaneMode::Diff,
             compact_toolbar: false,
             visible_file: None,
             watch: None,
@@ -591,10 +615,44 @@ fn sidebar_toggle(cx: &mut Context<RepoView>) -> Button {
 }
 
 impl RepoView {
-    fn toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn segmented(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let view = cx.entity().downgrade();
+        let on_select: OnSelect = Rc::new(move |index, _, cx| {
+            view.update(cx, |this, cx| {
+                this.mode = PaneMode::ALL[index];
+                cx.notify();
+            })
+            .ok();
+        });
+        let titles = PaneMode::ALL.map(PaneMode::title);
+        let selected = PaneMode::ALL.iter().position(|mode| *mode == self.mode).unwrap_or(0);
+        segmented("pane-mode", &titles, selected, GLASS_HEIGHT, &palette(cx), on_select).into_any_element()
+    }
+
+    fn wrap_button(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        toggle_capsule(
+            "toggle-wrap",
+            Glyph::TextWrap,
+            "Wrap lines",
+            self.wrap,
+            GLASS_HEIGHT,
+            &palette(cx),
+            cx.listener(|this, _, _, cx| {
+                this.wrap = !this.wrap;
+                let wrap = this.wrap;
+                if let Some(session) = &this.session {
+                    session.pane.update(cx, |pane, cx| pane.set_wrap(wrap, cx));
+                }
+                cx.notify();
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn toolbar(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let theme = cx.theme();
-        let (border, muted) = (theme.border, theme.muted_foreground);
-        let wrap = self.wrap;
+        let border = theme.border;
+        let palette = palette(cx);
         let view = cx.entity().downgrade();
         let select: Select = Rc::new(move |next, window, cx| {
             view.update(cx, |this, cx| this.select_comparison(next, window, cx))
@@ -602,78 +660,68 @@ impl RepoView {
         });
         let control = match (&self.refs, &self.comparison) {
             (Some(refs), Some(comparison)) => {
-                Some(comparison_control(refs, comparison, self.compact_toolbar, select, cx).into_any_element())
+                Some(comparison_control(refs, comparison, self.compact_toolbar, select, &palette).into_any_element())
             }
             _ => None,
         };
+        let pill = self.session.as_ref().map(|session| {
+            capsule(&palette, GLASS_HEIGHT)
+                .id("toolbar-claude-slot")
+                .px(px(6.))
+                .child(session.pill.clone())
+        });
         let drag = drag_region(&self.should_move);
         let leading = (!self.sidebar_open).then(|| sidebar_toggle(cx));
-        let _ = (window, muted);
+        let segmented = self.segmented(cx);
+        let wrap = self.wrap_button(cx);
         drag(
             h_flex()
                 .id("toolbar")
                 .h(px(TOOLBAR_HEIGHT))
                 .flex_shrink_0()
-                .px_3()
                 .gap_2()
                 .border_b_1()
-                .border_color(border)
-                .when(!self.sidebar_open, |this| this.pl(px(TRAFFIC_LIGHTS))),
-        )
-        .children(leading)
-        .child(
-            div()
-                .text_size(px(15.))
-                .font_semibold()
-                .whitespace_nowrap()
-                .child(self.folder_name.clone()),
+                .border_color(border),
         )
         .child(
             h_flex()
                 .flex_1()
                 .min_w_0()
-                .justify_center()
+                .pl(px(if self.sidebar_open { 20. } else { TRAFFIC_LIGHTS }))
                 .gap_2()
+                .children(leading)
                 .child(
                     div()
-                        .id("toolbar-claude-slot")
-                        .children(self.session.as_ref().map(|session| session.pill.clone())),
-                )
-                .children(control),
+                        .text_size(px(15.))
+                        .font_semibold()
+                        .whitespace_nowrap()
+                        .child(self.folder_name.clone()),
+                ),
         )
+        .child(h_flex().flex_shrink_0().gap(px(8.)).children(pill).children(control))
         .child(
-            Button::new("toggle-wrap")
-                .ghost()
-                .small()
-                .icon(Icon::new(Glyph::TextWrap).size_4())
-                .tooltip("Wrap lines")
-                .selected(wrap)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.wrap = !this.wrap;
-                    let wrap = this.wrap;
-                    if let Some(session) = &this.session {
-                        session.pane.update(cx, |pane, cx| pane.set_wrap(wrap, cx));
-                    }
-                    cx.notify();
-                })),
+            h_flex()
+                .flex_1()
+                .min_w_0()
+                .pr(px(8.))
+                .justify_end()
+                .gap(px(8.))
+                .child(wrap)
+                .child(segmented),
         )
         .into_any_element()
     }
 }
 
 impl Render for RepoView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        let (background, sidebar_bg, sidebar_border, muted) = (
-            theme.background,
-            theme.sidebar,
-            theme.sidebar_border,
-            theme.muted_foreground,
-        );
+        let background = theme.background;
+        let palette = palette(cx);
         let width = self.sidebar_width;
         let drag = drag_region(&self.should_move);
         let toggle = sidebar_toggle(cx);
-        let toolbar = self.toolbar(window, cx);
+        let toolbar = self.toolbar(cx);
 
         let sidebar_content = match &self.session {
             Some(session) => session.sidebar.clone().into_any_element(),
@@ -683,7 +731,6 @@ impl Render for RepoView {
             Some(session) => session.pane.clone().into_any_element(),
             None => div().into_any_element(),
         };
-        let _ = muted;
 
         h_flex()
             .id("repo-view")
@@ -706,40 +753,58 @@ impl Render for RepoView {
             )
             .when(self.sidebar_open, |this| {
                 this.child(
-                    v_flex()
+                    div()
                         .id("sidebar-column")
+                        .relative()
                         .w(width)
                         .flex_shrink_0()
                         .h_full()
-                        .bg(sidebar_bg)
-                        .child(
-                            drag(
-                                h_flex()
-                                    .id("sidebar-top")
-                                    .h(px(TOOLBAR_HEIGHT))
-                                    .flex_shrink_0()
-                                    .px_2()
-                                    .justify_end(),
-                            )
-                            .child(toggle),
-                        )
-                        .child(div().flex_1().min_h_0().child(sidebar_content)),
-                )
-                .child(
-                    div()
-                        .id("sidebar-handle")
-                        .w(px(1.))
-                        .h_full()
-                        .flex_shrink_0()
-                        .bg(sidebar_border)
-                        .relative()
+                        .bg(background)
                         .child(
                             div()
                                 .absolute()
                                 .top_0()
                                 .bottom_0()
-                                .left(px(-3.))
-                                .w(px(7.))
+                                .left_0()
+                                .w(px(PANEL_INSET))
+                                .bg(palette.gutter),
+                        )
+                        .child(
+                            v_flex()
+                                .absolute()
+                                .top(px(PANEL_INSET))
+                                .bottom(px(PANEL_INSET))
+                                .left(px(PANEL_INSET))
+                                .right_0()
+                                .rounded(px(PANEL_RADIUS))
+                                .overflow_hidden()
+                                .bg(palette.panel)
+                                .border_1()
+                                .border_color(palette.panel_border)
+                                .shadow(glass_shadow(&palette))
+                                .child(
+                                    drag(
+                                        h_flex()
+                                            .id("sidebar-top")
+                                            .h(px(37.))
+                                            .flex_shrink_0()
+                                            .pr(px(14.))
+                                            .justify_end()
+                                            .items_start()
+                                            .pt(px(PANEL_INSET - 1.)),
+                                    )
+                                    .child(toggle),
+                                )
+                                .child(div().flex_1().min_h_0().child(sidebar_content)),
+                        )
+                        .child(
+                            div()
+                                .id("sidebar-handle")
+                                .absolute()
+                                .top_0()
+                                .bottom_0()
+                                .right_0()
+                                .w(px(6.))
                                 .cursor_col_resize()
                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, _| this.resizing = true)),
                         ),

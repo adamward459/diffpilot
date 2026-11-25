@@ -9,12 +9,13 @@ mod repo_view;
 mod sidebar;
 mod sidebar_rows;
 mod theme;
+mod ui;
 mod workspace;
 
 use bench::Bench;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::viewed::ViewedStore;
-use gpui::{Application, Bounds, WindowBounds, WindowOptions, prelude::*, px, size};
+use gpui::{Application, Bounds, TitlebarOptions, WindowBounds, WindowOptions, point, prelude::*, px, size};
 use gpui_component::{Root, TitleBar};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -53,10 +54,13 @@ fn main() {
             None => settings.recent_folder(),
         };
 
-        let bounds = Bounds::centered(None, size(px(1100.), px(700.)), cx);
+        let bounds = Bounds::centered(None, size(px(1388.), px(923.)), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
-            titlebar: Some(TitleBar::title_bar_options()),
+            titlebar: Some(TitlebarOptions {
+                traffic_light_position: Some(point(px(20.), px(19.))),
+                ..TitleBar::title_bar_options()
+            }),
             window_min_size: Some(size(px(720.), px(420.))),
             ..Default::default()
         };
