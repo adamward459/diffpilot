@@ -88,11 +88,17 @@ impl Store {
     pub fn fail_stale_runs(&self) -> Result<usize> {
         let conn = self.lock();
         let now = now_ms();
-        Ok(conn.execute(
+        let failed = conn.execute(
             "UPDATE runs SET state = 'failed', finished_at = ?1,
                data = json_set(data, '$.state', 'failed', '$.finished_at_ms', ?1, '$.error', 'diffpilot quit during this run.')
              WHERE state IN ('queued', 'running')",
             [now],
-        )?)
+        )?;
+        conn.execute(
+            "DELETE FROM guides WHERE state = 'draft'
+             AND run_id NOT IN (SELECT id FROM runs WHERE state IN ('queued', 'running'))",
+            [],
+        )?;
+        Ok(failed)
     }
 }

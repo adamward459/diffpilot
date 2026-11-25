@@ -3,10 +3,12 @@
 //! The schema follows diffity's `review_sessions`, `threads` and `comments` tables (MIT, see
 //! THIRD_PARTY_NOTICES). A session is one review: repo + branch + base.
 
+mod guides;
 mod rows;
 mod runs;
 mod schema;
 
+pub use guides::{GuideSummary, StoredGuide};
 pub use rows::{NewComment, NewThread, Written};
 
 use crate::comparison::Comparison;
@@ -40,6 +42,10 @@ pub struct SessionId(pub i64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct RunId(pub i64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct GuideId(pub i64);
 
 /// Marks stand in for the base of views that have none, so they never share a session with a branch.
 pub const WORKING_TREE_BASE: &str = "@working-tree";

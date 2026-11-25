@@ -23,12 +23,13 @@ pub enum RunKind {
     FixComments,
     MakeChanges,
     Reply,
+    Guide,
 }
 
 impl RunKind {
     /// Runs that may change files. They get a snapshot first.
     pub fn edits(self) -> bool {
-        !matches!(self, Self::Review)
+        !matches!(self, Self::Review | Self::Guide)
     }
 
     pub fn title(self) -> &'static str {
@@ -37,6 +38,7 @@ impl RunKind {
             Self::FixComments => "Fix Comments",
             Self::MakeChanges => "Make Changes",
             Self::Reply => "Reply",
+            Self::Guide => "Guide",
         }
     }
 }
@@ -116,6 +118,8 @@ pub struct Progress {
 pub enum RunOutcome {
     Review(ReviewResult),
     Text(String),
+    /// The guide the run saved.
+    Guide(crate::store::GuideId),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -476,6 +480,17 @@ fn describe_mcp(tool: &str, input: &Value) -> (String, String) {
         "dismiss" => ("Dismissed a thread".into(), "addressing a thread".into()),
         "list_threads" => ("Read the threads".into(), "reading the threads".into()),
         "get_diff" => ("Read the diff".into(), "reading the diff".into()),
+        "set_overview" => ("Wrote the overview".into(), "writing the overview".into()),
+        "add_chapter" => (
+            format!("Added chapter: {}", input_text(input, "title")),
+            "writing a chapter".into(),
+        ),
+        "add_note" => (
+            format!("Added a note on {}", input_text(input, "file")),
+            "writing a note".into(),
+        ),
+        "add_diagram" => ("Added a diagram".into(), "drawing a diagram".into()),
+        "finish_guide" => ("Saved the guide".into(), "saving the guide".into()),
         other => (format!("Used {other}"), format!("using {other}")),
     }
 }
@@ -694,8 +709,9 @@ mod tests {
     }
 
     #[test]
-    fn only_review_runs_are_read_only() {
+    fn only_review_and_guide_runs_are_read_only() {
         assert!(!RunKind::Review.edits());
         assert!(RunKind::FixComments.edits() && RunKind::MakeChanges.edits() && RunKind::Reply.edits());
+        assert!(!RunKind::Guide.edits());
     }
 }

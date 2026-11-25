@@ -32,6 +32,14 @@ pub fn mcp_tools(kind: RunKind) -> &'static [&'static str] {
         RunKind::Review => &["get_diff", "list_threads", "add_comment", "add_general_comment"],
         RunKind::FixComments | RunKind::Reply => &["get_diff", "list_threads", "reply", "resolve", "dismiss"],
         RunKind::MakeChanges => &["get_diff", "list_threads"],
+        RunKind::Guide => &[
+            "get_diff",
+            "set_overview",
+            "add_chapter",
+            "add_note",
+            "add_diagram",
+            "finish_guide",
+        ],
     }
 }
 
@@ -180,6 +188,7 @@ mod tests {
             RunKind::FixComments,
             RunKind::MakeChanges,
             RunKind::Reply,
+            RunKind::Guide,
         ] {
             for edit in EditPermission::ALL {
                 let Ok(policy) = ToolPolicy::new(kind, edit, true) else {
@@ -204,6 +213,26 @@ mod tests {
         assert!(allowed.contains(&"Bash(git diff:*)"));
         assert!(allowed.contains(&"mcp__diffpilot__add_comment"));
         assert!(!args.contains(&"--permission-mode".to_string()));
+    }
+
+    #[test]
+    fn a_guide_run_reads_and_writes_only_the_guide() {
+        for edit in EditPermission::ALL {
+            let args = policy(RunKind::Guide, edit, true).arguments();
+            assert!(!args.contains(&"--permission-mode".to_string()), "{edit:?}");
+            assert!(!args.contains(&"--permission-prompt-tool".to_string()), "{edit:?}");
+            let allowed = after(&args, "--allowedTools");
+            assert!(!allowed.contains(&"Edit") && !allowed.contains(&"Write") && !allowed.contains(&"Bash"));
+            assert!(allowed.contains(&"Grep") && allowed.contains(&"Bash(git log:*)"));
+            for tool in ["set_overview", "add_chapter", "add_note", "add_diagram", "finish_guide"] {
+                assert!(allowed.contains(&format!("mcp__diffpilot__{tool}").as_str()), "{tool}");
+            }
+            assert!(!allowed.contains(&"mcp__diffpilot__add_comment"));
+            assert_eq!(
+                after(&args, "--disallowedTools"),
+                ["Bash(git push:*)", "Bash(git commit:*)", "Bash(gh:*)"]
+            );
+        }
     }
 
     #[test]
@@ -245,6 +274,7 @@ mod tests {
             RunKind::FixComments,
             RunKind::MakeChanges,
             RunKind::Reply,
+            RunKind::Guide,
         ] {
             for edit in EditPermission::ALL {
                 let policy = ToolPolicy::new(kind, edit, true).unwrap();
