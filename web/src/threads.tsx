@@ -1,7 +1,7 @@
 import { render } from 'preact';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import type { ReviewThread, ThreadComment } from './bridge.ts';
+import type { ReviewThread, Severity, ThreadComment } from './bridge.ts';
 import { I } from './icons.ts';
 import type { IconName } from './icons.ts';
 import { esc } from './rows.ts';
@@ -192,15 +192,37 @@ function Composer({ t, api, autoFocus }: { t: ReviewThread; api: ThreadApi; auto
   );
 }
 
-function Thread({ t, api }: { t: ReviewThread; api: ThreadApi }) {
+const SEVERITY: Record<Severity, { label: string; tone: string }> = {
+  'must-fix': { label: 'Must fix', tone: 'bg-err/15 text-err' },
+  suggestion: { label: 'Suggestion', tone: 'bg-amber-soft text-amber' },
+  nit: { label: 'Nit', tone: 'bg-cap text-muted' },
+  question: { label: 'Question', tone: 'bg-accent/15 text-accent' },
+};
+
+function threadLabel(t: ReviewThread): string {
   const { anchor } = t;
-  const label = anchor.kind === 'file' ? 'File comment' : `Line ${anchor.line}${anchor.side === 'old' ? ' (old)' : ''}`;
+  if (anchor.kind === 'change') return 'Review summary';
+  if (anchor.kind === 'file') return 'File comment';
+  return `Line ${anchor.line}${anchor.side === 'old' ? ' (old)' : ''}`;
+}
+
+function Thread({ t, api }: { t: ReviewThread; api: ThreadApi }) {
+  const { finding } = t;
+  const sev = finding ? SEVERITY[finding.severity] : null;
   const claude = t.comments.some((c) => c.author === 'Claude');
   const busy = t.comments.some((c) => c.isStreaming);
   return (
     <div class={`glass-card overflow-hidden rounded-xl border ${claude ? 'border-claude-b' : 'border-transparent'}`}>
       <div class="flex h-[34px] items-center gap-2 border-b border-line pr-2 pl-3 text-xs whitespace-nowrap text-fg2">
-        <span>{label}</span>
+        {sev && finding ? (
+          <>
+            <span class={`${chip} ${sev.tone}`}>{sev.label}</span>
+            <b class="min-w-0 overflow-hidden font-semibold text-ellipsis text-fg">{finding.title}</b>
+            {finding.location ? <span class="text-muted">{finding.location}</span> : null}
+          </>
+        ) : (
+          <span>{threadLabel(t)}</span>
+        )}
         {t.comments.length === 0 ? <span class={`${chip} bg-amber-soft text-amber`}>Draft</span> : null}
         <span class="ml-auto flex gap-1">
           <button class={btnClaude} disabled={busy} onClick={() => api.ask(t)}>

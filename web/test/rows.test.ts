@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { DiffLine, ReviewThread } from '../src/bridge.ts';
-import { BIG_LINES, buildFileRows, codeHtml, esc, wordRanges } from '../src/rows.ts';
+import { BIG_LINES, buildChangeRows, buildFileRows, codeHtml, esc, wordRanges } from '../src/rows.ts';
 import type { LineRow, PageFile, Row } from '../src/rows.ts';
 
 const file = (over: Partial<PageFile> = {}): PageFile => ({
@@ -165,4 +165,29 @@ test('codeHtml marks word ranges without tokens', () => {
 
 test('esc makes a path safe inside a quoted attribute', () => {
   assert.equal(esc(`a" onfocus="x'<b>&.ts`), 'a&quot; onfocus=&quot;x&#39;&lt;b&gt;&amp;.ts');
+});
+
+test('buildChangeRows puts each change thread in its own fc row before any file (f = -1)', () => {
+  const summary: ReviewThread = { id: 7, anchor: { kind: 'change' }, comments: [] };
+  const leftover: ReviewThread = {
+    id: 8,
+    anchor: { kind: 'change' },
+    comments: [],
+    finding: { severity: 'question', title: 'Used?', location: 'gone.py:3' },
+  };
+  const rows = buildChangeRows([summary, leftover]);
+  assert.deepEqual(kinds(rows), ['fc', 'fc']);
+  assert.deepEqual(
+    rows.map((r) => [r.f, r.key]),
+    [
+      [-1, 't7'],
+      [-1, 't8'],
+    ],
+  );
+  assert.deepEqual(buildChangeRows([]), []);
+});
+
+test('buildFileRows ignores change threads', () => {
+  const change: ReviewThread = { id: 9, anchor: { kind: 'change' }, comments: [] };
+  assert.deepEqual(kinds(buildFileRows(file(), 0, [change])), kinds(buildFileRows(file(), 0, [])));
 });

@@ -3,7 +3,7 @@ import type { VirtualItem } from '@tanstack/virtual-core';
 import type { FileDiff, HighlightRequest, HighlightResult, HostApi, ReviewThread, Theme, Token } from './bridge.ts';
 import { send } from './bridge.ts';
 import { I, fileIcon } from './icons.ts';
-import { SIZE, buildFileRows, codeHtml, esc, wordRanges } from './rows.ts';
+import { SIZE, buildChangeRows, buildFileRows, codeHtml, esc, wordRanges } from './rows.ts';
 import type { PageFile, Row } from './rows.ts';
 import { applyTheme } from './theme.ts';
 import { mountThread, unmountThread } from './threads.tsx';
@@ -26,6 +26,7 @@ const MEASURED = new Set<Row['k']>(['th', 'fc']);
 
 const S = {
   files: [] as PageFile[],
+  changeRows: [] as Row[],
   fileRows: [] as Row[][],
   rows: [] as Row[],
   done: false,
@@ -80,7 +81,7 @@ const bump = (file: PageFile): void => {
 };
 
 function rebuild(): void {
-  S.rows = S.fileRows.flat();
+  S.rows = [...S.changeRows, ...S.fileRows.flat()];
   if (!S.done) S.rows.push({ k: 'load', f: -1, key: 'load' });
   v.setOptions({ ...v.options, count: S.rows.length, estimateSize: (i) => SIZE[S.rows[i]?.k ?? 'ln'] });
   v._willUpdate();
@@ -422,11 +423,24 @@ function load(batch: FileDiff[], done: boolean): void {
   }
 }
 
+function rebuildChange(): void {
+  for (const r of S.changeRows) invalidate(r.key);
+  S.changeRows = buildChangeRows(threadsOf(''));
+  rebuild();
+}
+
 function thread(t: ReviewThread): void {
   const known = S.threads.has(t.id);
   S.threads.set(t.id, t);
-  const path = t.anchor.path;
+  const path = t.anchor.kind === 'change' ? '' : t.anchor.path;
   S.byFile.set(path, [...threadsOf(path).filter((x) => x.id !== t.id), t]);
+  if (t.anchor.kind === 'change') {
+    if (known) {
+      const el = S.threadEls.get(t.id);
+      if (el) mountThread(el, t, api);
+    } else rebuildChange();
+    return;
+  }
   const f = fileIndex(path);
   if (f < 0) return;
   if (known) {
@@ -442,8 +456,9 @@ function removeThread(id: number): void {
   const t = S.threads.get(id);
   if (!t) return;
   S.threads.delete(id);
-  const path = t.anchor.path;
+  const path = t.anchor.kind === 'change' ? '' : t.anchor.path;
   S.byFile.set(path, threadsOf(path).filter((x) => x.id !== id));
+  if (t.anchor.kind === 'change') return rebuildChange();
   const f = fileIndex(path);
   if (f < 0) return;
   bump(fileAt(f));

@@ -42,6 +42,9 @@ const WORD_DIFF_MIN_SAME = 0.4;
 const ENTITY: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 export const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ENTITY[c] ?? c);
 
+export const buildChangeRows = (threads: ReviewThread[]): Row[] =>
+  threads.map((thread) => ({ k: 'fc', f: -1, key: `t${thread.id}`, thread }));
+
 export function buildFileRows(file: PageFile, f: number, threads: ReviewThread[]): Row[] {
   const out: Row[] = [{ k: 'fh', f, key: `fh${f}` }];
   for (const thread of threads) if (thread.anchor.kind === 'file') out.push({ k: 'fc', f, key: `t${thread.id}`, thread });
