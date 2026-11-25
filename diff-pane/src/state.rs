@@ -93,12 +93,10 @@ impl PaneState {
         shown_mode(self.mode, self.geometry.width)
     }
 
-    /// The pane width when the rows on screen are split rows.
     pub fn split_width(&self) -> Option<f32> {
         (self.shown_mode() == DiffMode::Split).then_some(self.geometry.width)
     }
 
-    /// The mode shown when it differs from the last one this returned.
     pub fn take_shown_change(&mut self) -> Option<DiffMode> {
         let current = self.shown_mode();
         (current != std::mem::replace(&mut self.reported_mode, current)).then_some(current)

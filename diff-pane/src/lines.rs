@@ -28,7 +28,6 @@ pub struct Style<'a> {
     pub wrap: Option<usize>,
 }
 
-/// Where a line is drawn: across the pane, or in one half of a split row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Column {
     Unified,
@@ -37,10 +36,10 @@ pub enum Column {
 }
 
 impl Column {
-    /// The side whose highlight spans color the line.
-    pub fn side(self, kind: LineKind) -> Side {
+    pub fn side(self, kind: LineKind, old_spans_differ: bool) -> Side {
         match (self, kind) {
-            (Self::Left, _) | (Self::Unified, LineKind::Deleted) => Side::Old,
+            (_, LineKind::Deleted) => Side::Old,
+            (Self::Left, LineKind::Context) if old_spans_differ => Side::Old,
             _ => Side::New,
         }
     }
@@ -89,7 +88,6 @@ pub struct PaintLine {
     pub chunks: Vec<(usize, ShapedLine)>,
 }
 
-/// A half of a split row that has no line, drawn as an empty cell.
 pub struct PaintFiller {
     pub y: f32,
     pub height: f32,
@@ -383,4 +381,23 @@ pub fn paint(frame: &Frame, bounds: Bounds<Pixels>, window: &mut Window, cx: &mu
 
 fn hex(color: u32) -> Hsla {
     gpui::rgb(color).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_context_line_is_shaped_once_unless_the_old_side_colors_it_differently() {
+        for column in [Column::Unified, Column::Left, Column::Right] {
+            assert_eq!(column.side(LineKind::Context, false), Side::New);
+            assert_eq!(column.side(LineKind::Added, false), Side::New);
+        }
+        assert_eq!(Column::Left.side(LineKind::Context, true), Side::Old);
+        assert_eq!(Column::Right.side(LineKind::Context, true), Side::New);
+        assert_eq!(Column::Unified.side(LineKind::Context, true), Side::New);
+        for column in [Column::Unified, Column::Left] {
+            assert_eq!(column.side(LineKind::Deleted, false), Side::Old);
+        }
+    }
 }

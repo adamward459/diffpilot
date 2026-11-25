@@ -507,11 +507,13 @@ impl DiffPane {
                     }
                     continue;
                 };
-                let side = column.side(file.hunks[hunk as usize].lines[line as usize].kind);
-                let spans = match self.highlights.get(row.file as usize) {
-                    Some(Highlight::Ready(tokens)) => tokens.line_on(side, hunk as usize, line as usize),
-                    _ => &[],
+                let tokens = match self.highlights.get(row.file as usize) {
+                    Some(Highlight::Ready(tokens)) => Some(tokens),
+                    _ => None,
                 };
+                let differs = tokens.is_some_and(|tokens| tokens.old_context_differs(hunk as usize, line as usize));
+                let side = column.side(file.hunks[hunk as usize].lines[line as usize].kind, differs);
+                let spans = tokens.map_or(&[][..], |tokens| tokens.line_on(side, hunk as usize, line as usize));
                 let request = LineRequest {
                     key: LineKey {
                         file: row.file,
@@ -738,7 +740,6 @@ impl DiffPane {
         Some(row.child(AnyView::from(card.clone()).cached(style)))
     }
 
-    /// Where a column starts in the pane and how wide it is.
     fn column_span(&self, column: Column) -> (f32, f32) {
         let width = self.state.geometry().width;
         let half = column_width(width);

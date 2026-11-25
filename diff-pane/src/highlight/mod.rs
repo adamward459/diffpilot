@@ -52,6 +52,12 @@ impl FileTokens {
         &self.spans[start as usize..end as usize]
     }
 
+    pub fn old_context_differs(&self, hunk: usize, line: usize) -> bool {
+        self.hunk_start
+            .get(hunk)
+            .is_some_and(|&base| self.old_context.contains_key(&(base + line as u32)))
+    }
+
     pub fn line_on(&self, side: Side, hunk: usize, line: usize) -> &[Span] {
         let old = match (side, self.hunk_start.get(hunk)) {
             (Side::Old, Some(&base)) => self.old_context.get(&(base + line as u32)),
@@ -366,6 +372,9 @@ mod tests {
         assert_eq!(tokens.line(0, 1), tokens.line_on(Side::New, 0, 1));
         assert_eq!(tokens.line_on(Side::Old, 0, 0), tokens.line(0, 0));
         assert_eq!(tokens.line_on(Side::Old, 3, 0), &[]);
+        assert!(tokens.old_context_differs(0, 1));
+        assert!(!tokens.old_context_differs(0, 0));
+        assert!(!tokens.old_context_differs(3, 0));
     }
 
     #[test]
