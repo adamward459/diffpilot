@@ -74,7 +74,11 @@ struct DiffPaneDriver {
     }
 
     var commentButton: XCUIElement { app.descendants(matching: .any)["comment-on-file"].firstMatch }
-    var viewedToggle: XCUIElement { app.descendants(matching: .any)["viewed-toggle"].firstMatch }
+
+    func clickTopFileViewedCheckbox() {
+        let pane = paneFrame
+        paneCoordinate(x: pane.maxX - 45, y: pane.minY + Self.fileHeaderHeight / 2).click()
+    }
 
     func clickFileCommentButton() { commentButton.click() }
 

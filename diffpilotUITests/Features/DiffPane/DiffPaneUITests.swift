@@ -57,13 +57,12 @@ final class DiffPaneUITests: XCTestCase {
         XCTAssertEqual(pane.reply, "")
     }
 
-    func testViewedToggleInTheToolbarMarksAndUnmarksTheTopFile() {
+    func testViewedCheckboxInTheFileHeaderMarksAndUnmarksTheTopFile() {
         XCTAssertTrue(pane.waitUntil { pane.topFile == "docs/archive.md" }, pane.stateValue)
-        XCTAssertTrue(pane.viewedToggle.waitForExistence(timeout: 5))
         let before = pane.viewedCount
-        pane.viewedToggle.click()
+        pane.clickTopFileViewedCheckbox()
         XCTAssertTrue(pane.waitUntil { pane.viewedCount != before }, pane.stateValue)
-        pane.viewedToggle.click()
+        pane.clickTopFileViewedCheckbox()
         XCTAssertTrue(pane.waitUntil { pane.viewedCount == before }, pane.stateValue)
     }
 
