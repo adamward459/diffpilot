@@ -109,10 +109,6 @@ pub fn mix(foreground: Rgba, share: f32, background: Rgba) -> Rgba {
     }
 }
 
-fn over(foreground: Rgba, background: Rgba) -> Rgba {
-    mix(Rgba { a: 1.0, ..foreground }, foreground.a, background)
-}
-
 /// `top` laid over `base`, both with alpha.
 pub fn composite(base: Hsla, top: Hsla) -> Hsla {
     let (base, top): (Rgba, Rgba) = (base.into(), top.into());

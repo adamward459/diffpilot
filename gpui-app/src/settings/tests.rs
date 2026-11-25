@@ -1,6 +1,7 @@
 use super::window::{Load, Op};
 use super::*;
 use diffpilot_core::connection::{ClaudeStatus, Login, McpState};
+use diffpilot_core::diff::DiffMode;
 use diffpilot_core::github::auth::{Credentials, GhCli, MemoryStore, TokenSource, TokenStore};
 use diffpilot_core::github::http::{Http, HttpError, Request, Response};
 use diffpilot_core::policy::EditPermission;
@@ -397,6 +398,12 @@ async fn the_general_and_diff_switches_write_their_settings(cx: &mut TestAppCont
     assert!(!rig.settings.wrap_lines());
     rig.click(cx, "wrap-lines");
     assert!(rig.settings.wrap_lines());
+
+    assert_eq!(rig.settings.diff_mode(), DiffMode::Unified);
+    rig.click(cx, "layout:Split");
+    assert_eq!(rig.settings.diff_mode(), DiffMode::Split);
+    rig.click(cx, "layout:Unified");
+    assert_eq!(rig.settings.diff_mode(), DiffMode::Unified);
     let reopened = Settings::at(rig.dir.path().join("settings.json"));
     assert!(reopened.wrap_lines() && !reopened.open_last_repository());
 }

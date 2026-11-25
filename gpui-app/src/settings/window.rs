@@ -1,5 +1,3 @@
-use super::icons;
-use super::ui::{self, Tokens, tag};
 use super::{accounts, claude_tab, general};
 use diffpilot_core::connection::{self, ClaudeStatus, McpState};
 use diffpilot_core::github::auth::{Credentials, TokenSource};
@@ -7,10 +5,13 @@ use diffpilot_core::github::client::AuthStatus;
 use diffpilot_core::github::http::{Http, UreqHttp};
 use diffpilot_core::github::{Github, GithubError};
 use diffpilot_core::settings::Settings;
+use diffpilot_ui_kit::components::{backdrop, glyph_icon, tag};
+use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{
     App, Context, Entity, IntoElement, PathPromptOptions, Render, Subscription, Window, WindowControlArea, div, px,
 };
+use gpui_component::ActiveTheme;
 use gpui_component::input::{InputEvent, InputState};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -46,14 +47,14 @@ impl Tab {
         }
     }
 
-    fn icon(self) -> &'static str {
+    fn icon(self) -> Glyph {
         match self {
-            Self::General => icons::SUN,
-            Self::Appearance => icons::CONTRAST,
-            Self::Diff => icons::COLUMNS,
-            Self::Claude => icons::SPARKLES,
-            Self::Accounts => icons::USERS,
-            Self::KeyBindings => icons::KEYBOARD,
+            Self::General => Glyph::Sun,
+            Self::Appearance => Glyph::Contrast,
+            Self::Diff => Glyph::Columns2,
+            Self::Claude => Glyph::Sparkles,
+            Self::Accounts => Glyph::Users,
+            Self::KeyBindings => Glyph::Keyboard,
         }
     }
 
@@ -416,7 +417,7 @@ impl SettingsWindow {
 
 impl Render for SettingsWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = Tokens::of(cx);
+        let t = Theme::of(cx);
         let this = cx.entity();
         let body = match self.tab {
             Tab::General => general::general(self, &t, cx).into_any_element(),
@@ -432,9 +433,9 @@ impl Render for SettingsWindow {
             .flex()
             .flex_col()
             .size_full()
-            .bg(t.body)
-            .text_color(t.text)
-            .font_family(t.font.clone())
+            .bg(t.chrome.panel)
+            .text_color(t.ui.text)
+            .font_family(cx.theme().font_family.clone())
             .text_size(px(13.))
             .child(self.toolbar(&t, cx))
             .child(
@@ -450,19 +451,17 @@ impl Render for SettingsWindow {
                 ),
             )
             .when(self.menu.is_some(), |this_el| {
-                this_el.child(ui::backdrop(move |_, cx| {
-                    this.update(cx, |this, cx| this.close_menu(cx))
-                }))
+                this_el.child(backdrop(move |_, cx| this.update(cx, |this, cx| this.close_menu(cx))))
             })
     }
 }
 
 impl SettingsWindow {
-    fn toolbar(&self, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
+    fn toolbar(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
         let tabs = Tab::ALL.into_iter().map(|tab| {
             let selected = tab == self.tab;
-            let color = if selected { t.accent_text } else { t.text };
-            let (press, cap) = (t.press, t.cap);
+            let color = if selected { t.accent_text } else { t.ui.text };
+            let (press, cap) = (t.pressed(t.background), t.ui.cap);
             tag(
                 div()
                     .id(("settings-tab", tab as usize))
@@ -482,7 +481,7 @@ impl SettingsWindow {
                     .when(selected, |this| this.bg(press))
                     .when(!selected, |this| this.hover(move |style| style.bg(cap)))
                     .on_click(cx.listener(move |this, _, window, cx| this.select_tab(tab, window, cx)))
-                    .child(ui::icon(tab.icon(), 16., color))
+                    .child(glyph_icon(tab.icon(), 16., color))
                     .child(tab.title()),
                 format!("tab:{}", tab.title()),
             )
@@ -492,9 +491,9 @@ impl SettingsWindow {
             .flex_col()
             .flex_none()
             .h(px(92.))
-            .bg(t.toolbar)
+            .bg(t.chrome.glass)
             .border_b_1()
-            .border_color(t.line)
+            .border_color(t.ui.line)
             .window_control_area(WindowControlArea::Drag)
             .child(
                 div()
@@ -505,7 +504,7 @@ impl SettingsWindow {
                     .text_size(px(13.))
                     .line_height(px(24.))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(t.text)
+                    .text_color(t.ui.text)
                     .child(self.tab.title()),
             )
             .child(div().flex().justify_center().gap(px(4.)).children(tabs))

@@ -5,8 +5,6 @@ mod accounts;
 mod appearance;
 mod claude_tab;
 mod general;
-pub mod icons;
-mod ui;
 mod window;
 
 pub use appearance::install as install_theme;

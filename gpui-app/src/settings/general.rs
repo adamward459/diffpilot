@@ -1,24 +1,27 @@
-use super::ui::{self, Row, Tokens, tag};
 use super::window::SettingsWindow;
+use diffpilot_core::diff::DiffMode;
 use diffpilot_core::settings::AppearanceChoice;
+use diffpilot_ui_kit::Theme;
+use diffpilot_ui_kit::components::{Row, caption, grouped, section, segmented_control, switch, tag};
 use gpui::prelude::*;
 use gpui::{App, Context, Div, IntoElement, Keystroke, SharedString, div, px};
+use gpui_component::ActiveTheme;
 
-pub fn general(window: &SettingsWindow, t: &Tokens, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
+pub fn general(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
     let open = window.settings.open_last_repository();
-    ui::section(
+    section(
         t,
         "Launch",
-        ui::card(
+        grouped(
             t,
             vec![
                 Row::new(t, "Open the last repository on launch")
-                    .sub(ui::sub_text(
+                    .sub(caption(
                         t,
                         "Without it, diffpilot starts with no folder until you press ⌘O.",
                     ))
                     .control(
-                        tag(ui::switch(t, "open-last", open, true), "open-last").on_click(cx.listener(
+                        tag(switch(t, "open-last", open, true), "open-last").on_click(cx.listener(
                             move |this, _, _, cx| {
                                 this.settings.set_open_last_repository(!open);
                                 cx.notify();
@@ -31,14 +34,14 @@ pub fn general(window: &SettingsWindow, t: &Tokens, cx: &mut Context<SettingsWin
     )
 }
 
-pub fn appearance(window: &SettingsWindow, t: &Tokens, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
+pub fn appearance(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
     let current = window.settings.appearance();
     let selected = AppearanceChoice::ALL
         .iter()
         .position(|choice| *choice == current)
         .unwrap_or(0);
     let this = cx.entity();
-    let control = ui::segmented(
+    let control = segmented_control(
         t,
         "appearance",
         &AppearanceChoice::ALL.map(AppearanceChoice::title),
@@ -53,17 +56,14 @@ pub fn appearance(window: &SettingsWindow, t: &Tokens, cx: &mut Context<Settings
             super::appearance::set_choice(choice, window, cx);
         },
     );
-    ui::section(
+    section(
         t,
         "Theme",
-        ui::card(
+        grouped(
             t,
             vec![
                 Row::new(t, "Appearance")
-                    .sub(ui::sub_text(
-                        t,
-                        "System follows macOS. Every open window changes at once.",
-                    ))
+                    .sub(caption(t, "System follows macOS. Every open window changes at once."))
                     .control(control)
                     .into_any_element(),
             ],
@@ -71,18 +71,20 @@ pub fn appearance(window: &SettingsWindow, t: &Tokens, cx: &mut Context<Settings
     )
 }
 
-pub fn diff(window: &SettingsWindow, t: &Tokens, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
+pub fn diff(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
     let wrap = window.settings.wrap_lines();
-    ui::section(
+    let mode = window.settings.diff_mode();
+    let this = cx.entity();
+    section(
         t,
         "Diff",
-        ui::card(
+        grouped(
             t,
             vec![
                 Row::new(t, "Wrap lines by default")
-                    .sub(ui::sub_text(t, "Applies to repositories you open from now on."))
+                    .sub(caption(t, "Applies to repositories you open from now on."))
                     .control(
-                        tag(ui::switch(t, "wrap-lines", wrap, true), "wrap-lines").on_click(cx.listener(
+                        tag(switch(t, "wrap-lines", wrap, true), "wrap-lines").on_click(cx.listener(
                             move |this, _, _, cx| {
                                 this.settings.set_wrap_lines(!wrap);
                                 cx.notify();
@@ -91,14 +93,20 @@ pub fn diff(window: &SettingsWindow, t: &Tokens, cx: &mut Context<SettingsWindow
                     )
                     .into_any_element(),
                 Row::new(t, "Layout")
-                    .sub(ui::sub_text(t, "Unified or Split. Split view is not available yet."))
-                    .control(ui::segmented(
+                    .sub(caption(t, "Applies to repositories you open from now on."))
+                    .control(segmented_control(
                         t,
                         "layout",
                         &["Unified", "Split"],
-                        0,
-                        false,
-                        |_, _, _| {},
+                        usize::from(mode == DiffMode::Split),
+                        true,
+                        move |ix, _, cx| {
+                            let mode = if ix == 1 { DiffMode::Split } else { DiffMode::Unified };
+                            this.update(cx, |this, cx| {
+                                this.settings.set_diff_mode(mode);
+                                cx.notify();
+                            });
+                        },
                     ))
                     .into_any_element(),
             ],
@@ -106,35 +114,35 @@ pub fn diff(window: &SettingsWindow, t: &Tokens, cx: &mut Context<SettingsWindow
     )
 }
 
-pub fn key_bindings(t: &Tokens, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
+pub fn key_bindings(t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
     let rows = bindings(cx)
         .into_iter()
-        .map(|(title, keys)| Row::new(t, title).control(keycaps(t, &keys)).into_any_element())
+        .map(|(title, keys)| Row::new(t, title).control(keycaps(t, cx, &keys)).into_any_element())
         .collect();
     div()
         .flex()
         .flex_col()
         .gap(px(8.))
-        .child(ui::section(t, "Shortcuts", ui::card(t, rows)))
-        .child(ui::sub_text(
+        .child(section(t, "Shortcuts", grouped(t, rows)))
+        .child(caption(
             t,
             "These shortcuts are fixed. Changing them is not supported yet.",
         ))
 }
 
-fn keycaps(t: &Tokens, keys: &str) -> Div {
+fn keycaps(t: &Theme, cx: &App, keys: &str) -> Div {
     div()
         .px(px(6.))
         .h(px(20.))
         .flex()
         .items_center()
         .rounded(px(4.))
-        .bg(t.cap)
+        .bg(t.ui.cap)
         .border_1()
-        .border_color(t.cap_border)
-        .font_family(t.mono.clone())
+        .border_color(t.ui.cap_border)
+        .font_family(cx.theme().mono_font_family.clone())
         .text_size(px(11.))
-        .text_color(t.text2)
+        .text_color(t.ui.text2)
         .child(keys.to_string())
 }
 
