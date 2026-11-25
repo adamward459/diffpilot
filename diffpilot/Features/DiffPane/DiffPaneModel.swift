@@ -62,17 +62,37 @@ final class DiffPaneModel {
     }
 
     func load() async {
+        files = await readFiles()
+        batches = files.map { DiffBatches($0, lineBudget: Self.lineBudget) }
+        sendFirstBatchIfReady()
+    }
+
+    func reload() async {
+        let next = await readFiles()
+        guard next != files else { return }
+        files = next
+        batches = DiffBatches(next, lineBudget: Self.lineBudget)
+        guard hasSentFirstBatch else {
+            sendFirstBatchIfReady()
+            return
+        }
+        send(.reset)
+        hasSentFirstBatch = false
+        sendFirstBatchIfReady()
+        if let path = visiblePath, let batch = batches?.through(path: path) {
+            send(.load(files: batch.files, done: batch.done))
+        }
+    }
+
+    private func readFiles() async -> [FileDiff] {
         let repo = repo
         let comparison = comparison
-        let files = await Task.detached(priority: .userInitiated) {
+        return await Task.detached(priority: .userInitiated) {
             guard let repo, let text = try? Git.run(repo, UnifiedDiff.args + comparison.revisions) else {
                 return [FileDiff]()
             }
             return UnifiedDiff.parse(text).inTreeOrder()
         }.value
-        self.files = files
-        batches = DiffBatches(files, lineBudget: Self.lineBudget)
-        sendFirstBatchIfReady()
     }
 
     func pageDidReload() {

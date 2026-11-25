@@ -29,6 +29,9 @@ struct DiffPaneModelTests {
                 }
             }
         }
+        var resets: Int {
+            commands.filter { if case .reset = $0 { true } else { false } }.count
+        }
         var insets: [Double] {
             commands.compactMap { if case .setInset(let points) = $0 { points } else { nil } }
         }
@@ -328,5 +331,66 @@ struct DiffPaneModelTests {
         model.handle(.visibleFile("a.ts"))
         model.commentOnVisibleFile()
         #expect(recorder.threads.first?.anchor == .file(path: "a.ts"))
+    }
+
+    @Test func reloadingAnUnchangedDiffSendsNothing() async throws {
+        let repo = try makeRepo(files: 2)
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let recorder = Recorder()
+        let model = makeModel(recorder, repo: repo)
+        await model.load()
+        model.handle(.ready)
+        let sent = recorder.commands.count
+        await model.reload()
+        #expect(recorder.commands.count == sent)
+    }
+
+    @Test func reloadingAChangedDiffResetsThePageAndSendsTheFilesAgain() async throws {
+        let repo = try makeRepo(files: 2)
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let recorder = Recorder()
+        let model = makeModel(recorder, repo: repo)
+        await model.load()
+        model.handle(.ready)
+        model.handle(.createThread(.file(path: "f0.txt")))
+        try "base\nagain\n".write(to: repo.appendingPathComponent("f1.txt"), atomically: true, encoding: .utf8)
+        await model.reload()
+        #expect(recorder.resets == 1)
+        #expect(recorder.loads == [["f0.txt", "f1.txt"], ["f0.txt", "f1.txt"]])
+        #expect(recorder.threads.count == 2)
+        let resetIndex = recorder.commands.firstIndex { if case .reset = $0 { true } else { false } }
+        let lastLoadIndex = recorder.commands.lastIndex { if case .load = $0 { true } else { false } }
+        #expect((resetIndex ?? .max) < (lastLoadIndex ?? .min))
+    }
+
+    @Test func reloadSendsTheFilesThroughTheVisibleOneSoThePageCanKeepItsPlace() async throws {
+        let repo = try makeRepo(files: 3)
+        defer { try? FileManager.default.removeItem(at: repo) }
+        for i in 0..<3 {
+            let text = (0..<DiffPaneModel.lineBudget).map { "line \($0) \(i)" }.joined(separator: "\n") + "\n"
+            try text.write(to: repo.appendingPathComponent("f\(i).txt"), atomically: true, encoding: .utf8)
+        }
+        let recorder = Recorder()
+        let model = makeModel(recorder, repo: repo)
+        await model.load()
+        model.handle(.ready)
+        model.handle(.visibleFile("f2.txt"))
+        try "other\n".write(to: repo.appendingPathComponent("f0.txt"), atomically: true, encoding: .utf8)
+        await model.reload()
+        #expect(recorder.resets == 1)
+        #expect(recorder.loads.last?.last == "f2.txt")
+    }
+
+    @Test func reloadBeforeThePageIsReadyJustReplacesTheFiles() async throws {
+        let repo = try makeRepo(files: 1)
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let recorder = Recorder()
+        let model = makeModel(recorder, repo: repo)
+        await model.load()
+        try "base\nnew\n".write(to: repo.appendingPathComponent("f0.txt"), atomically: true, encoding: .utf8)
+        await model.reload()
+        model.handle(.ready)
+        #expect(recorder.resets == 0)
+        #expect(recorder.loads == [["f0.txt"]])
     }
 }

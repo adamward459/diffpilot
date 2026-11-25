@@ -30,7 +30,8 @@ final class SidebarModel {
             let root = FileTree.build(changes)
             return (changes, root, FileTree.files(in: root))
         }.value
-        (changes, root, files) = loaded
         isLoading = false
+        guard loaded.0 != changes else { return }
+        (changes, root, files) = loaded
     }
 }

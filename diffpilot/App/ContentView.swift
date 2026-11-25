@@ -41,7 +41,7 @@ private struct RepoView: View {
                         model: session.sidebar, comments: session.diff.commentCounts,
                         toggleViewed: session.diff.toggleViewed
                     )
-                    .id(session.comparison)
+                    .id(session.id)
                 } else {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -50,7 +50,7 @@ private struct RepoView: View {
         } detail: {
             if let session {
                 DiffPaneView(model: session.diff)
-                    .id(session.comparison)
+                    .id(session.id)
                     .toolbar { if session.diff.firstPaintAt != nil { PaneToolbar(model: session.diff) } }
             }
         }
@@ -61,18 +61,32 @@ private struct RepoView: View {
             if let path { session?.diff.reveal(path) }
         }
         .task { await picker.load() }
-        .task(id: picker.comparison) {
+        .task(id: SessionID(comparison: picker.comparison, branch: picker.refs?.checkedOut)) {
             guard let comparison = picker.comparison else { return }
             let next = RepoSession(repo: picker.repo, comparison: comparison, refs: picker.refs)
             session = next
+            let events = RepoWatcher.changes(in: picker.repo)
             async let sidebar: Void = next.sidebar.load()
             async let diff: Void = next.diff.load()
             _ = await (sidebar, diff)
+            for await change in events {
+                if change.headChanged { await picker.load() }
+                if Task.isCancelled { return }
+                async let sidebar: Void = next.sidebar.load()
+                async let diff: Void = next.diff.reload()
+                _ = await (sidebar, diff)
+            }
         }
     }
 }
 
+private struct SessionID: Equatable {
+    var comparison: Comparison?
+    var branch: String?
+}
+
 private struct RepoSession {
+    let id = UUID()
     let comparison: Comparison
     let sidebar: SidebarModel
     let diff: DiffPaneModel

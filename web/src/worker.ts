@@ -35,10 +35,10 @@ const ctx = self as unknown as {
   postMessage(result: HighlightResult): void;
 };
 
-ctx.onmessage = async ({ data: { f, path, oldText, newText } }) => {
+ctx.onmessage = async ({ data: { epoch, f, path, oldText, newText } }) => {
   const lang = LANGS[path.split('.').pop()?.toLowerCase() ?? ''];
   const load = lang ? LOADERS[lang] : undefined;
-  if (!lang || !load) return ctx.postMessage({ f, none: true });
+  if (!lang || !load) return ctx.postMessage({ epoch, f, none: true });
   const hl = await highlighter;
   let ready = loaded.get(lang);
   if (!ready) {
@@ -46,5 +46,5 @@ ctx.onmessage = async ({ data: { f, path, oldText, newText } }) => {
     loaded.set(lang, ready);
   }
   await ready;
-  ctx.postMessage({ f, old: tokenize(hl, lang, oldText), new: tokenize(hl, lang, newText) });
+  ctx.postMessage({ epoch, f, old: tokenize(hl, lang, oldText), new: tokenize(hl, lang, newText) });
 };
