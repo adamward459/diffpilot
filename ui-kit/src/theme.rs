@@ -149,7 +149,7 @@ impl Theme {
         Self {
             dark,
             background,
-            accent: pick(0x0a7aff, 0x0a84ff),
+            accent: pick(0x007aff, 0x0a84ff),
             accent_hover: pick(0x0066d6, 0x3a9bff),
             accent_press: pick(0x0058b8, 0x0070e0),
             on_accent: rgb(0xffffff).into(),
