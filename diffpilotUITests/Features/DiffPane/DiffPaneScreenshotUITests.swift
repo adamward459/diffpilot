@@ -33,7 +33,8 @@ final class DiffPaneScreenshotUITests: XCTestCase {
         XCTAssertTrue(pane.waitUntil { pane.threadCount == 1 })
         pane.app.typeText("@claude is this line needed?")
         pane.app.typeKey(.return, modifierFlags: .command)
-        XCTAssertTrue(pane.waitUntil(timeout: 20) { pane.reply.contains("did not change any code yet.") })
+        XCTAssertTrue(
+            pane.waitUntil(timeout: 20, pollEvery: 0.5) { pane.reply.contains("did not change any code yet.") })
         XCTAssertTrue(pane.waitUntil { pane.recognizedText().contains("change any code") })
         try attach(pane.window, named: "diffpane-thread-\(appearance)")
 

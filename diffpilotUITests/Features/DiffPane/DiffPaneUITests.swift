@@ -36,7 +36,8 @@ final class DiffPaneUITests: XCTestCase {
         pane.app.typeKey(.return, modifierFlags: .command)
 
         var partialReplies = Set<String>()
-        let finished = pane.waitUntil(timeout: 20) {
+        // Each check snapshots the 2,000-row accessibility tree on the main thread the reply streams on.
+        let finished = pane.waitUntil(timeout: 20, pollEvery: 0.5) {
             let reply = pane.reply
             if !reply.isEmpty, !reply.contains("any code yet.") { partialReplies.insert(reply) }
             return reply.contains("did not change any code yet.")
