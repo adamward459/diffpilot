@@ -130,7 +130,7 @@ impl Settings {
 
     pub fn model_for(&self, kind: RunKind) -> ReviewModel {
         match kind {
-            RunKind::Review => self.reviews_model(),
+            RunKind::Review | RunKind::Guide => self.reviews_model(),
             RunKind::FixComments | RunKind::MakeChanges | RunKind::Reply => self.fixes_model(),
         }
     }
@@ -431,6 +431,7 @@ mod tests {
         settings.set_reviews_model(ReviewModel::new(ModelName::Haiku, Effort::Low));
         settings.set_fixes_model(ReviewModel::new(ModelName::Opus, Effort::Medium));
         assert_eq!(settings.model_for(RunKind::Review).name, ModelName::Haiku);
+        assert_eq!(settings.model_for(RunKind::Guide).name, ModelName::Haiku);
         for kind in [RunKind::FixComments, RunKind::MakeChanges, RunKind::Reply] {
             assert_eq!(settings.model_for(kind).name, ModelName::Opus);
         }
