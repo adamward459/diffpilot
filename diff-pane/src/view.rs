@@ -8,8 +8,10 @@ use diffpilot_core::diff::{DiffMode, FileDiff, LineKind};
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use diffpilot_review_ui::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange};
-use diffpilot_ui_kit::components::{BadgeTone, State, status_badge, viewed_toggle};
+use diffpilot_ui_kit::Glyph;
+use diffpilot_ui_kit::components::{BadgeTone, Button, ChipTone, Look, State, chip_label, status_badge, viewed_toggle};
 use diffpilot_ui_kit::{Theme, painted};
+use gpui::ClipboardItem;
 use gpui::{
     AnyView, App, AppContext as _, ClickEvent, Context, Div, Entity, EventEmitter, FontWeight, Hsla,
     InteractiveElement as _, IntoElement, MouseMoveEvent, ParentElement as _, Pixels, Render, ScrollWheelEvent,
@@ -99,6 +101,7 @@ pub struct DiffPane {
     running: usize,
     lines: LineCache,
     first_paint: FirstPaint,
+    uncommitted: HashSet<String>,
     last_scroll: Option<Instant>,
     pub probe: Probe,
 }
@@ -154,6 +157,7 @@ impl DiffPane {
             running: 0,
             lines: LineCache::default(),
             first_paint: FirstPaint::Waiting,
+            uncommitted: HashSet::new(),
             last_scroll: None,
             probe: Probe::default(),
         }
@@ -172,6 +176,13 @@ impl DiffPane {
         self.lines.clear();
         self.share_files(cx);
         self.sync(cx);
+    }
+
+    pub fn set_uncommitted(&mut self, paths: HashSet<String>, cx: &mut Context<Self>) {
+        if self.uncommitted != paths {
+            self.uncommitted = paths;
+            cx.notify();
+        }
     }
 
     pub fn set_viewed(&mut self, viewed: HashSet<String>, cx: &mut Context<Self>) {
@@ -632,6 +643,12 @@ impl DiffPane {
             .pl(px(10.0))
             .pr(px(6.0))
             .child(left)
+            .child(div().flex_1())
+            .children(
+                self.uncommitted
+                    .contains(&diff.path)
+                    .then(|| chip_label(theme, "Uncommitted", ChipTone::Amber).mr(px(10.0))),
+            )
             .child(
                 viewed_toggle(
                     theme,
@@ -650,10 +667,29 @@ impl DiffPane {
         }
     }
 
-    fn hunk_bar(&self, file: usize, hunk: usize, glass: Option<Hsla>) -> Div {
+    fn hunk_bar(&self, file: usize, hunk: usize, glass: Option<Hsla>, cx: &mut Context<Self>) -> Div {
         let theme = &self.theme;
-        let header = self.state.files[file].hunks[hunk].header.clone();
+        let source = &self.state.files[file].hunks[hunk];
+        let header = source.header.clone();
+        let mut patch = header.clone();
+        for line in &source.lines {
+            patch.push('\n');
+            patch.push(match line.kind {
+                LineKind::Added => '+',
+                LineKind::Deleted => '-',
+                LineKind::Context => ' ',
+            });
+            patch.push_str(&line.text);
+        }
+        let copy = Button::new(("hunk-copy", file * 4096 + hunk))
+            .label("Copy")
+            .look(Look::Plain)
+            .icon(Glyph::Copy, 11.0)
+            .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(patch.clone()))
+            }));
         let bar = div()
+            .group("hunk-bar")
             .flex()
             .items_center()
             .h(px(HUNK))
@@ -665,7 +701,15 @@ impl DiffPane {
             .font(self.fonts.mono.clone())
             .text_size(px(11.5))
             .text_color(theme.diff.muted)
-            .child(header);
+            .child(header)
+            .child(div().flex_1())
+            .child(
+                div()
+                    .invisible()
+                    .group_hover("hunk-bar", |style| style.visible())
+                    .font(self.fonts.ui.clone())
+                    .child(copy),
+            );
         match glass {
             Some(glass) => bar.border_b_1().border_color(theme.diff.line).bg(glass),
             None => bar.border_y_1().border_color(theme.diff.line).bg(theme.diff.hunk),
@@ -801,7 +845,7 @@ impl DiffPane {
         let glass = |center: f32| Some(self.theme.pinned_glass(self.backdrop(sticky.push + center)));
         group = group.child(self.file_header(file, glass(FILE_HEADER / 2.0), cx));
         if let Some(hunk) = sticky.hunk {
-            group = group.child(self.hunk_bar(file, hunk as usize, glass(FILE_HEADER + HUNK / 2.0)));
+            group = group.child(self.hunk_bar(file, hunk as usize, glass(FILE_HEADER + HUNK / 2.0), cx));
         }
         group
     }
@@ -877,7 +921,7 @@ impl Render for DiffPane {
                     None => continue,
                 },
                 RowKind::FileHeader => Self::placed(y, height).child(self.file_header(file, None, cx)),
-                RowKind::Hunk { hunk } => Self::placed(y, height).child(self.hunk_bar(file, hunk as usize, None)),
+                RowKind::Hunk { hunk } => Self::placed(y, height).child(self.hunk_bar(file, hunk as usize, None, cx)),
                 RowKind::Notice(notice) => Self::placed(y, height).child(self.notice(file, notice, cx)),
             };
             root = root.child(element);

@@ -70,7 +70,11 @@ pub fn note(theme: &Theme, color: Hsla, text: impl Into<SharedString>) -> Div {
 }
 
 pub fn caption(theme: &Theme, text: impl Into<SharedString>) -> Div {
-    div().text_size(px(11.)).text_color(theme.ui.muted).child(text.into())
+    div()
+        .text_size(px(11.5))
+        .line_height(px(15.))
+        .text_color(theme.ui.muted)
+        .child(text.into())
 }
 
 pub fn mono_text(theme: &Theme, cx: &App, text: impl Into<SharedString>) -> Div {
@@ -131,8 +135,8 @@ impl RenderOnce for Row {
             .flex()
             .items_center()
             .gap(px(12.))
-            .px(px(13.))
-            .py(px(10.))
+            .px(px(12.))
+            .py(px(9.))
             .min_h(px(if self.sub.is_some() { 52. } else { 40. }))
             .when(self.dim, |this| this.opacity(0.55))
             .when_some(self.leading, |this, glyph| {
@@ -185,14 +189,14 @@ pub fn picker(theme: &Theme, id: impl Into<ElementId>, label: impl Into<SharedSt
         .flex()
         .items_center()
         .gap(px(6.))
-        .h(px(22.))
-        .pl(px(10.))
+        .h(px(24.))
+        .pl(px(9.))
         .pr(px(6.))
         .rounded(px(6.))
         .border_1()
         .border_color(theme.ui.cap_border)
         .bg(theme.ui.cap)
-        .text_size(px(12.))
+        .text_size(px(12.5))
         .text_color(theme.ui.text)
         .whitespace_nowrap()
         .child(label.into())

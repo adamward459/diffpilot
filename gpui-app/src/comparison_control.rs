@@ -25,12 +25,12 @@ pub fn comparison_control(
     let base_sections = base_sections(refs, comparison);
     let branch_select = select.clone();
     let base_select = select;
-    capsule(tokens, 35.)
+    capsule(tokens, 28.)
         .px(px(4.))
         .gap(px(4.))
         .child(
             segment("comparison-branch", tokens)
-                .icon(branch_glyph(comparison), 16.)
+                .icon(branch_glyph(comparison), 13.)
                 .label(branch_title(refs, comparison))
                 .tooltip(branch_tooltip(comparison))
                 .dropdown_menu(move |menu, window, cx| fill(menu, &branch_sections, &branch_select, window, cx)),
@@ -38,14 +38,14 @@ pub fn comparison_control(
         .when(!compact, |this| {
             this.child(
                 div()
-                    .text_size(px(13.))
+                    .text_size(px(12.))
                     .text_color(tokens.chrome.secondary)
                     .child("compared to"),
             )
         })
         .child(
             segment("comparison-base", tokens)
-                .icon(base_glyph(comparison), 16.)
+                .icon(base_glyph(comparison), 13.)
                 .label(base_title(comparison))
                 .tooltip("Compared to")
                 .dropdown_menu(move |menu, window, cx| fill(menu, &base_sections, &base_select, window, cx)),
@@ -56,7 +56,7 @@ fn segment(id: &'static str, tokens: &Theme) -> Button {
     Button::new(id)
         .look(Look::Ghost)
         .regular()
-        .h(px(27.))
+        .h(px(24.))
         .px(px(8.))
         .gap(px(5.))
         .rounded_full()

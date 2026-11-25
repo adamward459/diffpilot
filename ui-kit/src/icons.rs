@@ -30,12 +30,16 @@ macro_rules! glyphs {
 }
 
 glyphs! {
+    ArrowDown => "arrow-down",
     ArrowLeftRight => "arrow-left-right",
+    ArrowUp => "arrow-up",
     Atom => "atom",
+    BookOpen => "book-open",
     Braces => "braces",
     Check => "check",
     CheckThin => "check-thin",
     ChevronDown => "chevron-down",
+    ChevronLeft => "chevron-left",
     ChevronRight => "chevron-right",
     ChevronUp => "chevron-up",
     ChevronsUpDown => "chevrons-up-down",
@@ -51,6 +55,7 @@ glyphs! {
     Folder => "folder",
     FolderFilled => "folder-filled",
     GitBranch => "git-branch",
+    GitCommit => "git-commit",
     Github => "github",
     Keyboard => "keyboard",
     Laptop => "laptop",
@@ -61,6 +66,8 @@ glyphs! {
     MessageSquare => "message-square",
     PanelLeft => "panel-left",
     Pencil => "pencil",
+    Rows2 => "rows-2",
+    SlidersHorizontal => "sliders-horizontal",
     Sparkles => "sparkles",
     Spinner => "spinner",
     SquareTerminal => "square-terminal",

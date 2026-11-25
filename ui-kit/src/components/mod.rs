@@ -1,4 +1,5 @@
 mod badge;
+mod bar;
 mod button;
 mod card;
 mod check;
@@ -7,6 +8,10 @@ mod glass;
 mod interaction;
 
 pub use badge::{BadgeTone, avatar, filled_check, severity_badge, status_badge};
+pub use bar::{
+    BAR_HEIGHT, ChipTone, Crumb, IconSegment, SwitchItem, activity_capsule, bar_button, chip_label, crumbs,
+    icon_switch, jump_bar, status_bar, switch_bar,
+};
 pub use button::{Button, Look, Scale, chip, icon_button};
 pub use card::card_shell;
 pub use check::{viewed_check, viewed_toggle};

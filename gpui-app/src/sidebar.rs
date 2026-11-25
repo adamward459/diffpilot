@@ -202,6 +202,7 @@ impl Sidebar {
         self.rebuild_rows(cx);
     }
 
+    #[cfg(test)]
     fn set_mode(&mut self, mode: SidebarMode, cx: &mut Context<Self>) {
         self.mode = mode;
         self.rebuild_rows(cx);
@@ -272,7 +273,7 @@ impl Sidebar {
                 )
                 .child("·")
                 .child(format!(
-                    "{}/{} viewed",
+                    "{} of {} viewed",
                     grouped(summary.viewed),
                     grouped(summary.file_count)
                 ))
@@ -282,11 +283,11 @@ impl Sidebar {
             .id("summary")
             .gap(px(7.))
             .px_3()
-            .pt(px(5.))
+            .pt(px(2.))
             .pb(px(10.))
             .child(
                 div()
-                    .text_size(px(12.))
+                    .text_size(px(11.))
                     .text_color(muted)
                     .whitespace_nowrap()
                     .overflow_hidden()
@@ -308,11 +309,12 @@ impl Sidebar {
         let tokens = Theme::of(cx);
         let uncommitted = self.filter.only_uncommitted;
         let hide_viewed = self.filter.hide_viewed;
-        let list_mode = self.mode == SidebarMode::List;
         h_flex()
+            .h(px(38.))
             .gap(px(6.))
             .px(px(10.))
-            .py(px(6.))
+            .border_y_1()
+            .border_color(tokens.ui.line)
             .child(filter_field(
                 &tokens,
                 Input::new(&self.filter_input)
@@ -338,24 +340,6 @@ impl Sidebar {
                 State::Normal,
                 &tokens,
                 cx.listener(|this, _, _, cx| this.toggle_hide_viewed(cx)),
-            ))
-            .child(glass_button(
-                "mode-button",
-                if list_mode { Glyph::List } else { Glyph::ListTree },
-                if list_mode { "Switch to tree" } else { "Switch to list" },
-                false,
-                State::Normal,
-                &tokens,
-                cx.listener(move |this, _, _, cx| {
-                    this.set_mode(
-                        if list_mode {
-                            SidebarMode::Tree
-                        } else {
-                            SidebarMode::List
-                        },
-                        cx,
-                    )
-                }),
             ))
             .into_any_element()
     }
