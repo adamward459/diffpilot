@@ -2,13 +2,15 @@ use crate::comparison_menu::{
     Entry, MenuItem, Section, base_glyph, base_sections, base_title, branch_glyph, branch_sections, branch_title,
     branch_tooltip,
 };
+use crate::theme::Palette;
+use crate::ui::capsule;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::refs::Refs;
 use gpui::prelude::*;
 use gpui::{App, IntoElement, ParentElement, Styled, Window, div, px};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
-use gpui_component::{ActiveTheme, Icon, Sizable, h_flex};
+use gpui_component::{ActiveTheme, Icon, h_flex};
 use std::rc::Rc;
 
 pub type Select = Rc<dyn Fn(Comparison, &mut Window, &mut App)>;
@@ -18,19 +20,22 @@ pub fn comparison_control(
     comparison: &Comparison,
     compact: bool,
     select: Select,
-    cx: &App,
+    palette: &Palette,
 ) -> impl IntoElement {
     let branch_sections = branch_sections(refs, comparison);
     let base_sections = base_sections(refs, comparison);
     let branch_select = select.clone();
     let base_select = select;
-    h_flex()
-        .gap(px(6.))
+    capsule(palette, 35.)
+        .px(px(4.))
+        .gap(px(4.))
         .child(
             Button::new("comparison-branch")
                 .ghost()
-                .small()
-                .icon(Icon::new(branch_glyph(comparison)).size_3p5())
+                .compact()
+                .px(px(4.))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .icon(Icon::new(branch_glyph(comparison)).size(px(16.)))
                 .label(branch_title(refs, comparison))
                 .dropdown_caret(true)
                 .tooltip(branch_tooltip(comparison))
@@ -40,15 +45,17 @@ pub fn comparison_control(
             this.child(
                 div()
                     .text_size(px(13.))
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(palette.secondary)
                     .child("compared to"),
             )
         })
         .child(
             Button::new("comparison-base")
                 .ghost()
-                .small()
-                .icon(Icon::new(base_glyph(comparison)).size_3p5())
+                .compact()
+                .px(px(4.))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .icon(Icon::new(base_glyph(comparison)).size(px(16.)))
                 .label(base_title(comparison))
                 .dropdown_caret(true)
                 .tooltip("Compared to")

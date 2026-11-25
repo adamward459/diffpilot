@@ -1,17 +1,17 @@
 use crate::assets;
-use crate::palette::{Palette, severity_badge};
+use crate::palette::Palette;
 use crate::popover::{PopoverEvent, ReviewPopover};
 use crate::session::{ReviewEvent, ReviewSession};
+use crate::ui::{Btn, Look, filled_check, severity_badge};
 use diffpilot_core::review::{ReviewRun, Severity};
 use diffpilot_core::threads::ThreadId;
 use gpui::{
     App, AppContext, Context, Corner, Entity, EventEmitter, FontWeight, Global, IntoElement, KeyBinding, ParentElement,
     Render, Styled, Subscription, Task, WeakEntity, Window, actions, div, px,
 };
-use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::popover::Popover;
 use gpui_component::spinner::Spinner;
-use gpui_component::{ActiveTheme, Disableable, Icon, Sizable, h_flex};
+use gpui_component::{ActiveTheme, Icon, Sizable, h_flex};
 use std::time::{Duration, Instant};
 
 actions!(review_ui, [StopReview]);
@@ -165,34 +165,33 @@ impl ReviewPill {
         }
     }
 
-    fn trigger(&self, run: &ReviewRun, visible: bool, palette: Palette) -> Button {
-        let button = Button::new("claude-pill").ghost().small();
+    fn trigger(&self, run: &ReviewRun, visible: bool, palette: Palette) -> Btn {
+        let button = Btn::new("claude-pill")
+            .look(Look::Ghost)
+            .regular()
+            .h(px(24.))
+            .gap(px(6.));
         match run {
             ReviewRun::Done { counts } if self.shows_result => button
-                .child(
-                    Icon::empty()
-                        .path(assets::CIRCLE_CHECK)
-                        .size_4()
-                        .text_color(palette.green),
-                )
-                .child("Review done")
+                .child(filled_check(palette.green, 16.))
+                .child(div().child("Review done"))
                 .children(Severity::ALL.iter().filter_map(|severity| {
                     let count = counts.get(severity).copied().unwrap_or(0);
                     (count > 0).then(|| {
                         h_flex()
-                            .gap_0p5()
+                            .gap(px(2.))
                             .items_center()
                             .text_color(palette.severity(*severity))
-                            .child(severity_badge(*severity, palette, 12.))
+                            .child(severity_badge(*severity, palette, 12.5))
                             .child(div().font_weight(FontWeight::MEDIUM).child(count.to_string()))
                     })
                 })),
             ReviewRun::Failed(_) => button
-                .child(Icon::empty().path(assets::WARNING).size_4().text_color(palette.amber))
-                .child("Review failed"),
+                .icon_color(assets::WARNING, 16., palette.amber)
+                .label("Review failed"),
             _ => button
-                .child(Icon::empty().path(assets::SPARKLES).size_4().text_color(palette.claude))
-                .child("Ask Claude")
+                .icon_color(assets::SPARKLES, 16., palette.claude)
+                .label("Ask Claude")
                 .disabled(!visible),
         }
     }
@@ -204,7 +203,12 @@ impl ReviewPill {
             .pl_2p5()
             .pr_1()
             .items_center()
-            .child(Spinner::new().icon(Icon::empty().path(assets::LOADER)).small())
+            .child(
+                Spinner::new()
+                    .icon(Icon::empty().path(assets::SPINNER))
+                    .color(palette.muted)
+                    .with_size(px(16.)),
+            )
             .child(
                 h_flex()
                     .gap_1()
@@ -216,11 +220,12 @@ impl ReviewPill {
                     ),
             )
             .child(
-                Button::new("stop-review")
-                    .ghost()
-                    .xsmall()
+                Btn::new("stop-review")
+                    .look(Look::Ghost)
+                    .w(px(22.))
+                    .px(px(0.))
                     .tooltip("Stop Claude (⌘.)")
-                    .child(div().size(px(9.)).rounded(px(2.)).bg(palette.red))
+                    .child(div().size(px(10.)).rounded(px(2.)).bg(palette.red))
                     .on_click(cx.listener(|this, _, _, cx| this.stop(cx))),
             )
     }
@@ -258,10 +263,12 @@ impl Render for ReviewPill {
             .child(claude)
             .child(div().w(px(1.)).h(px(16.)).mx_0p5().bg(palette.line))
             .child(
-                Button::new("comment-on-file")
-                    .ghost()
-                    .small()
-                    .icon(Icon::empty().path(assets::COMMENT).size_4())
+                Btn::new("comment-on-file")
+                    .look(Look::Ghost)
+                    .regular()
+                    .h(px(24.))
+                    .gap(px(6.))
+                    .icon(assets::COMMENT, 16.)
                     .label(count.to_string())
                     .tooltip("Comment on file")
                     .disabled(!visible)

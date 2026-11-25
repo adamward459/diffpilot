@@ -6,6 +6,7 @@ pub struct Palette {
     pub text: Hsla,
     pub muted: Hsla,
     pub faint: Hsla,
+    pub secondary: Hsla,
     pub line: Hsla,
     pub accent: Hsla,
     pub on_accent: Hsla,
@@ -23,7 +24,6 @@ pub struct Palette {
     pub del_ribbon: Hsla,
     pub del_word: Hsla,
     pub press: Hsla,
-    pub pinned: Hsla,
     pub tints: [Hsla; 6],
 }
 
@@ -56,7 +56,16 @@ fn over(foreground: Rgba, background: Rgba) -> Rgba {
     mix(Rgba { a: 1.0, ..foreground }, foreground.a, background)
 }
 
+const LIGHT_GLASS_SHARE: f32 = 0.85;
+const DARK_GLASS_SHARE: f32 = 0.5;
+
 impl Palette {
+    /// A pinned bar's color over `backdrop`, standing in for the page's blurred glass.
+    pub fn glass(&self, backdrop: Hsla) -> Hsla {
+        let share = if self.dark { DARK_GLASS_SHARE } else { LIGHT_GLASS_SHARE };
+        mix(backdrop.into(), share, self.editor.into()).into()
+    }
+
     pub fn new(dark: bool) -> Self {
         let (text, muted, faint, line, editor, accent) = if dark {
             (
@@ -103,6 +112,7 @@ impl Palette {
             text: text.into(),
             muted: muted.into(),
             faint: faint.into(),
+            secondary: secondary.into(),
             line: line.into(),
             accent: accent.into(),
             on_accent: rgba(255, 255, 255, 1.0).into(),
@@ -120,14 +130,9 @@ impl Palette {
             del_ribbon: err.into(),
             del_word: mix(err, 0.32, editor).into(),
             press: mix(label, 0.11, editor).into(),
-            pinned: rgba_with_alpha(editor, 0.94).into(),
             tints: [accent, teal, orange, yellow, purple, secondary].map(Into::into),
         }
     }
-}
-
-fn rgba_with_alpha(color: Rgba, alpha: f32) -> Rgba {
-    Rgba { a: alpha, ..color }
 }
 
 pub fn hex(color: u32) -> Hsla {

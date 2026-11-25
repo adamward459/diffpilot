@@ -5,6 +5,7 @@ use crate::sidebar_rows::{
     Arrow, ArrowOutcome, Row, RowInput, RowKind, arrow, build_rows, index_of, scroll_target, step,
 };
 use crate::theme::{palette, tint};
+use crate::ui::{BadgeTone, filter_field, glass_button, status_badge, viewed_check};
 use diffpilot_core::changes::{ChangeSummary, FileChange};
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::tree::{FileEntry, FileFilter, Folder, SidebarMode};
@@ -13,10 +14,9 @@ use gpui::{
     IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
     UniformListScrollHandle, Window, actions, div, point, prelude::*, px, uniform_list,
 };
-use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle};
-use gpui_component::{ActiveTheme, Icon, Selectable, Sizable, h_flex, v_flex};
+use gpui_component::{ActiveTheme, Icon, Sizable, h_flex, v_flex};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -78,6 +78,10 @@ impl Focusable for Sidebar {
 impl Sidebar {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let filter_input = cx.new(|cx| InputState::new(window, cx).placeholder("Filter"));
+        let query = std::env::var("DIFFPILOT_FILTER").unwrap_or_default();
+        if !query.is_empty() {
+            filter_input.update(cx, |input, cx| input.set_value(query.clone(), window, cx));
+        }
         let subscription = cx.subscribe_in(&filter_input, window, |this, input, event: &InputEvent, _, cx| {
             if matches!(event, InputEvent::Change) {
                 let query = input.read(cx).value().to_string();
@@ -91,7 +95,10 @@ impl Sidebar {
             changes: Vec::new(),
             root: Folder::default(),
             files: Vec::new(),
-            filter: FileFilter::default(),
+            filter: FileFilter {
+                query,
+                ..FileFilter::default()
+            },
             mode: SidebarMode::Tree,
             collapsed: HashSet::new(),
             viewed: HashSet::new(),
@@ -234,7 +241,7 @@ impl Sidebar {
     fn summary_header(&self, cx: &App) -> AnyElement {
         let theme = cx.theme();
         let palette = palette(cx);
-        let muted = theme.muted_foreground;
+        let muted = palette.secondary;
         let summary = &self.summary;
         let fraction = if summary.file_count == 0 {
             0.0
@@ -276,7 +283,7 @@ impl Sidebar {
             .id("summary")
             .gap(px(7.))
             .px_3()
-            .pt(px(2.))
+            .pt(px(5.))
             .pb(px(10.))
             .child(
                 div()
@@ -299,8 +306,7 @@ impl Sidebar {
     }
 
     fn filter_row(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme();
-        let (border, muted_bg, muted_fg) = (theme.border, theme.muted, theme.muted_foreground);
+        let palette = palette(cx);
         let uncommitted = self.filter.only_uncommitted;
         let hide_viewed = self.filter.hide_viewed;
         let list_mode = self.mode == SidebarMode::List;
@@ -308,66 +314,47 @@ impl Sidebar {
             .gap(px(6.))
             .px(px(10.))
             .py(px(6.))
-            .child(
-                h_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .h(px(28.))
-                    .px_2()
-                    .gap_1p5()
-                    .rounded_full()
-                    .border_1()
-                    .border_color(border)
-                    .bg(muted_bg)
-                    .child(Icon::new(Glyph::ListFilter).size_3p5().text_color(muted_fg))
-                    .child(
-                        div().flex_1().min_w_0().child(
-                            Input::new(&self.filter_input)
-                                .appearance(false)
-                                .bordered(false)
-                                .focus_bordered(false)
-                                .small(),
-                        ),
-                    ),
-            )
-            .child(
-                Button::new("toggle-uncommitted")
-                    .ghost()
-                    .small()
-                    .rounded(px(14.))
-                    .icon(Icon::new(Glyph::Pencil).size_3p5())
-                    .tooltip("Only uncommitted")
-                    .selected(uncommitted)
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_uncommitted(cx))),
-            )
-            .child(
-                Button::new("toggle-hide-viewed")
-                    .ghost()
-                    .small()
-                    .rounded(px(14.))
-                    .icon(Icon::new(if hide_viewed { Glyph::EyeOff } else { Glyph::Eye }).size_3p5())
-                    .tooltip("Hide viewed")
-                    .selected(hide_viewed)
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_hide_viewed(cx))),
-            )
-            .child(
-                Button::new("mode-button")
-                    .ghost()
-                    .small()
-                    .rounded(px(14.))
-                    .icon(Icon::new(if list_mode { Glyph::List } else { Glyph::ListTree }).size_3p5())
-                    .tooltip(if list_mode { "Switch to tree" } else { "Switch to list" })
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.set_mode(
-                            if list_mode {
-                                SidebarMode::Tree
-                            } else {
-                                SidebarMode::List
-                            },
-                            cx,
-                        )
-                    })),
-            )
+            .child(filter_field(
+                &palette,
+                Input::new(&self.filter_input)
+                    .appearance(false)
+                    .bordered(false)
+                    .focus_bordered(false)
+                    .small(),
+            ))
+            .child(glass_button(
+                "toggle-uncommitted",
+                Glyph::Pencil,
+                "Only uncommitted",
+                uncommitted,
+                &palette,
+                cx.listener(|this, _, _, cx| this.toggle_uncommitted(cx)),
+            ))
+            .child(glass_button(
+                "toggle-hide-viewed",
+                Glyph::Eye,
+                "Hide viewed",
+                hide_viewed,
+                &palette,
+                cx.listener(|this, _, _, cx| this.toggle_hide_viewed(cx)),
+            ))
+            .child(glass_button(
+                "mode-button",
+                if list_mode { Glyph::List } else { Glyph::ListTree },
+                if list_mode { "Switch to tree" } else { "Switch to list" },
+                false,
+                &palette,
+                cx.listener(move |this, _, _, cx| {
+                    this.set_mode(
+                        if list_mode {
+                            SidebarMode::Tree
+                        } else {
+                            SidebarMode::List
+                        },
+                        cx,
+                    )
+                }),
+            ))
             .into_any_element()
     }
 }
@@ -441,41 +428,41 @@ impl Render for Sidebar {
 
 impl Sidebar {
     fn render_row(&self, index: usize, row: &Row, focused: bool, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme();
         let palette = palette(cx);
         let selected = self.selected.as_deref() == Some(row.path.as_str());
         let on_accent = selected && focused;
-        let primary = if on_accent { palette.on_accent } else { theme.foreground };
+        let primary = if on_accent { palette.on_accent } else { palette.label };
         let secondary = if on_accent {
             palette.on_accent_dim
         } else {
-            theme.muted_foreground
+            palette.secondary
         };
         let tertiary = if on_accent {
             palette.on_accent_dim
         } else {
-            theme.muted_foreground.opacity(0.7)
+            palette.tertiary
         };
         let selection_bg = if on_accent {
-            theme.list_active
+            cx.theme().list_active
         } else {
-            theme.list_hover.opacity(1.0)
+            palette.segment
         };
+        let hover_bg = cx.theme().list_hover;
         let path = row.path.clone();
         let depth = row.depth as f32;
 
         let base = h_flex()
             .id(("row", index))
             .group("row")
+            .w_full()
             .h(px(ROW_HEIGHT))
-            .mx(px(6.))
-            .pl(px(4. + depth * INDENT))
-            .pr(px(6.))
+            .pl(px(0.5 + depth * INDENT))
+            .pr(px(15.5))
             .gap(px(6.))
-            .rounded(px(6.))
+            .rounded(px(8.))
             .cursor_pointer()
             .when(selected, |this| this.bg(selection_bg))
-            .when(!selected, |this| this.hover(|style| style.bg(cx.theme().list_hover)))
+            .when(!selected, |this| this.hover(|style| style.bg(hover_bg)))
             .on_click(cx.listener({
                 let path = path.clone();
                 move |this, event: &ClickEvent, window, cx| {
@@ -495,6 +482,7 @@ impl Sidebar {
                 base.child(
                     div()
                         .id(("chevron", index))
+                        .ml(px(2.))
                         .size(px(14.))
                         .flex()
                         .items_center()
@@ -515,16 +503,13 @@ impl Sidebar {
                                 Glyph::ChevronRight
                             })
                             .size(px(11.))
-                            .text_color(if on_accent {
-                                palette.on_accent
-                            } else {
-                                secondary
-                            }),
+                            .text_color(secondary),
                         ),
                 )
                 .child(
-                    Icon::new(if *expanded { Glyph::FolderOpen } else { Glyph::Folder })
-                        .size(px(14.))
+                    Icon::new(Glyph::FolderFilled)
+                        .size(px(17.))
+                        .ml(px(-1.))
                         .text_color(if on_accent { palette.on_accent } else { palette.folder }),
                 )
                 .child(
@@ -547,6 +532,14 @@ impl Sidebar {
                 };
                 let name_color = if viewed && !on_accent { secondary } else { primary };
                 let toggle_path = path.clone();
+                let tone = if on_accent {
+                    BadgeTone::OnAccent
+                } else if change.is_uncommitted {
+                    BadgeTone::Uncommitted
+                } else {
+                    BadgeTone::Plain
+                };
+                let hover_border = if on_accent { secondary } else { cx.theme().border };
                 base.child(div().w(px(14.)))
                     .child(
                         Icon::new(Glyph::for_file(&entry.name))
@@ -583,68 +576,27 @@ impl Sidebar {
                                 .child(comments.to_string()),
                         )
                     })
-                    .child(viewed_box(index, viewed, on_accent, secondary, cx, toggle_path))
-                    .child(status_badge(change, on_accent, &palette, cx))
+                    .child(viewed_check(
+                        ("viewed", index),
+                        viewed,
+                        secondary,
+                        hover_border,
+                        "row",
+                        cx.listener(move |_, _: &ClickEvent, _, cx| {
+                            cx.stop_propagation();
+                            cx.emit(SidebarEvent::ToggleViewed(toggle_path.clone()));
+                        }),
+                    ))
+                    .child(status_badge(
+                        change.status.code(),
+                        tone,
+                        cx.theme().mono_font_family.clone(),
+                        &palette,
+                    ))
             }
         };
-        element.into_any_element()
+        div().w_full().px(px(6.)).child(element).into_any_element()
     }
-}
-
-fn viewed_box(
-    index: usize,
-    viewed: bool,
-    on_accent: bool,
-    color: gpui::Hsla,
-    cx: &mut Context<Sidebar>,
-    path: String,
-) -> impl IntoElement {
-    let border = if on_accent { color } else { cx.theme().border };
-    div()
-        .id(("viewed", index))
-        .size(px(16.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(4.))
-        .when(!viewed, |this| {
-            this.border_1()
-                .border_color(border)
-                .opacity(0.)
-                .group_hover("row", |style| style.opacity(1.))
-        })
-        .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-            cx.stop_propagation();
-            cx.emit(SidebarEvent::ToggleViewed(path.clone()));
-        }))
-        .when(viewed, |this| {
-            this.child(Icon::new(Glyph::Check).size(px(12.)).text_color(color))
-        })
-}
-
-fn status_badge(change: &FileChange, on_accent: bool, palette: &crate::theme::Palette, cx: &App) -> impl IntoElement {
-    let theme = cx.theme();
-    let (fill, text) = if on_accent {
-        (palette.badge_selected_fill, palette.on_accent_dim)
-    } else if change.is_uncommitted {
-        (palette.badge_uncommitted_fill, palette.orange)
-    } else {
-        (palette.badge_fill, theme.muted_foreground)
-    };
-    div()
-        .min_w(px(16.))
-        .h(px(16.))
-        .px(px(3.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(4.))
-        .bg(fill)
-        .text_color(text)
-        .font_family(theme.mono_font_family.clone())
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_size(px(10.5))
-        .child(change.status.code())
 }
 
 #[cfg(test)]

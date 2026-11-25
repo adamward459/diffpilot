@@ -15,9 +15,9 @@ use diffpilot_review_ui::{
     PillEvent, ReviewAssets, ReviewEvent, ReviewHost, ReviewPill, ReviewSession, ThreadCard, ThreadChange,
 };
 use gpui::{
-    App, AppContext, Application, AsyncApp, Bounds, Context, Entity, InteractiveElement, IntoElement, ParentElement,
-    Pixels, Render, StatefulInteractiveElement, Styled, Subscription, Window, WindowBounds, WindowOptions, canvas, div,
-    point, px, size,
+    App, AppContext, Application, AsyncApp, Bounds, Context, Entity, Hsla, InteractiveElement, IntoElement,
+    ParentElement, Pixels, Render, StatefulInteractiveElement, Styled, Subscription, Window, WindowBounds,
+    WindowOptions, canvas, div, point, px, rgb, size,
 };
 use gpui_component::{ActiveTheme, Root, Theme, ThemeMode, h_flex, v_flex};
 use std::cell::RefCell;
@@ -163,6 +163,22 @@ fn apply_appearance(cx: &mut App) {
         Ok("light") => Theme::change(ThemeMode::Light, None, cx),
         _ => Theme::sync_system_appearance(None, cx),
     }
+    let dark = cx.theme().is_dark();
+    let pick = |light: u32, dark_value: u32| -> Hsla { rgb(if dark { dark_value } else { light }).into() };
+    let theme = Theme::global_mut(cx);
+    theme.font_size = px(13.);
+    theme.radius = px(6.);
+    theme.background = pick(0xffffff, 0x1e1e1e);
+    theme.foreground = pick(0x1d1d1f, 0xf2f2f7);
+    theme.border = pick(0xe3e3e6, 0x3a3a3c);
+    theme.input = pick(0xdcdce0, 0x48484a);
+    theme.muted_foreground = pick(0x6e6e73, 0x98989d);
+    theme.popover = pick(0xfbfbfc, 0x2a2a2c);
+    theme.popover_foreground = pick(0x1d1d1f, 0xf2f2f7);
+    theme.primary = pick(0x0a7aff, 0x0a84ff);
+    theme.primary_hover = pick(0x0066d6, 0x3a9bff);
+    theme.primary_active = pick(0x0058b8, 0x0070e0);
+    theme.ring = pick(0x0a7aff, 0x0a84ff);
 }
 
 fn open_gallery(

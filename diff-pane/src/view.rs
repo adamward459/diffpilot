@@ -10,9 +10,10 @@ use diffpilot_core::diff::{FileDiff, LineKind};
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use diffpilot_review_ui::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange};
 use gpui::{
-    AnyView, App, AppContext as _, ClickEvent, Context, Div, Entity, EventEmitter, InteractiveElement as _,
-    IntoElement, MouseMoveEvent, ParentElement as _, Pixels, Render, ScrollWheelEvent, SharedString, Stateful,
-    StatefulInteractiveElement as _, StyleRefinement, Styled as _, Subscription, Window, canvas, div, font, px,
+    AnyView, App, AppContext as _, ClickEvent, Context, Div, Entity, EventEmitter, FontWeight, Hsla,
+    InteractiveElement as _, IntoElement, MouseMoveEvent, ParentElement as _, Pixels, Render, ScrollWheelEvent,
+    SharedString, Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled as _, Subscription, Window,
+    canvas, div, font, px,
 };
 use gpui_component::{ActiveTheme as _, Theme};
 use std::collections::{HashMap, HashSet};
@@ -96,15 +97,19 @@ impl EventEmitter<DiffPaneEvent> for DiffPane {}
 
 fn load_fonts(window: &Window) -> Fonts {
     let system = window.text_system();
-    let names = system.all_font_names();
-    let family = ["SF Mono", "Menlo"]
+    let advance = |mono: &gpui::Font, ch: char| {
+        system
+            .advance(system.resolve_font(mono), px(CODE_SIZE), ch)
+            .map_or(0.0, |size| f32::from(size.width))
+    };
+    let mono = [font(".AppleSystemUIFontMonospaced"), font("Menlo")]
         .into_iter()
-        .find(|name| names.iter().any(|known| known == name))
-        .unwrap_or("Menlo");
-    let mono = font(family);
-    let cell = system
-        .ch_advance(system.resolve_font(&mono), px(CODE_SIZE))
-        .map_or(7.2, f32::from);
+        .find(|mono| advance(mono, 'i') > 0.0 && advance(mono, 'i') == advance(mono, 'W'))
+        .unwrap_or_else(|| font("Menlo"));
+    let cell = match advance(&mono, '0') {
+        0.0 => 7.2,
+        width => width,
+    };
     Fonts {
         ui: font(".SystemUIFont"),
         mono,
@@ -522,8 +527,9 @@ impl DiffPane {
         div().absolute().top(px(y)).left_0().w_full().h(px(height))
     }
 
-    fn file_header(&self, file: usize, pinned: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn file_header(&self, file: usize, glass: Option<Hsla>, cx: &mut Context<Self>) -> Stateful<Div> {
         let palette = &self.palette;
+        let pinned = glass.is_some();
         let diff = &self.state.files[file];
         let collapsed = self.state.collapsed.contains(&diff.path);
         let viewed = self.state.viewed.contains(&diff.path);
@@ -541,43 +547,51 @@ impl DiffPane {
             .flex_none()
             .items_center()
             .justify_center()
-            .size(px(20.0))
-            .mx(px(-4.0))
+            .w(px(12.0))
+            .h(px(20.0))
             .cursor_pointer()
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle_collapsed(&collapse_path, cx)))
             .child(icons::chevron(!collapsed, 12.0, palette.muted));
         let id = if pinned { "pinned-header" } else { "file-header" };
-        let bar = div()
-            .id((id, file))
+        let left = div()
             .flex()
             .items_center()
             .gap(px(7.0))
+            .min_w_0()
+            .child(chevron)
+            .child(icons::document(14.0, chrome::tint(palette, diff)))
+            .child(chrome::path_text(palette, diff))
+            .child(chrome::status_badge(palette, &self.fonts.mono, diff.status))
+            .child(chrome::counts(
+                palette,
+                &self.fonts.mono,
+                diff.additions,
+                diff.deletions,
+            ))
+            .child(chrome::minibar(palette, diff.additions, diff.deletions))
+            .children((threads > 0).then(|| chrome::thread_count(palette, threads)));
+        let bar = div()
+            .flex()
+            .items_center()
             .h(px(FILE_HEADER))
             .w_full()
             .pl(px(10.0))
             .pr(px(12.0))
-            .whitespace_nowrap()
-            .child(chevron)
-            .child(icons::document(14.0, chrome::tint(palette, diff)))
-            .child(chrome::path_text(palette, diff))
-            .child(chrome::status_badge(palette, diff.status))
-            .child(chrome::counts(palette, diff.additions, diff.deletions))
-            .child(chrome::minibar(palette, diff.additions, diff.deletions))
-            .children((threads > 0).then(|| chrome::thread_count(palette, threads)))
+            .child(left)
             .child(
                 chrome::viewed_toggle(palette, (if pinned { "pinned-viewed" } else { "viewed" }, file), viewed)
                     .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
                         cx.emit(DiffPaneEvent::ToggleViewed(viewed_path.clone()))
                     })),
             );
-        if pinned {
-            bar.border_b_1().border_color(palette.line).bg(palette.pinned)
-        } else {
-            bar.border_y_1().border_color(palette.line).bg(palette.editor)
+        let bar = bar.id((id, file));
+        match glass {
+            Some(glass) => bar.border_b_1().border_color(palette.line).bg(glass),
+            None => bar.border_y_1().border_color(palette.line).bg(palette.editor),
         }
     }
 
-    fn hunk_bar(&self, file: usize, hunk: usize, pinned: bool) -> Div {
+    fn hunk_bar(&self, file: usize, hunk: usize, glass: Option<Hsla>) -> Div {
         let palette = &self.palette;
         let header = self.state.files[file].hunks[hunk].header.clone();
         let bar = div()
@@ -593,10 +607,9 @@ impl DiffPane {
             .text_size(px(11.5))
             .text_color(palette.muted)
             .child(header);
-        if pinned {
-            bar.border_b_1().border_color(palette.line).bg(palette.pinned)
-        } else {
-            bar.border_y_1().border_color(palette.line).bg(palette.hunk)
+        match glass {
+            Some(glass) => bar.border_b_1().border_color(palette.line).bg(glass),
+            None => bar.border_y_1().border_color(palette.line).bg(palette.hunk),
         }
     }
 
@@ -630,6 +643,7 @@ impl DiffPane {
                     .bg(palette.cap)
                     .cursor_pointer()
                     .text_size(px(12.0))
+                    .font_weight(FontWeight::MEDIUM)
                     .text_color(palette.text)
                     .child("Load diff")
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.load_diff(&path, cx))),
@@ -674,6 +688,25 @@ impl DiffPane {
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.add_comment(index, window, cx)))
     }
 
+    fn backdrop(&self, y: f32) -> Hsla {
+        let palette = &self.palette;
+        let Some(index) = self.state.tops.row_at(self.state.scroll() + y.max(0.0)) else {
+            return palette.editor;
+        };
+        let row = self.state.rows.rows[index];
+        match row.kind {
+            RowKind::Hunk { .. } => palette.hunk,
+            RowKind::Line { hunk, line } => {
+                match self.state.files[row.file as usize].hunks[hunk as usize].lines[line as usize].kind {
+                    LineKind::Added => palette.add_bg,
+                    LineKind::Deleted => palette.del_bg,
+                    LineKind::Context => palette.editor,
+                }
+            }
+            _ => palette.editor,
+        }
+    }
+
     fn sticky(&self, sticky: Sticky, cx: &mut Context<Self>) -> Div {
         let file = sticky.file as usize;
         let mut group = div()
@@ -683,9 +716,10 @@ impl DiffPane {
             .w_full()
             .flex()
             .flex_col();
-        group = group.child(self.file_header(file, true, cx));
+        let glass = |center: f32| Some(self.palette.glass(self.backdrop(sticky.push + center)));
+        group = group.child(self.file_header(file, glass(FILE_HEADER / 2.0), cx));
         if let Some(hunk) = sticky.hunk {
-            group = group.child(self.hunk_bar(file, hunk as usize, true));
+            group = group.child(self.hunk_bar(file, hunk as usize, glass(FILE_HEADER + HUNK / 2.0)));
         }
         group
     }
@@ -766,14 +800,16 @@ impl Render for DiffPane {
                     Some(thread) => thread,
                     None => continue,
                 },
-                RowKind::FileHeader => Self::placed(y, height).child(self.file_header(file, false, cx)),
-                RowKind::Hunk { hunk } => Self::placed(y, height).child(self.hunk_bar(file, hunk as usize, false)),
+                RowKind::FileHeader => Self::placed(y, height).child(self.file_header(file, None, cx)),
+                RowKind::Hunk { hunk } => Self::placed(y, height).child(self.hunk_bar(file, hunk as usize, None)),
                 RowKind::Notice(notice) => Self::placed(y, height).child(self.notice(file, notice, cx)),
             };
             root = root.child(element);
         }
         if let Some(index) = self.hovered_line() {
             let y = self.state.tops.top(index) - scroll;
+            let height = self.state.tops.height(index);
+            root = root.child(Self::placed(y, height).bg(palette.text.opacity(0.05)));
             root = root.child(self.add_comment_button(index, y, cx));
         }
         if let Some(sticky) = self.state.position().and_then(|position| position.sticky) {

@@ -37,13 +37,16 @@ pub fn chevron(down: bool, size: f32, color: Hsla) -> impl IntoElement {
 
 pub fn check(size: f32, color: Hsla) -> impl IntoElement {
     const SHAPES: &[Shape] = &[(&[(3.2, 8.6), (6.6, 12.0), (12.8, 4.4)], false)];
-    icon(size, color, 2.0, SHAPES)
+    icon(size, color, 1.7, SHAPES)
 }
 
 pub fn document(size: f32, color: Hsla) -> impl IntoElement {
     const SHAPES: &[Shape] = &[
         (&[(3.5, 1.5), (9.5, 1.5), (12.5, 4.5), (12.5, 14.5), (3.5, 14.5)], true),
         (&[(9.5, 1.5), (9.5, 4.5), (12.5, 4.5)], false),
+        (&[(5.5, 7.5), (10.5, 7.5)], false),
+        (&[(5.5, 10.0), (10.5, 10.0)], false),
+        (&[(5.5, 12.5), (8.5, 12.5)], false),
     ];
     icon(size, color, 1.1, SHAPES)
 }

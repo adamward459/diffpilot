@@ -1,19 +1,19 @@
 use crate::assets;
-use crate::palette::{Palette, accent_variant};
+use crate::palette::Palette;
 use crate::session::ReviewSession;
+use crate::ui::{Btn, Look, chip};
 use diffpilot_core::review::{Effort, ModelName, ReviewModel, ReviewRun, ReviewScope, focus};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, FontWeight, IntoElement, ParentElement, Render,
     SharedString, Styled, Subscription, Window, div, px,
 };
-use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_component::radio::{Radio, RadioGroup};
-use gpui_component::{ActiveTheme, Icon, Sizable, h_flex, v_flex};
+use gpui_component::{Icon, h_flex, v_flex};
 
-pub const INSTRUCTIONS_HINT: &str = "Optional. For example “Check error handling in the new API routes”.";
+pub const INSTRUCTIONS_HINT: &str = "Optional. For example “Check error handling in the new API routes” or “This is a perf refactor, look for regressions”.";
 pub const WIDTH: f32 = 440.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,9 +33,7 @@ impl ReviewPopover {
     pub fn new(session: Entity<ReviewSession>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let text = session.read(cx).setup().instructions.clone();
         let instructions = cx.new(|cx| {
-            let mut state = InputState::new(window, cx)
-                .auto_grow(2, 6)
-                .placeholder(INSTRUCTIONS_HINT);
+            let mut state = InputState::new(window, cx).auto_grow(2, 6);
             if !text.is_empty() {
                 state.set_value(text, window, cx);
             }
@@ -69,32 +67,12 @@ impl ReviewPopover {
         self.session.update(cx, |session, cx| session.start_review(cx));
     }
 
-    fn chip(&self, name: &'static str, on: bool, palette: Palette, cx: &Context<Self>) -> Button {
-        let style = ButtonCustomVariant::new(cx)
-            .color(if on {
-                palette.accent.opacity(0.14)
-            } else {
-                cx.theme().transparent
-            })
-            .foreground(if on { palette.accent } else { palette.text })
-            .border(if on { palette.accent.opacity(0.6) } else { palette.line })
-            .hover(palette.accent.opacity(0.2))
-            .active(palette.accent.opacity(0.28));
-        let button = Button::new(name).label(name).small().rounded(px(999.)).custom(style);
-        if on {
-            button.icon(Icon::empty().path(assets::CHECK).size(px(11.)))
-        } else {
-            button
-        }
-    }
-
     fn model_menu(&self, model: ReviewModel) -> AnyElement {
         let session = self.session.clone();
-        Button::new("review-model")
-            .icon(Icon::empty().path(assets::SPARKLES).size_3())
+        Btn::new("review-model")
+            .icon(assets::SPARKLES, 12.)
             .label(model.title())
-            .small()
-            .outline()
+            .regular()
             .dropdown_menu(move |menu, _, _| {
                 let pick = |model: ReviewModel| {
                     let session = session.clone();
@@ -158,13 +136,14 @@ impl Render for ReviewPopover {
         let plural = if files == 1 { "file" } else { "files" };
         let section = |text: &'static str| {
             div()
-                .text_size(px(13.))
+                .text_size(px(12.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(palette.text)
                 .child(text)
         };
         v_flex()
             .w(px(WIDTH - 24.))
+            .p(px(4.))
             .gap(px(0.))
             .text_size(px(13.))
             .text_color(palette.text)
@@ -176,23 +155,19 @@ impl Render for ReviewPopover {
                     .child(
                         Icon::empty()
                             .path(assets::SPARKLES)
-                            .size(px(15.))
+                            .size(px(13.))
                             .text_color(palette.claude),
                     )
-                    .child(
-                        div()
-                            .text_size(px(15.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Ask Claude"),
-                    )
+                    .child(div().font_weight(FontWeight::BOLD).child("Ask Claude"))
                     .child(div().flex_1())
-                    .child(div().text_size(px(11.)).text_color(palette.muted).child("Claude Code")),
+                    .child(div().text_size(px(10.)).text_color(palette.muted).child("Claude Code")),
             )
             .child(
                 h_flex()
                     .gap_1p5()
                     .mb(px(14.))
                     .items_center()
+                    .text_size(px(12.))
                     .text_color(palette.muted)
                     .child(Icon::empty().path(assets::BRANCH).size_3p5())
                     .child(
@@ -222,7 +197,24 @@ impl Render for ReviewPopover {
                 },
             )
             .child(section("What should Claude focus on?").mb(px(6.)))
-            .child(div().mb(px(10.)).child(Input::new(&self.instructions)))
+            .child(
+                div()
+                    .mb(px(10.))
+                    .relative()
+                    .child(Input::new(&self.instructions).text_size(px(13.)))
+                    .when(self.instructions.read(cx).value().is_empty(), |field| {
+                        field.child(
+                            div()
+                                .absolute()
+                                .top(px(9.))
+                                .left(px(13.))
+                                .right(px(13.))
+                                .text_size(px(13.))
+                                .text_color(palette.muted)
+                                .child(INSTRUCTIONS_HINT),
+                        )
+                    }),
+            )
             .child(
                 h_flex()
                     .flex_wrap()
@@ -230,19 +222,18 @@ impl Render for ReviewPopover {
                     .mb(px(16.))
                     .children(focus::PRESETS.map(|name| {
                         let on = setup.focuses.contains(name);
-                        self.chip(name, on, palette, cx)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.session.update(cx, |session, cx| {
-                                    session.update_setup(
-                                        |s| {
-                                            if !s.focuses.remove(name) {
-                                                s.focuses.insert(name.to_string());
-                                            }
-                                        },
-                                        cx,
-                                    )
-                                });
-                            }))
+                        chip(name, on).on_click(cx.listener(move |this, _, _, cx| {
+                            this.session.update(cx, |session, cx| {
+                                session.update_setup(
+                                    |s| {
+                                        if !s.focuses.remove(name) {
+                                            s.focuses.insert(name.to_string());
+                                        }
+                                    },
+                                    cx,
+                                )
+                            });
+                        }))
                     })),
             )
             .child(section("Scope").mb(px(6.)))
@@ -270,16 +261,17 @@ impl Render for ReviewPopover {
                     .child(self.model_menu(model))
                     .child(div().flex_1())
                     .child(
-                        Button::new("cancel-review")
+                        Btn::new("cancel-review")
                             .label("Cancel")
-                            .small()
+                            .regular()
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(PopoverEvent::Dismiss))),
                     )
                     .child(
-                        Button::new("start-review")
-                            .label(format!("{start_title}  ⌘↩"))
-                            .small()
-                            .custom(accent_variant(cx))
+                        Btn::new("start-review")
+                            .label(start_title)
+                            .hint("⌘↩")
+                            .regular()
+                            .look(Look::Primary)
                             .on_click(cx.listener(|this, _, _, cx| this.start(cx))),
                     ),
             )
