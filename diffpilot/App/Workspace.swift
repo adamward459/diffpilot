@@ -11,7 +11,6 @@ final class Workspace {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        folder?.stopAccessingSecurityScopedResource()
         RecentFolder.remember(url)
         folder = url
     }
