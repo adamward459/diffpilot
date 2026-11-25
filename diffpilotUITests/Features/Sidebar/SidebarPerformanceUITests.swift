@@ -17,15 +17,20 @@ final class SidebarPerformanceUITests: XCTestCase {
     func testLaunchTime() {
         measure(metrics: [XCTApplicationLaunchMetric()], options: options) {
             let app = XCUIApplication()
-            app.launchEnvironment["DIFFPILOT_REPO"] = "large"
+            app.launchEnvironment["DIFFPILOT_REPO"] = Fixture.large
             app.launch()
         }
     }
 
     func testScrollingHitches() {
         let app = XCUIApplication()
-        app.launchEnvironment["DIFFPILOT_REPO"] = "large"
+        app.launchEnvironment["DIFFPILOT_REPO"] = Fixture.large
         app.launch()
+        let pane = app.otherElements["diff-pane"]
+        XCTAssertTrue(pane.waitForExistence(timeout: 10))
+        let loaded = NSPredicate(format: "label CONTAINS 'top=docs/'")
+        expectation(for: loaded, evaluatedWith: pane)
+        waitForExpectations(timeout: 15)
         app.typeText("/")
 
         let sidebar = app.scrollViews.firstMatch

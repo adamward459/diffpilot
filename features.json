@@ -2,6 +2,10 @@
   "na": {
     "App": {
       "unit": "App only wires the window to the sidebar; the logic lives in features."
+    },
+    "Shared": {
+      "e2e": "Shared holds the git runner; the features that use it have the e2e tests.",
+      "screenshot": "Shared has no UI."
     }
   }
 }

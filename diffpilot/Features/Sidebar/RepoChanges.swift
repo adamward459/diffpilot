@@ -6,23 +6,9 @@ nonisolated struct ReviewState: Decodable, Equatable {
 }
 
 nonisolated enum RepoChanges {
-    enum LoadError: Error {
-        case gitNotFound
-        case gitFailed(String)
-    }
-
-    // /usr/bin/git is an xcrun shim, and xcrun refuses to run inside the App Sandbox.
-    static let gitCandidates = [
-        "/Applications/Xcode.app/Contents/Developer/usr/bin/git",
-        "/Library/Developer/CommandLineTools/usr/bin/git",
-        "/opt/homebrew/bin/git",
-        "/usr/local/bin/git",
-    ]
-
     static func configuredRepo() -> URL? {
         guard let value = ProcessInfo.processInfo.environment["DIFFPILOT_REPO"], !value.isEmpty else { return nil }
-        if value.hasPrefix("/") { return URL(fileURLWithPath: value) }
-        return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("fixtures").appendingPathComponent(value)
+        return URL(fileURLWithPath: value)
     }
 
     static func load(repo: URL, base: String = "main") throws -> [FileChange] {
@@ -30,9 +16,9 @@ nonisolated enum RepoChanges {
             (try? Data(contentsOf: repo.appendingPathComponent(".git/diffpilot-review.json")))
             .flatMap { try? JSONDecoder().decode(ReviewState.self, from: $0) } ?? ReviewState()
         return parse(
-            nameStatus: try git(repo, "diff", "-z", "-M", "--name-status", base),
-            numstat: try git(repo, "diff", "-z", "-M", "--numstat", base),
-            uncommitted: try git(repo, "diff", "-z", "--name-only", "HEAD"),
+            nameStatus: try Git.run(repo, ["diff", "-z", "-M", "--name-status", base]),
+            numstat: try Git.run(repo, ["diff", "-z", "-M", "--numstat", base]),
+            uncommitted: try Git.run(repo, ["diff", "-z", "--name-only", "HEAD"]),
             review: review)
     }
 
@@ -68,26 +54,5 @@ nonisolated enum RepoChanges {
                 commentCount: review.comments[path] ?? 0)
         }
         .sorted { $0.path < $1.path }
-    }
-
-    private static func git(_ repo: URL, _ args: String...) throws -> String {
-        guard let binary = gitCandidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
-            throw LoadError.gitNotFound
-        }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: binary)
-        process.arguments = ["-C", repo.path] + args
-        let output = Pipe()
-        let errors = Pipe()
-        process.standardOutput = output
-        process.standardError = errors
-        try process.run()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let message = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            throw LoadError.gitFailed(message)
-        }
-        return String(data: data, encoding: .utf8) ?? ""
     }
 }

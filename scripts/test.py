@@ -16,7 +16,7 @@ and a change in it touches every feature.
                                          (or REF) and fail on metrics more than 5% worse
   scripts/test.py screenshot [feature...] capture screenshots into screenshots/feature/<Feature>/
   scripts/test.py related                print the test commands that match the current changes
-  scripts/test.py lint                   check the folder layout and features.json
+  scripts/test.py lint                   check the folder layout, features.json, that the committed web build is current, and that web/ type checks
 """
 
 from __future__ import annotations
@@ -32,6 +32,9 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import web_stamp  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "features.json"
@@ -91,7 +94,7 @@ def upstream() -> str:
     try:
         return git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")[0]
     except subprocess.CalledProcessError:
-        return "HEAD"
+        return git("merge-base", "HEAD", resolve_base(None))[0]
 
 
 def changed_files(base: str) -> list[str]:
@@ -330,6 +333,9 @@ def base_worktree(ref: str) -> Path:
         subprocess.run(["git", "-C", str(path), "checkout", "-q", "-f", "--detach", sha], check=True)
     else:
         subprocess.run(["git", "worktree", "add", "-q", "--detach", str(path), sha], cwd=ROOT, check=True)
+    fixture = path / "scripts" / "fixture_repo.py"
+    if fixture.exists():
+        subprocess.run([sys.executable, str(fixture)], check=True)
     return path
 
 
@@ -447,6 +453,16 @@ def related() -> None:
         print("  scripts/pr_screenshots.py")
 
 
+def web_typecheck() -> None:
+    web = ROOT / "web"
+    if not (web / "node_modules").is_dir():
+        print("web types skipped: run `npm ci` in web/ to type check the page", file=sys.stderr)
+        return
+    done = subprocess.run(["npm", "run", "--silent", "typecheck"], cwd=web, capture_output=True, text=True)
+    if done.returncode != 0:
+        raise LintError("web/ does not type check (npm run typecheck):\n" + (done.stdout + done.stderr).strip())
+
+
 def main(argv: list[str]) -> int:
     if not argv or argv[0] not in ("unit", "e2e", "hotpath", "screenshot", "related", "lint"):
         print(__doc__.strip(), file=sys.stderr)
@@ -456,7 +472,11 @@ def main(argv: list[str]) -> int:
         if command == "lint":
             files = swift_files()
             lint(load_manifest(), files, test_types(files))
-            print("Layout and features.json OK", file=sys.stderr)
+            stale = web_stamp.problems()
+            if stale:
+                raise LintError("\n".join(stale))
+            web_typecheck()
+            print("Layout, features.json, web build, and web types OK", file=sys.stderr)
             return 0
         if command == "related":
             related()
