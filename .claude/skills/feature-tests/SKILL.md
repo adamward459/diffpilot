@@ -31,7 +31,7 @@ Unit tests sit next to the code (`#[cfg(test)]`) or in a crate's `tests/` folder
 
 ## Screenshots
 
-- The app reads these variables: `DIFFPILOT_REPO` (the fixture repo in `.fixtures/large`, built by `scripts/fixture_repo.py`), `DIFFPILOT_VIEWED_SEED`, `DIFFPILOT_APPEARANCE` (`light` or `dark`), and `DIFFPILOT_REVIEWER=scripted`.
+- The app reads these variables: `DIFFPILOT_REPO` (the fixture repo in `.fixtures/large`, built by `scripts/fixture_repo.py`), `DIFFPILOT_VIEWED_SEED`, `DIFFPILOT_APPEARANCE` (`light` or `dark`), `DIFFPILOT_DIFF_MODE` (`unified` or `split`), and `DIFFPILOT_REVIEWER=scripted`. The diff-pane example also takes `DIFFPILOT_WRAP=0`, `DIFFPILOT_REVEAL=<path>` (scroll to that file), and `DIFFPILOT_DEMO_THREADS=1` (a comment on each side of the first changed line pair, in the revealed file when one is set).
 - Use deterministic data, so screenshots only change when the UI changes.
 
 ## Hot path checks

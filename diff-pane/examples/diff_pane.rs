@@ -1,16 +1,24 @@
+use diffpilot_core::claude::{ScriptedReplier, reviewer_from_env};
 use diffpilot_core::comparison::Comparison;
-use diffpilot_core::diff::{self, FileDiff};
+use diffpilot_core::diff::{self, DiffMode, FileDiff, LineKind};
 use diffpilot_core::git;
-use diffpilot_core::settings;
+use diffpilot_core::settings::{self, Settings};
+use diffpilot_core::threads::{Side, ThreadAnchor};
 use diffpilot_diff_pane::highlight;
 use diffpilot_diff_pane::state::{Geometry, PaneState};
 use diffpilot_diff_pane::{DiffPane, DiffPaneEvent};
-use gpui::{App, AppContext as _, Application, Bounds, Entity, Window, WindowBounds, WindowOptions, px, size};
+use diffpilot_review_ui::{ReviewHost, ReviewSession};
+use diffpilot_ui_kit::Assets;
+use gpui::{
+    AnyWindowHandle, App, AppContext as _, Application, Bounds, Entity, Window, WindowBounds, WindowOptions, px, size,
+};
+use gpui_component::Root;
 use serde_json::{Map, Value, json};
 use std::cell::RefCell;
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
@@ -104,6 +112,12 @@ fn headless(repo: &Path, cold: bool) -> Value {
     let started = Instant::now();
     state.toggle_collapsed("src/api/client.ts");
     report["toggle_collapse_ms"] = json!(ms(started));
+    let started = Instant::now();
+    state.set_mode(DiffMode::Split);
+    report["toggle_split_ms"] = json!(ms(started));
+    let started = Instant::now();
+    state.set_mode(DiffMode::Unified);
+    report["toggle_unified_ms"] = json!(ms(started));
     report
 }
 
@@ -136,6 +150,7 @@ fn stats(prefix: &str, samples: &[f32], into: &mut Map<String, Value>) {
 
 struct Phase {
     name: &'static str,
+    mode: DiffMode,
     wrap: bool,
     frames: usize,
     step: Step,
@@ -154,7 +169,14 @@ struct Run {
     intervals: Vec<f32>,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Drive {
+    Vsync,
+    Draw,
+}
+
 struct Bench {
+    drive: Drive,
     pane: Entity<DiffPane>,
     repo: PathBuf,
     queue: VecDeque<Phase>,
@@ -164,31 +186,24 @@ struct Bench {
 }
 
 fn plan() -> VecDeque<Phase> {
+    use DiffMode::{Split, Unified};
+    let phase = |name, mode, wrap, frames, step| Phase {
+        name,
+        mode,
+        wrap,
+        frames,
+        step,
+    };
+    let flick = || Step::Pixels(100.0);
     VecDeque::from([
-        Phase {
-            name: "sweep_nowrap",
-            wrap: false,
-            frames: 800,
-            step: Step::Sweep,
-        },
-        Phase {
-            name: "sweep_wrap",
-            wrap: true,
-            frames: 800,
-            step: Step::Sweep,
-        },
-        Phase {
-            name: "flick_nowrap",
-            wrap: false,
-            frames: 240,
-            step: Step::Pixels(100.0),
-        },
-        Phase {
-            name: "flick_wrap",
-            wrap: true,
-            frames: 240,
-            step: Step::Pixels(100.0),
-        },
+        phase("sweep_nowrap", Unified, false, 800, Step::Sweep),
+        phase("sweep_wrap", Unified, true, 800, Step::Sweep),
+        phase("flick_nowrap", Unified, false, 240, flick()),
+        phase("flick_wrap", Unified, true, 240, flick()),
+        phase("split_sweep_nowrap", Split, false, 800, Step::Sweep),
+        phase("split_sweep_wrap", Split, true, 800, Step::Sweep),
+        phase("split_flick_nowrap", Split, false, 240, flick()),
+        phase("split_flick_wrap", Split, true, 240, flick()),
     ])
 }
 
@@ -211,6 +226,7 @@ fn start_phase(bench: &Rc<RefCell<Bench>>, window: &mut Window, cx: &mut App) {
     eprintln!("PHASE {}", phase.name);
     let pane = bench.borrow().pane.clone();
     let step_px = pane.update(cx, |pane, cx| {
+        pane.set_mode(phase.mode, cx);
         pane.set_wrap(phase.wrap, cx);
         pane.scroll_to(0.0, cx);
         pane.probe.enabled = true;
@@ -228,7 +244,14 @@ fn start_phase(bench: &Rc<RefCell<Bench>>, window: &mut Window, cx: &mut App) {
         last_tick: None,
         intervals: Vec::new(),
     });
-    schedule(bench.clone(), window);
+    let drive = bench.borrow().drive;
+    match drive {
+        Drive::Vsync => schedule(bench.clone(), window),
+        Drive::Draw => {
+            window.draw(cx).clear();
+            tick(bench, window, cx);
+        }
+    }
 }
 
 fn schedule(bench: Rc<RefCell<Bench>>, window: &mut Window) {
@@ -236,51 +259,72 @@ fn schedule(bench: Rc<RefCell<Bench>>, window: &mut Window) {
 }
 
 fn tick(bench: &Rc<RefCell<Bench>>, window: &mut Window, cx: &mut App) {
-    let now = Instant::now();
     let pane = bench.borrow().pane.clone();
-    let finished = {
-        let mut guard = bench.borrow_mut();
-        let run = guard.run.as_mut().expect("a phase is running");
-        if let Some(last) = run.last_tick.replace(now) {
-            run.intervals.push(now.duration_since(last).as_secs_f32() * 1000.0);
+    loop {
+        let now = Instant::now();
+        let finished = {
+            let mut guard = bench.borrow_mut();
+            let run = guard.run.as_mut().expect("a phase is running");
+            if let Some(last) = run.last_tick.replace(now) {
+                run.intervals.push(now.duration_since(last).as_secs_f32() * 1000.0);
+            }
+            run.done += 1;
+            run.done > run.phase.frames
+        };
+        if finished {
+            finish_phase(bench, window, cx);
+            return;
         }
-        run.done += 1;
-        run.done > run.phase.frames
-    };
-    if finished {
-        let run = bench.borrow_mut().run.take().expect("a phase is running");
-        let (cpu, lines) = pane.update(cx, |pane, _| {
-            pane.probe.enabled = false;
-            (
-                std::mem::take(&mut pane.probe.frames_ms),
-                std::mem::take(&mut pane.probe.lines_ms),
-            )
-        });
-        eprintln!(
-            "PHASE {} requested={} ticks={} painted={}",
-            run.phase.name,
-            run.phase.frames,
-            run.intervals.len() + 1,
-            cpu.len()
-        );
-        let mut metrics = Map::new();
-        stats("interval", &run.intervals, &mut metrics);
-        stats("cpu", &cpu, &mut metrics);
-        stats("lines", &lines, &mut metrics);
-        bench
-            .borrow_mut()
-            .scroll
-            .insert(run.phase.name.to_string(), Value::Object(metrics));
-        start_phase(bench, window, cx);
-        return;
+        let step = bench.borrow().run.as_ref().map_or(0.0, |run| run.step_px);
+        pane.update(cx, |pane, cx| pane.scroll_by(step, 0.0, cx));
+        if bench.borrow().drive == Drive::Vsync {
+            schedule(bench.clone(), window);
+            return;
+        }
+        window.draw(cx).clear();
     }
-    let step = bench.borrow().run.as_ref().map_or(0.0, |run| run.step_px);
-    pane.update(cx, |pane, cx| pane.scroll_by(step, 0.0, cx));
-    schedule(bench.clone(), window);
 }
 
-fn start_bench(pane: &Entity<DiffPane>, repo: PathBuf, launch: Value, window: gpui::AnyWindowHandle, cx: &mut App) {
+fn finish_phase(bench: &Rc<RefCell<Bench>>, window: &mut Window, cx: &mut App) {
+    let pane = bench.borrow().pane.clone();
+    let run = bench.borrow_mut().run.take().expect("a phase is running");
+    let (cpu, lines, shown, rows) = pane.update(cx, |pane, _| {
+        pane.probe.enabled = false;
+        (
+            std::mem::take(&mut pane.probe.frames_ms),
+            std::mem::take(&mut pane.probe.lines_ms),
+            pane.state().shown_mode(),
+            pane.state().rows.rows.len(),
+        )
+    });
+    eprintln!(
+        "PHASE {} requested={} ticks={} painted={} shown={shown:?} rows={rows}",
+        run.phase.name,
+        run.phase.frames,
+        run.intervals.len() + 1,
+        cpu.len()
+    );
+    let mut metrics = Map::new();
+    stats("interval", &run.intervals, &mut metrics);
+    stats("cpu", &cpu, &mut metrics);
+    stats("lines", &lines, &mut metrics);
+    bench
+        .borrow_mut()
+        .scroll
+        .insert(run.phase.name.to_string(), Value::Object(metrics));
+    start_phase(bench, window, cx);
+}
+
+fn start_bench(
+    pane: &Entity<DiffPane>,
+    repo: PathBuf,
+    launch: Value,
+    drive: Drive,
+    window: gpui::AnyWindowHandle,
+    cx: &mut App,
+) {
     let bench = Rc::new(RefCell::new(Bench {
+        drive,
         pane: pane.clone(),
         repo,
         queue: plan(),
@@ -304,10 +348,45 @@ fn start_bench(pane: &Entity<DiffPane>, repo: PathBuf, launch: Value, window: gp
     .detach();
 }
 
-fn run_window(repo: PathBuf, launch: Instant, bench_mode: bool) {
-    Application::new().run(move |cx: &mut App| {
+fn demo_enabled() -> bool {
+    std::env::var("DIFFPILOT_DEMO_THREADS").is_ok_and(|value| value == "1")
+}
+
+/// Comments on the first changed line pair the fixture has, one on each side, for screenshots.
+fn demo_threads(files: &[FileDiff], only: Option<&str>) -> Option<(String, Vec<(ThreadAnchor, &'static str)>)> {
+    files.iter().filter(|file| only.is_none_or(|path| file.path == path)).find_map(|file| {
+        file.hunks.iter().find_map(|hunk| {
+            let at = hunk
+                .lines
+                .windows(2)
+                .position(|pair| pair[0].kind == LineKind::Deleted && pair[1].kind == LineKind::Added)?;
+            let (old, new) = (hunk.lines[at].old?, hunk.lines[at + 1].new?);
+            Some((
+                file.path.clone(),
+                vec![
+                    (
+                        ThreadAnchor::line(&file.path, Side::Old, old),
+                        "This line is gone. Was it covered by a test?",
+                    ),
+                    (
+                        ThreadAnchor::line(&file.path, Side::New, new),
+                        "The new name reads better. Please add a short note on why the order matters here, because the next person will wonder.",
+                    ),
+                ],
+            ))
+        })
+    })
+}
+
+fn run_window(repo: PathBuf, launch: Instant, bench: Option<Drive>) {
+    let demo = demo_enabled();
+    Application::new().with_assets(Assets).run(move |cx: &mut App| {
         diffpilot_ui_kit::init(cx);
+        if demo {
+            diffpilot_review_ui::init(cx);
+        }
         let slot: Rc<RefCell<Option<Entity<DiffPane>>>> = Rc::default();
+        let review: Rc<RefCell<Option<Entity<ReviewSession>>>> = Rc::default();
         let displays = cx.displays();
         for (index, display) in displays.iter().enumerate() {
             eprintln!("display {index}: {:?}", display.bounds());
@@ -322,20 +401,41 @@ fn run_window(repo: PathBuf, launch: Instant, bench_mode: bool) {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             ..WindowOptions::default()
         };
-        let handle = cx
-            .open_window(options, {
-                let slot = slot.clone();
-                move |window, cx| {
-                    diffpilot_ui_kit::theme::install(window, cx);
-                    let pane = cx.new(|cx| DiffPane::new(window, cx));
-                    if let Some(mode) = settings::diff_mode_override() {
-                        pane.update(cx, |pane, cx| pane.set_mode(mode, cx));
-                    }
-                    *slot.borrow_mut() = Some(pane.clone());
-                    pane
+        let make_pane = {
+            let (slot, review, repo) = (slot.clone(), review.clone(), repo.clone());
+            move |window: &mut Window, cx: &mut App| {
+                diffpilot_ui_kit::theme::install(window, cx);
+                let pane = cx.new(|cx| DiffPane::new(window, cx));
+                if let Some(mode) = settings::diff_mode_override() {
+                    pane.update(cx, |pane, cx| pane.set_mode(mode, cx));
                 }
+                if demo {
+                    let host = ReviewHost::new(Some(repo.clone()), Comparison::checked_out("main", true));
+                    let session = cx.new(|_| {
+                        ReviewSession::new(
+                            host,
+                            Arc::new(Settings::in_memory()),
+                            Arc::from(reviewer_from_env()),
+                            Arc::new(ScriptedReplier::default()),
+                        )
+                    });
+                    pane.update(cx, |pane, cx| pane.set_review(session.clone(), window, cx));
+                    *review.borrow_mut() = Some(session);
+                }
+                *slot.borrow_mut() = Some(pane.clone());
+                pane
+            }
+        };
+        let handle: AnyWindowHandle = if demo {
+            cx.open_window(options, move |window, cx| {
+                let pane = make_pane(window, cx);
+                cx.new(|cx| Root::new(pane, window, cx))
             })
-            .expect("window opens");
+            .expect("window opens")
+            .into()
+        } else {
+            cx.open_window(options, make_pane).expect("window opens").into()
+        };
         let pane = slot.borrow().clone().expect("pane was created");
         let timeline: Rc<RefCell<Map<String, Value>>> = Rc::default();
         timeline.borrow_mut().insert("window_open_ms".into(), json!(ms(launch)));
@@ -348,9 +448,9 @@ fn run_window(repo: PathBuf, launch: Instant, bench_mode: bool) {
             move |pane, event: &DiffPaneEvent, cx| match event {
                 DiffPaneEvent::FirstPaint => {
                     timeline.borrow_mut().insert("first_paint_ms".into(), json!(ms(launch)));
-                    if bench_mode {
+                    if bench == Some(Drive::Vsync) {
                         let launch = Value::Object(timeline.borrow().clone());
-                        start_bench(&pane, repo.clone(), launch, handle.into(), cx);
+                        start_bench(&pane, repo.clone(), launch, Drive::Vsync, handle, cx);
                     }
                 }
                 DiffPaneEvent::VisibleFile(_) | DiffPaneEvent::ShownMode(_) => {}
@@ -373,10 +473,22 @@ fn run_window(repo: PathBuf, launch: Instant, bench_mode: bool) {
         cx.spawn(async move |cx| {
             let (files, _) = loading.await;
             let loaded_ms = ms(launch);
+            let reveal = std::env::var("DIFFPILOT_REVEAL").ok();
+            let threads = if demo {
+                demo_threads(&files, reveal.as_deref())
+            } else {
+                None
+            };
             pane.update(cx, |pane, cx| {
                 let started = Instant::now();
                 pane.set_files(files, cx);
                 pane.set_viewed(viewed.borrow().clone(), cx);
+                if std::env::var("DIFFPILOT_WRAP").is_ok_and(|value| value == "0") {
+                    pane.set_wrap(false, cx);
+                }
+                if let Some(path) = &reveal {
+                    pane.reveal(path, cx);
+                }
                 if let Some(offset) = std::env::var("DIFFPILOT_SCROLL")
                     .ok()
                     .and_then(|text| text.parse().ok())
@@ -388,6 +500,22 @@ fn run_window(repo: PathBuf, launch: Instant, bench_mode: bool) {
                 timeline.insert("set_files_ms".into(), json!(ms(started)));
             })
             .ok();
+            if let (Some((path, threads)), Some(session)) = (threads, review.borrow().clone()) {
+                session
+                    .update(cx, |session, cx| {
+                        for (anchor, text) in threads {
+                            let id = session.create_thread(anchor, cx);
+                            session.post(id, text, cx);
+                        }
+                    })
+                    .ok();
+                pane.update(cx, |pane, cx| pane.reveal(&path, cx)).ok();
+            }
+            if bench == Some(Drive::Draw) {
+                let launch = Value::Object(timeline.borrow().clone());
+                cx.update(|cx| start_bench(&pane, repo, launch, Drive::Draw, handle, cx))
+                    .ok();
+            }
         })
         .detach();
         cx.activate(true);
@@ -402,7 +530,8 @@ fn main() {
             "{}",
             serde_json::to_string_pretty(&headless(&repo, true)).expect("report serializes")
         ),
-        Ok(_) => run_window(repo, launch, true),
-        Err(_) => run_window(repo, launch, false),
+        Ok("draw") => run_window(repo, launch, Some(Drive::Draw)),
+        Ok(_) => run_window(repo, launch, Some(Drive::Vsync)),
+        Err(_) => run_window(repo, launch, None),
     }
 }
