@@ -77,9 +77,8 @@ final class SidebarUITests: XCTestCase {
         XCTAssertTrue(row("archive.md").waitForExistence(timeout: 5))
         app.buttons["toggle-hide-viewed"].click()
         XCTAssertEqual(app.buttons["toggle-hide-viewed"].value as? String, "on")
-        XCTAssertFalse(row("archive.md").waitForExistence(timeout: 2))
-        XCTAssertFalse(row("docs").exists)
-        XCTAssertTrue(row("archive.ts").exists)
+        XCTAssertFalse(row("archive.ts").waitForExistence(timeout: 2))
+        XCTAssertTrue(row("archive.md").exists)
         let summary = app.staticTexts["summary"].value as? String ?? ""
         XCTAssertTrue(summary.contains("493/2,000 viewed"), summary)
     }
@@ -134,7 +133,7 @@ final class SidebarUITests: XCTestCase {
     }
 
     func testMarkingAFileViewedFromThePageHeaderRaisesTheSidebarCount() {
-        let toggle = app.descendants(matching: .any)["viewed-docs/CacheConfig.md"].firstMatch
+        let toggle = app.checkBoxes["Viewed docs/CacheConfig.md"].firstMatch
         XCTAssertTrue(toggle.waitForExistence(timeout: 10))
         toggle.click()
         let summary = app.staticTexts["summary"]

@@ -44,8 +44,8 @@ class Spec:
 
 
 DESIGN = [
-    Spec("docs/archive.md", "A", 19, 0, viewed=True),
-    Spec("src/api/archive.ts", "M", 38, 6),
+    Spec("docs/archive.md", "A", 19, 0),
+    Spec("src/api/archive.ts", "M", 38, 6, viewed=True),
     Spec("src/api/client.ts", "M", 4, 1, viewed=True),
     Spec("src/components/inbox/ArchiveToast.tsx", "A", 48, 0),
     Spec("src/components/inbox/MessageRow.tsx", "M", 23, 15),

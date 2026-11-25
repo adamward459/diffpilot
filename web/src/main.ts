@@ -114,7 +114,7 @@ function fileHeaderHtml(f: number, pinned: boolean): string {
     <span class="inline-flex h-4 min-w-4 items-center justify-center rounded bg-cap px-[3px] font-mono text-[10.5px] font-semibold text-muted">${file.status}</span>
     <span class="font-mono text-[11.5px]"><span class="text-ok">+${file.additions}</span> <span class="text-err">−${file.deletions}</span></span>${minibar(file.additions, file.deletions)}
     ${count ? `<span class="ml-1 inline-flex items-center gap-0.5 text-[11px] text-muted">${I('bubble', 12)}${count}</span>` : ''}
-    <button class="ml-auto inline-flex items-center gap-1.5 text-[11px] text-muted" data-act="viewed" role="checkbox" aria-checked="${file.viewed ? 'true' : 'false'}" aria-label="Viewed" id="viewed-${esc(file.path)}"><span class="inline-flex size-3.5 items-center justify-center rounded-[3px] border ${file.viewed ? 'border-accent bg-accent text-on-accent' : 'border-line'}">${file.viewed ? I('check', 10) : ''}</span>Viewed</button>
+    <button class="ml-auto inline-flex items-center gap-1.5 text-[11px] text-muted" data-act="viewed" role="checkbox" aria-checked="${file.viewed ? 'true' : 'false'}" aria-label="Viewed ${esc(file.path)}"><span class="inline-flex size-3.5 items-center justify-center rounded-[3px] border ${file.viewed ? 'border-accent bg-accent text-on-accent' : 'border-line'}">${file.viewed ? I('check', 10) : ''}</span>Viewed</button>
   </div>`;
 }
 function hunkHtml(text: string, pinned: boolean): string {
