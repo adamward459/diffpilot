@@ -1,6 +1,7 @@
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{self, FileDiff};
 use diffpilot_core::git;
+use diffpilot_core::settings;
 use diffpilot_diff_pane::highlight;
 use diffpilot_diff_pane::state::{Geometry, PaneState};
 use diffpilot_diff_pane::{DiffPane, DiffPaneEvent};
@@ -327,6 +328,9 @@ fn run_window(repo: PathBuf, launch: Instant, bench_mode: bool) {
                 move |window, cx| {
                     diffpilot_ui_kit::theme::install(window, cx);
                     let pane = cx.new(|cx| DiffPane::new(window, cx));
+                    if let Some(mode) = settings::diff_mode_override() {
+                        pane.update(cx, |pane, cx| pane.set_mode(mode, cx));
+                    }
                     *slot.borrow_mut() = Some(pane.clone());
                     pane
                 }
@@ -349,7 +353,7 @@ fn run_window(repo: PathBuf, launch: Instant, bench_mode: bool) {
                         start_bench(&pane, repo.clone(), launch, handle.into(), cx);
                     }
                 }
-                DiffPaneEvent::VisibleFile(_) => {}
+                DiffPaneEvent::VisibleFile(_) | DiffPaneEvent::ShownMode(_) => {}
                 DiffPaneEvent::ToggleViewed(path) => {
                     let mut viewed = viewed.borrow_mut();
                     if !viewed.remove(path) {

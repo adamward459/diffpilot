@@ -1,7 +1,8 @@
 use crate::highlight::{Piece, Span, chunk_pieces, pieces};
-use crate::layout::{CODE_PADDING, LINE, NUMBER_COLUMN, RIBBON, wrap_ranges};
+use crate::layout::{CODE_PADDING, LINE, NUMBER_COLUMN, RIBBON, SPLIT_DIVIDER, wrap_ranges};
 use crate::word::{pair_lines, word_ranges};
 use diffpilot_core::diff::{DiffLine, Hunk, LineKind};
+use diffpilot_core::threads::Side;
 use diffpilot_ui_kit::Theme;
 use gpui::{App, Bounds, ContentMask, Font, Hsla, Pixels, ShapedLine, TextRun, Window, fill, point, px, size};
 use std::collections::HashMap;
@@ -27,11 +28,30 @@ pub struct Style<'a> {
     pub wrap: Option<usize>,
 }
 
+/// Where a line is drawn: across the pane, or in one half of a split row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Column {
+    Unified,
+    Left,
+    Right,
+}
+
+impl Column {
+    /// The side whose highlight spans color the line.
+    pub fn side(self, kind: LineKind) -> Side {
+        match (self, kind) {
+            (Self::Left, _) | (Self::Unified, LineKind::Deleted) => Side::Old,
+            _ => Side::New,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct LineKey {
     pub file: u32,
     pub hunk: u32,
     pub line: u32,
+    pub side: Side,
 }
 
 struct Prepared {
@@ -57,15 +77,23 @@ pub struct LineRequest<'a> {
     pub spans: &'a [Span],
     pub y: f32,
     pub height: f32,
+    pub column: Column,
 }
 
 pub struct PaintLine {
     pub y: f32,
     pub height: f32,
+    pub column: Column,
     pub kind: LineKind,
-    pub old: Option<ShapedLine>,
-    pub new: Option<ShapedLine>,
+    pub numbers: [Option<ShapedLine>; 2],
     pub chunks: Vec<(usize, ShapedLine)>,
+}
+
+/// A half of a split row that has no line, drawn as an empty cell.
+pub struct PaintFiller {
+    pub y: f32,
+    pub height: f32,
+    pub column: Column,
 }
 
 pub struct Thumb {
@@ -77,7 +105,9 @@ pub struct Thumb {
 pub struct Frame {
     pub scroll_x: f32,
     pub theme: Theme,
+    pub column_width: f32,
     pub lines: Vec<PaintLine>,
+    pub fillers: Vec<PaintFiller>,
     pub thumb: Option<Thumb>,
 }
 
@@ -114,6 +144,7 @@ impl LineCache {
             spans,
             y,
             height,
+            column,
         } = request;
         let line = &hunk.lines[key.line as usize];
         let prepared = self.map.entry(key).or_insert_with(|| {
@@ -139,12 +170,17 @@ impl LineCache {
                 chunks.push((index, shaped.clone()));
             }
         }
+        let numbers = match column {
+            Column::Unified => [prepared.old.clone(), prepared.new.clone()],
+            Column::Left => [prepared.old.clone(), None],
+            Column::Right => [prepared.new.clone(), None],
+        };
         PaintLine {
             y,
             height,
+            column,
             kind: line.kind,
-            old: prepared.old.clone(),
-            new: prepared.new.clone(),
+            numbers,
             chunks,
         }
     }
@@ -230,11 +266,55 @@ fn shape_chunk(style: &Style, window: &mut Window, line: &DiffLine, range: &Rang
 const THUMB_WIDTH: f32 = 6.0;
 const THUMB_INSET: f32 = 3.0;
 
+struct Slot {
+    left: Pixels,
+    width: Pixels,
+    numbers: f32,
+}
+
+impl Slot {
+    fn of(column: Column, bounds: Bounds<Pixels>, column_width: f32) -> Self {
+        let (left, width, numbers) = match column {
+            Column::Unified => (bounds.origin.x, bounds.size.width, 2.0),
+            Column::Left => (bounds.origin.x, px(column_width), 1.0),
+            Column::Right => {
+                let skip = px(column_width + SPLIT_DIVIDER);
+                (bounds.origin.x + skip, bounds.size.width - skip, 1.0)
+            }
+        };
+        Self { left, width, numbers }
+    }
+
+    fn gutter(&self) -> Pixels {
+        px(NUMBER_COLUMN * self.numbers)
+    }
+}
+
+fn paint_divider(frame: &Frame, bounds: Bounds<Pixels>, top: Pixels, height: Pixels, window: &mut Window) {
+    let origin = point(bounds.origin.x + px(frame.column_width), top);
+    window.paint_quad(fill(
+        Bounds::new(origin, size(px(SPLIT_DIVIDER), height)),
+        frame.theme.diff.line,
+    ));
+}
+
 pub fn paint(frame: &Frame, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
     let theme = &frame.theme;
     let line_height = px(LINE);
     window.with_content_mask(Some(ContentMask { bounds }), |window| {
+        for filler in &frame.fillers {
+            let slot = Slot::of(filler.column, bounds, frame.column_width);
+            let (top, height) = (bounds.origin.y + px(filler.y), px(filler.height));
+            window.paint_quad(fill(
+                Bounds::new(point(slot.left, top), size(slot.width, height)),
+                theme.diff.cap,
+            ));
+            if filler.column == Column::Left {
+                paint_divider(frame, bounds, top, height, window);
+            }
+        }
         for line in &frame.lines {
+            let slot = Slot::of(line.column, bounds, frame.column_width);
             let top = bounds.origin.y + px(line.y);
             let height = px(line.height);
             let (background, number, ribbon) = match line.kind {
@@ -248,33 +328,35 @@ pub fn paint(frame: &Frame, bounds: Bounds<Pixels>, window: &mut Window, cx: &mu
             };
             if let Some(color) = background {
                 window.paint_quad(fill(
-                    Bounds::new(point(bounds.origin.x, top), size(bounds.size.width, height)),
+                    Bounds::new(point(slot.left, top), size(slot.width, height)),
                     color,
                 ));
             }
             if let Some(color) = number {
-                let width = px(NUMBER_COLUMN * 2.0);
                 window.paint_quad(fill(
-                    Bounds::new(point(bounds.origin.x, top), size(width, height)),
+                    Bounds::new(point(slot.left, top), size(slot.gutter(), height)),
                     color,
                 ));
             }
             if let Some(color) = ribbon {
-                let origin = point(bounds.origin.x + px(NUMBER_COLUMN * 2.0), top);
+                let origin = point(slot.left + slot.gutter(), top);
                 window.paint_quad(fill(Bounds::new(origin, size(px(RIBBON), height)), color));
             }
-            for (column, shaped) in [(0.0, &line.old), (1.0, &line.new)] {
+            if line.column == Column::Left {
+                paint_divider(frame, bounds, top, height, window);
+            }
+            for (column, shaped) in line.numbers.iter().enumerate() {
                 if let Some(shaped) = shaped {
-                    let right = bounds.origin.x + px(NUMBER_COLUMN * (column + 1.0) - NUMBER_PADDING);
+                    let right = slot.left + px(NUMBER_COLUMN * (column + 1) as f32 - NUMBER_PADDING);
                     shaped
                         .paint(point(right - shaped.width, top), line_height, window, cx)
                         .ok();
                 }
             }
-            let code = bounds.origin.x + px(NUMBER_COLUMN * 2.0 + RIBBON);
+            let code = slot.left + slot.gutter() + px(RIBBON);
             let clip = Bounds::new(
                 point(code, bounds.origin.y),
-                size(bounds.size.width - px(NUMBER_COLUMN * 2.0 + RIBBON), bounds.size.height),
+                size(slot.width - slot.gutter() - px(RIBBON), bounds.size.height),
             );
             window.with_content_mask(Some(ContentMask { bounds: clip }), |window| {
                 let left = code + px(CODE_PADDING - frame.scroll_x);

@@ -4,6 +4,8 @@ mod theme_data;
 pub use runs::{Piece, chunk_pieces, pieces};
 
 use diffpilot_core::diff::{FileDiff, LineKind};
+use diffpilot_core::threads::Side;
+use std::collections::HashMap;
 use std::sync::OnceLock;
 use syntect::highlighting::{
     Color, HighlightState, Highlighter, RangedHighlightIterator, ScopeSelectors, StyleModifier, Theme, ThemeItem,
@@ -27,12 +29,14 @@ impl Span {
     }
 }
 
-/// Highlight spans for every diff line of one file, indexed by hunk and line.
+/// Highlight spans for every diff line of one file, indexed by hunk and line. A context line keeps the spans
+/// of the new side, and the old side's own where they differ.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct FileTokens {
     hunk_start: Vec<u32>,
     line_end: Vec<u32>,
     spans: Vec<Span>,
+    old_context: HashMap<u32, Vec<Span>>,
 }
 
 impl FileTokens {
@@ -46,6 +50,14 @@ impl FileTokens {
         };
         let start = if index == 0 { 0 } else { self.line_end[index - 1] };
         &self.spans[start as usize..end as usize]
+    }
+
+    pub fn line_on(&self, side: Side, hunk: usize, line: usize) -> &[Span] {
+        let old = match (side, self.hunk_start.get(hunk)) {
+            (Side::Old, Some(&base)) => self.old_context.get(&(base + line as u32)),
+            _ => None,
+        };
+        old.map_or_else(|| self.line(hunk, line), Vec::as_slice)
     }
 
     pub fn span_count(&self) -> usize {
@@ -129,6 +141,7 @@ impl Engine {
         let mut tokens = FileTokens::default();
         let mut buffer = String::new();
         let mut scratch = Scratch::default();
+        let mut old_spans = Vec::new();
         for hunk in &file.hunks {
             tokens.hunk_start.push(tokens.line_end.len() as u32);
             for line in &hunk.lines {
@@ -140,8 +153,15 @@ impl Engine {
                     LineKind::Deleted => old.feed(&buffer, plain, self, &mut scratch),
                     LineKind::Added => new.feed(&buffer, plain, self, &mut scratch),
                     LineKind::Context => {
-                        old.feed(&buffer, plain, self, &mut scratch);
-                        new.feed(&buffer, plain, self, &mut scratch)
+                        old_spans.clear();
+                        old_spans.extend_from_slice(old.feed(&buffer, plain, self, &mut scratch));
+                        let keep = new.feed(&buffer, plain, self, &mut scratch);
+                        if old_spans != keep {
+                            tokens
+                                .old_context
+                                .insert(tokens.line_end.len() as u32, old_spans.clone());
+                        }
+                        keep
                     }
                 };
                 tokens.spans.extend_from_slice(keep);
@@ -327,6 +347,33 @@ mod tests {
         );
         assert_eq!(tokens.line(0, 1)[0].dark, 0x569cd6);
         assert_eq!(tokens.line(0, 3)[0].dark, 0x569cd6);
+    }
+
+    #[test]
+    fn a_context_line_keeps_the_old_sides_spans_where_they_differ() {
+        let file = diff(
+            "a.ts",
+            vec![
+                (LineKind::Deleted, "/* old note"),
+                (LineKind::Context, "const c = 3;"),
+                (LineKind::Context, "const d = 4;"),
+            ],
+        );
+        let tokens = engine().highlight(&file).unwrap();
+        let comment = 0x6a9955;
+        assert!(tokens.line_on(Side::Old, 0, 1).iter().all(|span| span.dark == comment));
+        assert_eq!(tokens.line_on(Side::New, 0, 1)[0].dark, 0x569cd6);
+        assert_eq!(tokens.line(0, 1), tokens.line_on(Side::New, 0, 1));
+        assert_eq!(tokens.line_on(Side::Old, 0, 0), tokens.line(0, 0));
+        assert_eq!(tokens.line_on(Side::Old, 3, 0), &[]);
+    }
+
+    #[test]
+    fn a_context_line_that_parses_the_same_on_both_sides_stores_one_set() {
+        let file = diff("a.ts", vec![(LineKind::Context, "const c = 3;")]);
+        let tokens = engine().highlight(&file).unwrap();
+        assert!(tokens.old_context.is_empty());
+        assert_eq!(tokens.line_on(Side::Old, 0, 0), tokens.line(0, 0));
     }
 
     #[test]

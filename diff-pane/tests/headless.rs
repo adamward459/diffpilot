@@ -1,7 +1,8 @@
 #![cfg(feature = "headless-tests")]
 
 use diffpilot_core::changes::FileStatus;
-use diffpilot_core::diff::{DiffLine, FileDiff, Hunk, LineKind};
+use diffpilot_core::diff::{DiffLine, DiffMode, FileDiff, Hunk, LineKind};
+use diffpilot_diff_pane::rows::RowKind;
 use diffpilot_diff_pane::{DiffPane, DiffPaneEvent};
 use gpui::{ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point, px, size};
 use std::cell::RefCell;
@@ -31,6 +32,42 @@ fn files() -> Vec<FileDiff> {
         .iter()
         .map(|path| file(path, 40))
         .collect()
+}
+
+fn changed(path: &str, status: FileStatus, spec: &str) -> FileDiff {
+    let (mut old, mut new) = (0, 0);
+    let lines: Vec<DiffLine> = spec
+        .chars()
+        .map(|kind| {
+            let (kind, number) = match kind {
+                'd' => (LineKind::Deleted, &mut old),
+                'a' => (LineKind::Added, &mut new),
+                _ => (LineKind::Context, &mut old),
+            };
+            *number += 1;
+            let position = *number;
+            if kind == LineKind::Context {
+                new += 1;
+            }
+            DiffLine {
+                kind,
+                old: (kind != LineKind::Added).then_some(position),
+                new: (kind != LineKind::Deleted).then_some(if kind == LineKind::Context { new } else { position }),
+                text: format!(
+                    "let {path}_{position} = {position}; // {}",
+                    "words ".repeat(position as usize % 9)
+                ),
+            }
+        })
+        .collect();
+    let mut diff = FileDiff::new(path, status);
+    diff.additions = lines.iter().filter(|line| line.kind == LineKind::Added).count() as u32;
+    diff.deletions = lines.iter().filter(|line| line.kind == LineKind::Deleted).count() as u32;
+    diff.hunks.push(Hunk {
+        header: "@@ -1 +1 @@".into(),
+        lines,
+    });
+    diff
 }
 
 fn open(
@@ -127,4 +164,139 @@ fn highlights_arrive_from_the_background_and_apply(cx: &mut TestAppContext) {
     let (ready, busy) = pane.read_with(cx, |pane, _| (pane.highlighted_files(), pane.is_highlighting()));
     assert!(ready >= 3, "{ready} files highlighted");
     assert!(!busy);
+}
+
+fn split_files() -> Vec<FileDiff> {
+    let mut renamed = changed("moved.ts", FileStatus::Renamed, "cddaacdaaa");
+    renamed.old_path = Some("old/moved.ts".into());
+    let mut binary = FileDiff::new("logo.png", FileStatus::Added);
+    binary.is_binary = true;
+    let mut untouched_rename = FileDiff::new("same.txt", FileStatus::Renamed);
+    untouched_rename.old_path = Some("was.txt".into());
+    vec![
+        changed("modified.ts", FileStatus::Modified, "cccdddaaaccddaacdadaccc"),
+        changed("added.ts", FileStatus::Added, &"a".repeat(30)),
+        changed("deleted.ts", FileStatus::Deleted, &"d".repeat(30)),
+        renamed,
+        binary,
+        untouched_rename,
+        changed("pnpm-lock.yaml", FileStatus::Modified, "cdac"),
+        changed("viewed.ts", FileStatus::Modified, "cdda"),
+    ]
+}
+
+fn pair_rows(pane: &gpui::Entity<DiffPane>, cx: &mut VisualTestContext) -> usize {
+    pane.read_with(cx, |pane, _| {
+        pane.state()
+            .rows
+            .rows
+            .iter()
+            .filter(|row| matches!(row.kind, RowKind::Pair { .. }))
+            .count()
+    })
+}
+
+fn resize(cx: &mut VisualTestContext, width: f32) {
+    cx.simulate_resize(size(px(width), px(600.0)));
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn draws_split_rows_of_every_kind_and_toggles_the_mode(cx: &mut TestAppContext) {
+    let (pane, cx, events) = open(cx);
+    pane.update(cx, |pane, cx| {
+        pane.set_files(split_files(), cx);
+        pane.set_viewed(HashSet::from(["viewed.ts".to_string()]), cx);
+        pane.set_mode(DiffMode::Split, cx);
+    });
+    draw(&pane, cx);
+    assert!(pair_rows(&pane, cx) > 60);
+    for offset in [0.0, 300.0, 700.0, 5000.0] {
+        pane.update(cx, |pane, cx| pane.scroll_to(offset, cx));
+        draw(&pane, cx);
+    }
+    pane.update(cx, |pane, cx| pane.set_wrap(false, cx));
+    draw(&pane, cx);
+    pane.update(cx, |pane, cx| pane.scroll_by(0.0, 300.0, cx));
+    draw(&pane, cx);
+    cx.update(|_, cx| diffpilot_ui_kit::theme::set_dark(true, None, cx));
+    draw(&pane, cx);
+    pane.update(cx, |pane, cx| pane.reveal("pnpm-lock.yaml", cx));
+    draw(&pane, cx);
+    pane.update(cx, |pane, cx| pane.set_wrap(true, cx));
+    draw(&pane, cx);
+
+    pane.update(cx, |pane, cx| pane.set_mode(DiffMode::Unified, cx));
+    draw(&pane, cx);
+    assert_eq!(pair_rows(&pane, cx), 0);
+    pane.update(cx, |pane, cx| pane.set_mode(DiffMode::Split, cx));
+    draw(&pane, cx);
+    assert!(pair_rows(&pane, cx) > 60);
+
+    let shown: Vec<_> = events
+        .borrow()
+        .iter()
+        .filter_map(|event| match event {
+            DiffPaneEvent::ShownMode(mode) => Some(*mode),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(shown, [DiffMode::Split, DiffMode::Unified, DiffMode::Split]);
+}
+
+#[gpui::test]
+fn a_pane_too_narrow_for_two_columns_draws_unified_rows_and_says_so(cx: &mut TestAppContext) {
+    let (pane, cx, events) = open(cx);
+    pane.update(cx, |pane, cx| {
+        pane.set_files(split_files(), cx);
+        pane.set_mode(DiffMode::Split, cx);
+    });
+    resize(cx, 1200.0);
+    assert!(pair_rows(&pane, cx) > 0);
+    resize(cx, 700.0);
+    assert_eq!(pair_rows(&pane, cx), 0);
+    pane.read_with(cx, |pane, _| {
+        assert_eq!(pane.state().mode(), DiffMode::Split);
+        assert_eq!(pane.state().shown_mode(), DiffMode::Unified);
+    });
+    resize(cx, 1200.0);
+    assert!(pair_rows(&pane, cx) > 0);
+    let shown: Vec<_> = events
+        .borrow()
+        .iter()
+        .filter_map(|event| match event {
+            DiffPaneEvent::ShownMode(mode) => Some(*mode),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(shown, [DiffMode::Split, DiffMode::Unified, DiffMode::Split]);
+}
+
+#[gpui::test]
+fn the_top_line_stays_put_when_the_mode_changes_under_a_live_window(cx: &mut TestAppContext) {
+    let (pane, cx, _) = open(cx);
+    pane.update(cx, |pane, cx| pane.set_files(split_files(), cx));
+    draw(&pane, cx);
+    pane.update(cx, |pane, cx| pane.scroll_to(900.0, cx));
+    draw(&pane, cx);
+    let top = |cx: &mut VisualTestContext| {
+        pane.read_with(cx, |pane, _| {
+            let state = pane.state();
+            let row = state.rows.rows[state.tops.row_at(state.scroll()).unwrap()];
+            (state.visible_path().map(str::to_owned), row.hunk(), row.kind)
+        })
+    };
+    let (path, hunk, kind) = top(cx);
+    let RowKind::Line { line, .. } = kind else {
+        panic!("a line is at the top: {kind:?}")
+    };
+    pane.update(cx, |pane, cx| pane.set_mode(DiffMode::Split, cx));
+    draw(&pane, cx);
+    let (split_path, split_hunk, split_kind) = top(cx);
+    assert_eq!((split_path, split_hunk), (path, hunk));
+    let shown = match split_kind {
+        RowKind::Pair { left, right, .. } => left == Some(line) || right == Some(line),
+        _ => false,
+    };
+    assert!(shown, "{split_kind:?} shows line {line}");
 }
