@@ -1,4 +1,6 @@
 use crate::paths::find_executable;
+use std::ffi::OsStr;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -24,18 +26,41 @@ pub fn binary() -> Option<PathBuf> {
 }
 
 pub fn run(repo: &Path, args: &[&str]) -> Result<String, GitError> {
+    run_io(repo, args, &[], None).map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Like `run`, with extra environment variables and bytes for stdin. Returns stdout as raw bytes.
+pub fn run_io(repo: &Path, args: &[&str], env: &[(&str, &OsStr)], stdin: Option<&[u8]>) -> Result<Vec<u8>, GitError> {
     let binary = binary().ok_or(GitError::NotFound)?;
-    let output = Command::new(binary)
+    let mut command = Command::new(binary);
+    command
         .arg("-C")
         .arg(repo)
         .args(args)
-        .stdin(Stdio::null())
-        .output()
+        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (name, value) in env {
+        command.env(name, value);
+    }
+    let mut child = command.spawn().map_err(|error| GitError::Failed(error.to_string()))?;
+    let writer = stdin.map(|input| {
+        let mut pipe = child.stdin.take().expect("stdin is piped");
+        let input = input.to_vec();
+        std::thread::spawn(move || {
+            let _ = pipe.write_all(&input);
+        })
+    });
+    let output = child
+        .wait_with_output()
         .map_err(|error| GitError::Failed(error.to_string()))?;
+    if let Some(writer) = writer {
+        let _ = writer.join();
+    }
     if !output.status.success() {
         return Err(GitError::Failed(String::from_utf8_lossy(&output.stderr).into_owned()));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok(output.stdout)
 }
 
 #[cfg(test)]

@@ -10,6 +10,7 @@ pub mod prompt;
 pub mod refs;
 pub mod review;
 pub mod settings;
+pub mod snapshot;
 pub mod store;
 pub mod threads;
 pub mod tree;
