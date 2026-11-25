@@ -3,7 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.mjs && python3 ../scripts/web_stamp.py write",
     "typecheck": "tsc --noEmit",
     "test": "node --test",
     "check": "tsc --noEmit && node --test"

@@ -1,14 +1,15 @@
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const out = join(here, '..', 'diffpilot', 'Features', 'DiffPane', 'Web');
+const out = process.argv[2];
+if (!out) throw new Error('usage: node build.mjs <output folder>');
 
+rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
-for (const name of readdirSync(out)) rmSync(join(out, name));
 
 await build({
   entryPoints: { diffpane: join(here, 'src/main.ts'), 'diffpane-worker': join(here, 'src/worker.ts') },
