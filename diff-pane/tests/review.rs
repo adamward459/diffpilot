@@ -4,12 +4,13 @@ use diffpilot_core::cancel::CancelToken;
 use diffpilot_core::changes::FileStatus;
 use diffpilot_core::claude::{Replier, ReviewError, Reviewer};
 use diffpilot_core::comparison::Comparison;
-use diffpilot_core::diff::{DiffLine, FileDiff, Hunk, LineKind};
+use diffpilot_core::diff::{DiffLine, DiffMode, FileDiff, Hunk, LineKind};
 use diffpilot_core::review::{Finding, ReviewRequest, ReviewResult, Severity};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::threads::{ReviewThread, Side, ThreadAnchor, ThreadId};
 use diffpilot_diff_pane::DiffPane;
-use diffpilot_diff_pane::layout::{THREAD, ThreadFrame};
+use diffpilot_diff_pane::layout::{LINE, SPLIT_DIVIDER, THREAD, ThreadFrame, column_width};
+use diffpilot_diff_pane::rows::RowKind;
 use diffpilot_review_ui::{ReviewHost, ReviewSession, metrics};
 use gpui::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext, point, px, size};
 use gpui_component::Root;
@@ -135,9 +136,16 @@ fn card_height(opened: &Opened, cx: &mut VisualTestContext, id: ThreadId, anchor
     let card = opened
         .pane
         .read_with(cx, |pane, _| pane.card(id).cloned().expect("a card"));
-    let pane_width = opened.pane.read_with(cx, |pane, _| pane.state().geometry().width);
-    let width = px(ThreadFrame::of(anchor).card_width(pane_width));
+    let (pane_width, split) = opened.pane.read_with(cx, |pane, _| {
+        (pane.state().geometry().width, pane.state().split_width())
+    });
+    let width = px(ThreadFrame::of(anchor, split).card_width(pane_width));
     f32::from(cx.update(|window, cx| card.read(cx).height(width, window, cx)))
+}
+
+fn frame_of(opened: &Opened, cx: &mut VisualTestContext, anchor: &ThreadAnchor) -> ThreadFrame {
+    let split = opened.pane.read_with(cx, |pane, _| pane.state().split_width());
+    ThreadFrame::of(anchor, split)
 }
 
 fn run_review(opened: &Opened, cx: &mut VisualTestContext) -> Vec<ReviewThread> {
@@ -151,7 +159,18 @@ fn run_review(opened: &Opened, cx: &mut VisualTestContext) -> Vec<ReviewThread> 
 
 #[gpui::test]
 fn a_review_run_puts_its_findings_in_the_pane_with_the_height_of_their_cards(cx: &mut TestAppContext) {
+    review_run_heights(cx, DiffMode::Unified);
+}
+
+#[gpui::test]
+fn split_threads_are_measured_at_the_width_of_their_half(cx: &mut TestAppContext) {
+    review_run_heights(cx, DiffMode::Split);
+}
+
+fn review_run_heights(cx: &mut TestAppContext, mode: DiffMode) {
     let (opened, cx) = open(cx);
+    opened.pane.update(cx, |pane, cx| pane.set_mode(mode, cx));
+    draw(&opened.pane, cx);
     let before = opened.pane.read_with(cx, |pane, _| pane.state().tops.total());
     let threads = run_review(&opened, cx);
     assert_eq!(threads.len(), 4, "the summary and three findings");
@@ -161,7 +180,7 @@ fn a_review_run_puts_its_findings_in_the_pane_with_the_height_of_their_cards(cx:
     let mut grown = 0.0;
     for thread in &threads {
         let measured = row_height(&opened, cx, thread.id);
-        let frame = ThreadFrame::of(&thread.anchor);
+        let frame = frame_of(&opened, cx, &thread.anchor);
         assert_eq!(
             measured,
             frame.row_height(card_height(&opened, cx, thread.id, &thread.anchor))
@@ -184,13 +203,137 @@ fn a_review_run_puts_its_findings_in_the_pane_with_the_height_of_their_cards(cx:
     let collapsed = 2.0 * metrics::BORDER + metrics::FINDING_HEADER;
     assert_eq!(
         row_height(&opened, cx, nit.id),
-        ThreadFrame::of(&nit.anchor).row_height(collapsed)
+        frame_of(&opened, cx, &nit.anchor).row_height(collapsed)
     );
 
     let change = threads.iter().filter(|t| t.anchor == ThreadAnchor::Change).count();
     assert_eq!(change, 2, "the summary and the finding on a file outside the diff");
     let first = opened.pane.read_with(cx, |pane, _| pane.state().rows.rows[0].kind);
     assert!(matches!(first, diffpilot_diff_pane::rows::RowKind::Thread { .. }));
+
+    let line = threads
+        .iter()
+        .find(|thread| matches!(thread.anchor, ThreadAnchor::Line { .. }))
+        .unwrap();
+    opened.pane.read_with(cx, |pane, _| {
+        let state = pane.state();
+        let row = state
+            .thread_top(line.id)
+            .map(|top| state.tops.row_at(top).unwrap())
+            .unwrap();
+        let shown = match state.rows.rows[row - 1].kind {
+            RowKind::Line { line, .. } => (DiffMode::Unified, Some(line), None),
+            RowKind::Pair { left, right, .. } => (DiffMode::Split, left, right),
+            other => panic!("{other:?} is above the thread"),
+        };
+        assert_eq!(shown.0, mode);
+        assert!(
+            shown.1 == Some(1) || shown.2 == Some(1),
+            "the line thread is under line 2: {shown:?}"
+        );
+    });
+}
+
+fn edited(path: &str) -> FileDiff {
+    let line = |kind, old, new, text: &str| DiffLine {
+        kind,
+        old,
+        new,
+        text: text.into(),
+    };
+    let mut diff = FileDiff::new(path, FileStatus::Modified);
+    diff.additions = 2;
+    diff.deletions = 1;
+    diff.hunks.push(Hunk {
+        header: "@@ -1,3 +1,4 @@".into(),
+        lines: vec![
+            line(LineKind::Context, Some(1), Some(1), "keep"),
+            line(LineKind::Deleted, Some(2), None, "old text"),
+            line(LineKind::Added, None, Some(2), "new text"),
+            line(LineKind::Added, None, Some(3), "more text"),
+            line(LineKind::Context, Some(3), Some(4), "tail"),
+        ],
+    });
+    diff
+}
+
+fn comment_on(opened: &Opened, cx: &mut VisualTestContext, hover: (f32, f32), plus: (f32, f32)) -> Vec<ThreadAnchor> {
+    cx.simulate_mouse_move(point(px(hover.0), px(hover.1)), None, Modifiers::default());
+    cx.run_until_parked();
+    cx.simulate_click(point(px(plus.0), px(plus.1)), Modifiers::default());
+    cx.run_until_parked();
+    opened.session.read_with(cx, |session, _| {
+        session.threads().map(|thread| thread.anchor.clone()).collect()
+    })
+}
+
+#[gpui::test]
+fn the_plus_works_in_both_halves_of_a_split_row_and_not_on_an_empty_cell(cx: &mut TestAppContext) {
+    let (opened, cx) = open(cx);
+    opened.pane.update(cx, |pane, cx| {
+        pane.set_files(vec![edited("a.ts")], cx);
+        pane.set_mode(DiffMode::Split, cx);
+    });
+    cx.simulate_resize(size(px(1000.0), px(700.0)));
+    cx.run_until_parked();
+    let width = opened.pane.read_with(cx, |pane, _| pane.state().geometry().width);
+    assert_eq!(width, 1000.0);
+    let right = column_width(width) + SPLIT_DIVIDER;
+    let rows = 38.0 + 28.0;
+    let row = |index: f32| rows + index * LINE + 10.0;
+    let (plus_left, plus_right) = (22.0 + 9.0, right + 22.0 + 9.0);
+
+    let anchors = comment_on(&opened, cx, (right + 200.0, row(1.0)), (plus_right, row(1.0)));
+    assert_eq!(anchors, [ThreadAnchor::line("a.ts", Side::New, 2)]);
+
+    let anchors = comment_on(&opened, cx, (200.0, row(1.0)), (plus_left, row(1.0)));
+    assert_eq!(anchors.len(), 2);
+    assert_eq!(anchors[1], ThreadAnchor::line("a.ts", Side::Old, 2));
+
+    let empty_left = comment_on(&opened, cx, (200.0, row(2.0)), (plus_left, row(2.0)));
+    assert_eq!(empty_left.len(), 2, "the second addition has nothing across from it");
+
+    let anchors = comment_on(&opened, cx, (200.0, row(0.0)), (plus_left, row(0.0)));
+    assert_eq!(
+        anchors[2],
+        ThreadAnchor::line("a.ts", Side::New, 1),
+        "a context line is commented on its new side from either half"
+    );
+}
+
+#[gpui::test]
+fn toggling_the_mode_measures_the_threads_again_at_the_new_width(cx: &mut TestAppContext) {
+    let (opened, cx) = open(cx);
+    let id = opened.session.update(cx, |session, cx| {
+        session.create_thread(ThreadAnchor::line("a.ts", Side::New, 2), cx)
+    });
+    cx.run_until_parked();
+    let essay = "a long comment that wraps across many lines of the card ".repeat(30);
+    opened.session.update(cx, |session, cx| session.post(id, &essay, cx));
+    cx.run_until_parked();
+    draw(&opened.pane, cx);
+    let anchor = ThreadAnchor::line("a.ts", Side::New, 2);
+    let unified = row_height(&opened, cx, id);
+    assert_eq!(
+        unified,
+        frame_of(&opened, cx, &anchor).row_height(card_height(&opened, cx, id, &anchor))
+    );
+
+    opened.pane.update(cx, |pane, cx| pane.set_mode(DiffMode::Split, cx));
+    draw(&opened.pane, cx);
+    let split = row_height(&opened, cx, id);
+    assert!(
+        split > unified,
+        "half the width wraps the comment more: {unified} then {split}"
+    );
+    assert_eq!(
+        split,
+        frame_of(&opened, cx, &anchor).row_height(card_height(&opened, cx, id, &anchor))
+    );
+
+    opened.pane.update(cx, |pane, cx| pane.set_mode(DiffMode::Unified, cx));
+    draw(&opened.pane, cx);
+    assert_eq!(row_height(&opened, cx, id), unified);
 }
 
 #[gpui::test]
@@ -301,7 +444,7 @@ fn a_file_comment_opens_its_composer_in_view(cx: &mut TestAppContext) {
     });
     assert_eq!(
         row_height(&opened, cx, id),
-        ThreadFrame::of(&ThreadAnchor::file("c.ts")).row_height(card_height(
+        ThreadFrame::of(&ThreadAnchor::file("c.ts"), None).row_height(card_height(
             &opened,
             cx,
             id,

@@ -1,10 +1,10 @@
 use crate::chrome;
 use crate::highlight::{self, FileTokens};
-use crate::layout::{FILE_HEADER, HUNK, LINE, NOTICE, Sticky, ThreadFrame};
-use crate::lines::{self, CODE_SIZE, Fonts, Frame, LineCache, LineKey, LineRequest, Style, Thumb};
+use crate::layout::{FILE_HEADER, HUNK, LINE, NOTICE, NUMBER_COLUMN, SPLIT_DIVIDER, Sticky, ThreadFrame, column_width};
+use crate::lines::{self, CODE_SIZE, Column, Fonts, Frame, LineCache, LineKey, LineRequest, PaintFiller, Style, Thumb};
 use crate::rows::{Notice, RowKind, ThreadSlot};
 use crate::state::{Geometry, PaneState};
-use diffpilot_core::diff::{FileDiff, LineKind};
+use diffpilot_core::diff::{DiffMode, FileDiff, LineKind};
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use diffpilot_review_ui::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange};
@@ -27,6 +27,8 @@ pub enum DiffPaneEvent {
     VisibleFile(String),
     ToggleViewed(String),
     FirstPaint,
+    /// The mode the rows are drawn in changed. A split pane that is too narrow draws unified rows.
+    ShownMode(DiffMode),
 }
 
 #[derive(Clone)]
@@ -65,6 +67,14 @@ impl Probe {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Hovered {
+    row: usize,
+    column: Column,
+    hunk: u32,
+    line: u32,
+}
+
 struct Card {
     view: Entity<ThreadCard>,
     _resized: Subscription,
@@ -80,8 +90,9 @@ pub struct DiffPane {
     state: PaneState,
     review: Option<Review>,
     pending_focus: Option<ThreadId>,
-    mouse_y: Option<Pixels>,
-    top: Pixels,
+    mouse: Option<(Pixels, Pixels)>,
+    origin: (Pixels, Pixels),
+    remeasure: bool,
     fonts: Fonts,
     theme: Theme,
     highlights: Vec<Highlight>,
@@ -134,8 +145,9 @@ impl DiffPane {
             state: PaneState::new(geometry),
             review: None,
             pending_focus: None,
-            mouse_y: None,
-            top: px(0.0),
+            mouse: None,
+            origin: (px(0.0), px(0.0)),
+            remeasure: false,
             fonts,
             theme: Theme::new(false),
             highlights: Vec::new(),
@@ -175,6 +187,12 @@ impl DiffPane {
 
     pub fn set_wrap(&mut self, wrap: bool, cx: &mut Context<Self>) {
         self.state.set_wrap(wrap);
+        self.sync(cx);
+    }
+
+    pub fn set_mode(&mut self, mode: DiffMode, cx: &mut Context<Self>) {
+        self.state.set_mode(mode);
+        self.remeasure = true;
         self.sync(cx);
     }
 
@@ -312,7 +330,7 @@ impl DiffPane {
         let Some(slot) = self.state.threads.iter().find(|slot| slot.id == id) else {
             return;
         };
-        let frame = ThreadFrame::of(&slot.anchor);
+        let frame = ThreadFrame::of(&slot.anchor, self.state.split_width());
         let width = px(frame.card_width(self.state.geometry().width));
         let height = f32::from(card.read(cx).height(width, window, cx));
         self.state.set_thread_height(id, frame.row_height(height));
@@ -325,17 +343,38 @@ impl DiffPane {
         }
     }
 
-    fn hovered_line(&self) -> Option<usize> {
+    fn hovered(&self) -> Option<Hovered> {
         self.review.as_ref()?;
-        let index = self.state.tops.row_at(self.state.scroll() + f32::from(self.mouse_y?))?;
-        matches!(self.state.rows.rows[index].kind, RowKind::Line { .. }).then_some(index)
+        let (x, y) = self.mouse?;
+        let row = self.state.tops.row_at(self.state.scroll() + f32::from(y))?;
+        match self.state.rows.rows[row].kind {
+            RowKind::Line { hunk, line } => Some(Hovered {
+                row,
+                column: Column::Unified,
+                hunk,
+                line,
+            }),
+            RowKind::Pair { hunk, left, right } => {
+                let on_left = f32::from(x) < column_width(self.state.geometry().width);
+                let (column, line) = if on_left {
+                    (Column::Left, left?)
+                } else {
+                    (Column::Right, right?)
+                };
+                Some(Hovered {
+                    row,
+                    column,
+                    hunk,
+                    line,
+                })
+            }
+            _ => None,
+        }
     }
 
-    fn add_comment(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let row = self.state.rows.rows[index];
-        let RowKind::Line { hunk, line } = row.kind else { return };
-        let file = &self.state.files[row.file as usize];
-        let diff_line = &file.hunks[hunk as usize].lines[line as usize];
+    fn add_comment(&mut self, hovered: Hovered, window: &mut Window, cx: &mut Context<Self>) {
+        let file = &self.state.files[self.state.rows.rows[hovered.row].file as usize];
+        let diff_line = &file.hunks[hovered.hunk as usize].lines[hovered.line as usize];
         let (side, number) = match diff_line.kind {
             LineKind::Deleted => (Side::Old, diff_line.old),
             _ => (Side::New, diff_line.new),
@@ -365,6 +404,9 @@ impl DiffPane {
         if let Some(path) = self.state.take_visible_change() {
             self.share_visible(Some(path.clone()), cx);
             cx.emit(DiffPaneEvent::VisibleFile(path));
+        }
+        if let Some(mode) = self.state.take_shown_change() {
+            cx.emit(DiffPaneEvent::ShownMode(mode));
         }
         self.pump_highlights(cx);
         cx.notify();
@@ -429,11 +471,12 @@ impl DiffPane {
             height: f32::from(bounds.size.height),
             cell: self.fonts.cell,
         };
-        self.top = bounds.origin.y;
-        if geometry != self.state.geometry() {
-            let narrower_or_wider = geometry.width != self.state.geometry().width;
+        self.origin = (bounds.origin.x, bounds.origin.y);
+        let before = self.state.geometry();
+        if geometry != before || self.remeasure {
             self.state.set_geometry(geometry);
-            if narrower_or_wider {
+            if geometry.width != before.width || self.remeasure {
+                self.remeasure = false;
                 self.measure_all(window, cx);
             }
             self.sync(cx);
@@ -447,28 +490,45 @@ impl DiffPane {
         let scroll = self.state.scroll();
         let viewport = geometry.height;
         let mut painted = Vec::new();
+        let mut fillers = Vec::new();
         for index in self.state.visible_rows() {
             let row = self.state.rows.rows[index];
-            let RowKind::Line { hunk, line } = row.kind else {
-                continue;
+            let (hunk, cells) = match row.kind {
+                RowKind::Line { hunk, line } => (hunk, [(Column::Unified, Some(line)), (Column::Unified, None)]),
+                RowKind::Pair { hunk, left, right } => (hunk, [(Column::Left, left), (Column::Right, right)]),
+                _ => continue,
             };
+            let (y, height) = (self.state.tops.top(index) - scroll, self.state.tops.height(index));
             let file = &self.state.files[row.file as usize];
-            let spans = match self.highlights.get(row.file as usize) {
-                Some(Highlight::Ready(tokens)) => tokens.line(hunk as usize, line as usize),
-                _ => &[],
-            };
-            let request = LineRequest {
-                key: LineKey {
-                    file: row.file,
-                    hunk,
-                    line,
-                },
-                hunk: &file.hunks[hunk as usize],
-                spans,
-                y: self.state.tops.top(index) - scroll,
-                height: self.state.tops.height(index),
-            };
-            painted.push(self.lines.line(&style, window, request, viewport));
+            for (column, line) in cells {
+                let Some(line) = line else {
+                    if column != Column::Unified {
+                        fillers.push(PaintFiller { y, height, column });
+                    }
+                    continue;
+                };
+                let tokens = match self.highlights.get(row.file as usize) {
+                    Some(Highlight::Ready(tokens)) => Some(tokens),
+                    _ => None,
+                };
+                let differs = tokens.is_some_and(|tokens| tokens.old_context_differs(hunk as usize, line as usize));
+                let side = column.side(file.hunks[hunk as usize].lines[line as usize].kind, differs);
+                let spans = tokens.map_or(&[][..], |tokens| tokens.line_on(side, hunk as usize, line as usize));
+                let request = LineRequest {
+                    key: LineKey {
+                        file: row.file,
+                        hunk,
+                        line,
+                        side,
+                    },
+                    hunk: &file.hunks[hunk as usize],
+                    spans,
+                    y,
+                    height,
+                    column,
+                };
+                painted.push(self.lines.line(&style, window, request, viewport));
+            }
         }
         if let Some(started) = started {
             self.probe.lines_ms.push(started.elapsed().as_secs_f32() * 1000.0);
@@ -476,7 +536,9 @@ impl DiffPane {
         Frame {
             scroll_x: self.state.scroll_x(),
             theme: self.theme,
+            column_width: column_width(geometry.width),
             lines: painted,
+            fillers,
             thumb: self.thumb(window),
         }
     }
@@ -652,7 +714,7 @@ impl DiffPane {
     fn thread_row(&self, slot: u32, y: f32, height: f32) -> Option<Div> {
         let thread = &self.state.threads[slot as usize];
         let card = self.card(thread.id)?;
-        let frame = ThreadFrame::of(&thread.anchor);
+        let frame = ThreadFrame::of(&thread.anchor, self.state.split_width());
         let card_height = height - frame.top - frame.bottom - if frame.rule { 1.0 } else { 0.0 };
         let style = StyleRefinement::default().w_full().h(px(card_height));
         let mut row = Self::placed(y, height)
@@ -664,16 +726,39 @@ impl DiffPane {
         if frame.rule {
             row = row.border_b_1().border_color(self.theme.diff.line);
         }
+        if let Some(width) = self.state.split_width().filter(|_| !frame.rule) {
+            row = row.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left(px(column_width(width)))
+                    .w(px(SPLIT_DIVIDER))
+                    .h_full()
+                    .bg(self.theme.diff.line),
+            );
+        }
         Some(row.child(AnyView::from(card.clone()).cached(style)))
     }
 
-    fn add_comment_button(&self, index: usize, y: f32, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn column_span(&self, column: Column) -> (f32, f32) {
+        let width = self.state.geometry().width;
+        let half = column_width(width);
+        match column {
+            Column::Unified => (0.0, width),
+            Column::Left => (0.0, half),
+            Column::Right => (half + SPLIT_DIVIDER, width - half - SPLIT_DIVIDER),
+        }
+    }
+
+    fn add_comment_button(&self, hovered: Hovered, y: f32, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = &self.theme;
+        let numbers = if hovered.column == Column::Unified { 2.0 } else { 1.0 };
+        let left = self.column_span(hovered.column).0 + NUMBER_COLUMN * numbers - 18.0;
         div()
-            .id(("add-comment", index))
+            .id(("add-comment", hovered.row))
             .absolute()
             .top(px(y + 1.0))
-            .left(px(62.0))
+            .left(px(left))
             .flex()
             .items_center()
             .justify_center()
@@ -682,7 +767,7 @@ impl DiffPane {
             .bg(theme.accent)
             .cursor_pointer()
             .child(painted::plus(12.0, theme.on_accent))
-            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.add_comment(index, window, cx)))
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.add_comment(hovered, window, cx)))
     }
 
     fn backdrop(&self, y: f32) -> Hsla {
@@ -745,14 +830,14 @@ impl Render for DiffPane {
                 this.scroll_by(-f32::from(delta.y), -f32::from(delta.x), cx);
             }))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
-                let before = this.hovered_line();
-                this.mouse_y = Some(event.position.y - this.top);
-                if this.hovered_line() != before {
+                let before = this.hovered();
+                this.mouse = Some((event.position.x - this.origin.0, event.position.y - this.origin.1));
+                if this.hovered() != before {
                     cx.notify();
                 }
             }))
             .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
-                if !hovered && this.mouse_y.take().is_some() {
+                if !hovered && this.mouse.take().is_some() {
                     cx.notify();
                 }
             }));
@@ -786,7 +871,7 @@ impl Render for DiffPane {
             let height = self.state.tops.height(index);
             let file = row.file as usize;
             let element = match row.kind {
-                RowKind::Line { .. } | RowKind::Gap => continue,
+                RowKind::Line { .. } | RowKind::Pair { .. } | RowKind::Gap => continue,
                 RowKind::Thread { slot } => match self.thread_row(slot, y, height) {
                     Some(thread) => thread,
                     None => continue,
@@ -797,11 +882,17 @@ impl Render for DiffPane {
             };
             root = root.child(element);
         }
-        if let Some(index) = self.hovered_line() {
-            let y = self.state.tops.top(index) - scroll;
-            let height = self.state.tops.height(index);
-            root = root.child(Self::placed(y, height).bg(theme.diff.text.opacity(0.05)));
-            root = root.child(self.add_comment_button(index, y, cx));
+        if let Some(hovered) = self.hovered() {
+            let y = self.state.tops.top(hovered.row) - scroll;
+            let height = self.state.tops.height(hovered.row);
+            let (left, width) = self.column_span(hovered.column);
+            root = root.child(
+                Self::placed(y, height)
+                    .left(px(left))
+                    .w(px(width))
+                    .bg(theme.diff.text.opacity(0.05)),
+            );
+            root = root.child(self.add_comment_button(hovered, y, cx));
         }
         if let Some(sticky) = self.state.position().and_then(|position| position.sticky) {
             root = root.child(self.sticky(sticky, cx));

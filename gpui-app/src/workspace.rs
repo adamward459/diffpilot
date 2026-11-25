@@ -1,5 +1,6 @@
 use crate::bench::{self, Bench, Mark};
 use crate::repo_view::{Claude, RepoView};
+use diffpilot_core::diff::DiffMode;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::viewed::ViewedStore;
 use diffpilot_ui_kit::Glyph;
@@ -13,7 +14,7 @@ use gpui_component::{ActiveTheme, Icon, Sizable, StyledExt, h_flex, v_flex};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-actions!(diffpilot, [OpenFolder, ToggleSidebar, Quit]);
+actions!(diffpilot, [OpenFolder, ToggleSidebar, UnifiedDiff, SplitDiff, Quit]);
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
@@ -35,7 +36,12 @@ pub fn init(cx: &mut App) {
         },
         Menu {
             name: "View".into(),
-            items: vec![MenuItem::action("Toggle Sidebar", ToggleSidebar)],
+            items: vec![
+                MenuItem::action("Toggle Sidebar", ToggleSidebar),
+                MenuItem::separator(),
+                MenuItem::action("Unified Diff", UnifiedDiff),
+                MenuItem::action("Split Diff", SplitDiff),
+            ],
         },
     ]);
 }
@@ -101,6 +107,12 @@ impl Workspace {
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         if let Some(repo) = &self.repo {
             repo.update(cx, |repo, cx| repo.toggle_sidebar(cx));
+        }
+    }
+
+    fn set_diff_mode(&mut self, mode: DiffMode, cx: &mut Context<Self>) {
+        if let Some(repo) = &self.repo {
+            repo.update(cx, |repo, cx| repo.set_diff_mode(mode, cx));
         }
     }
 
@@ -187,6 +199,8 @@ impl Render for Workspace {
             .size_full()
             .on_action(cx.listener(|this, _: &OpenFolder, window, cx| this.open_folder(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
+            .on_action(cx.listener(|this, _: &UnifiedDiff, _, cx| this.set_diff_mode(DiffMode::Unified, cx)))
+            .on_action(cx.listener(|this, _: &SplitDiff, _, cx| this.set_diff_mode(DiffMode::Split, cx)))
             .child(content)
             .when(self.benching, |this| this.child(bench::probe()))
     }

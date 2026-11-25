@@ -1,5 +1,5 @@
 use diffpilot_core::changes::FileStatus;
-use diffpilot_core::diff::{FileDiff, LineKind};
+use diffpilot_core::diff::{DiffLine, DiffMode, FileDiff, Hunk, LineKind};
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -47,9 +47,23 @@ fn group_thousands(value: u32) -> String {
 pub enum RowKind {
     FileHeader,
     Notice(Notice),
-    Hunk { hunk: u32 },
-    Line { hunk: u32, line: u32 },
-    Thread { slot: u32 },
+    Hunk {
+        hunk: u32,
+    },
+    Line {
+        hunk: u32,
+        line: u32,
+    },
+    /// A split row. `left` and `right` index the hunk's lines: a deleted or context line on the left,
+    /// an added or context line on the right. A context line is on both sides.
+    Pair {
+        hunk: u32,
+        left: Option<u32>,
+        right: Option<u32>,
+    },
+    Thread {
+        slot: u32,
+    },
     Gap,
 }
 
@@ -62,8 +76,16 @@ pub struct Row {
 impl Row {
     pub fn hunk(self) -> Option<u32> {
         match self.kind {
-            RowKind::Hunk { hunk } | RowKind::Line { hunk, .. } => Some(hunk),
+            RowKind::Hunk { hunk } | RowKind::Line { hunk, .. } | RowKind::Pair { hunk, .. } => Some(hunk),
             _ => None,
+        }
+    }
+
+    pub fn shows_line(self, hunk: u32, line: u32) -> bool {
+        match self.kind {
+            RowKind::Line { hunk: h, line: l } => (h, l) == (hunk, line),
+            RowKind::Pair { hunk: h, left, right } => h == hunk && (left == Some(line) || right == Some(line)),
+            _ => false,
         }
     }
 
@@ -118,6 +140,7 @@ impl Rows {
             RowKind::Gap => RowRef::Gap,
             RowKind::Hunk { hunk } => RowRef::Hunk(hunk),
             RowKind::Line { hunk, line } => RowRef::Line(hunk, line),
+            RowKind::Pair { hunk, left, right } => RowRef::Line(hunk, left.or(right).unwrap_or_default()),
             RowKind::Thread { slot } => RowRef::Thread(threads[slot as usize].id),
         }
     }
@@ -127,8 +150,10 @@ impl Rows {
             let slot = threads.iter().position(|thread| thread.id == id)?;
             return self.thread_row(slot as u32);
         }
-        self.file_range(file)?
-            .find(|&index| self.row_ref(index, threads) == target)
+        self.file_range(file)?.find(|&index| match target {
+            RowRef::Line(hunk, line) => self.rows[index].shows_line(hunk, line),
+            _ => self.row_ref(index, threads) == target,
+        })
     }
 
     pub fn file_range(&self, file: usize) -> Option<std::ops::Range<usize>> {
@@ -175,7 +200,7 @@ pub fn body_notice(file: &FileDiff, loaded: bool) -> Option<Notice> {
     None
 }
 
-pub fn build(files: &[Arc<FileDiff>], visibility: Visibility, threads: &[ThreadSlot]) -> Rows {
+pub fn build(files: &[Arc<FileDiff>], visibility: Visibility, threads: &[ThreadSlot], mode: DiffMode) -> Rows {
     let mut by_path: HashMap<&str, Vec<(u32, &ThreadSlot)>> = HashMap::new();
     for (slot, thread) in threads.iter().enumerate() {
         by_path
@@ -226,6 +251,7 @@ pub fn build(files: &[Arc<FileDiff>], visibility: Visibility, threads: &[ThreadS
                 file,
                 visibility.loaded.contains(&file.path),
                 file_threads,
+                mode,
             );
         }
         out.rows.push(Row {
@@ -242,7 +268,14 @@ pub fn build(files: &[Arc<FileDiff>], visibility: Visibility, threads: &[ThreadS
     out
 }
 
-fn push_body(rows: &mut Vec<Row>, f: u32, file: &FileDiff, loaded: bool, threads: &[(u32, &ThreadSlot)]) {
+fn push_body(
+    rows: &mut Vec<Row>,
+    f: u32,
+    file: &FileDiff,
+    loaded: bool,
+    threads: &[(u32, &ThreadSlot)],
+    mode: DiffMode,
+) {
     if let Some(notice) = body_notice(file, loaded) {
         rows.push(Row {
             file: f,
@@ -256,36 +289,92 @@ fn push_body(rows: &mut Vec<Row>, f: u32, file: &FileDiff, loaded: bool, threads
             file: f,
             kind: RowKind::Hunk { hunk: hunk_index },
         });
-        for (l, line) in hunk.lines.iter().enumerate() {
+        match mode {
+            DiffMode::Unified => push_unified_hunk(rows, f, hunk_index, hunk, threads),
+            DiffMode::Split => push_split_hunk(rows, f, hunk_index, hunk, threads),
+        }
+    }
+}
+
+fn push_unified_hunk(rows: &mut Vec<Row>, f: u32, hunk_index: u32, hunk: &Hunk, threads: &[(u32, &ThreadSlot)]) {
+    for (l, line) in hunk.lines.iter().enumerate() {
+        rows.push(Row {
+            file: f,
+            kind: RowKind::Line {
+                hunk: hunk_index,
+                line: l as u32,
+            },
+        });
+        push_line_threads(rows, f, line, threads);
+    }
+}
+
+/// Each run of changed lines becomes rows that put its deletions on the left and its additions on the right,
+/// in order. The shorter side ends early and the other side's cells have no partner.
+fn push_split_hunk(rows: &mut Vec<Row>, f: u32, hunk_index: u32, hunk: &Hunk, threads: &[(u32, &ThreadSlot)]) {
+    let lines = &hunk.lines;
+    let mut push_pair = |left: Option<u32>, right: Option<u32>| {
+        rows.push(Row {
+            file: f,
+            kind: RowKind::Pair {
+                hunk: hunk_index,
+                left,
+                right,
+            },
+        });
+        let own_threads = [
+            left.filter(|&index| lines[index as usize].kind == LineKind::Deleted),
+            right,
+        ];
+        for index in own_threads.into_iter().flatten() {
+            push_line_threads(rows, f, &lines[index as usize], threads);
+        }
+    };
+    let (mut deleted, mut added) = (Vec::new(), Vec::new());
+    let mut at = 0;
+    while at < lines.len() {
+        if lines[at].kind == LineKind::Context {
+            push_pair(Some(at as u32), Some(at as u32));
+            at += 1;
+            continue;
+        }
+        deleted.clear();
+        added.clear();
+        while at < lines.len() && lines[at].kind != LineKind::Context {
+            if lines[at].kind == LineKind::Deleted {
+                deleted.push(at as u32);
+            } else {
+                added.push(at as u32);
+            }
+            at += 1;
+        }
+        for k in 0..deleted.len().max(added.len()) {
+            push_pair(deleted.get(k).copied(), added.get(k).copied());
+        }
+    }
+}
+
+fn push_line_threads(rows: &mut Vec<Row>, f: u32, line: &DiffLine, threads: &[(u32, &ThreadSlot)]) {
+    if threads.is_empty() {
+        return;
+    }
+    let (side, number) = match line.kind {
+        LineKind::Deleted => (Side::Old, line.old),
+        _ => (Side::New, line.new),
+    };
+    for (slot, thread) in threads {
+        if let ThreadAnchor::Line {
+            side: anchor_side,
+            line: anchor_line,
+            ..
+        } = &thread.anchor
+            && *anchor_side == side
+            && Some(*anchor_line) == number
+        {
             rows.push(Row {
                 file: f,
-                kind: RowKind::Line {
-                    hunk: hunk_index,
-                    line: l as u32,
-                },
+                kind: RowKind::Thread { slot: *slot },
             });
-            if threads.is_empty() {
-                continue;
-            }
-            let (side, number) = match line.kind {
-                LineKind::Deleted => (Side::Old, line.old),
-                _ => (Side::New, line.new),
-            };
-            for (slot, thread) in threads {
-                if let ThreadAnchor::Line {
-                    side: anchor_side,
-                    line: anchor_line,
-                    ..
-                } = &thread.anchor
-                    && *anchor_side == side
-                    && Some(*anchor_line) == number
-                {
-                    rows.push(Row {
-                        file: f,
-                        kind: RowKind::Thread { slot: *slot },
-                    });
-                }
-            }
         }
     }
 }
@@ -293,8 +382,7 @@ fn push_body(rows: &mut Vec<Row>, f: u32, file: &FileDiff, loaded: bool, threads
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{diff_hunks, line};
-    use diffpilot_core::diff::DiffLine;
+    use crate::testing::{diff_hunks, line, lines_of};
 
     fn file(path: &str, hunks: Vec<Vec<DiffLine>>) -> Arc<FileDiff> {
         Arc::new(diff_hunks(path, hunks))
@@ -327,6 +415,7 @@ mod tests {
                 loaded: &loaded,
             },
             &[],
+            DiffMode::Unified,
         )
     }
 
@@ -402,6 +491,7 @@ mod tests {
                 loaded: &none,
             },
             &[],
+            DiffMode::Unified,
         );
         assert_eq!(rows.rows[1].kind, RowKind::Notice(Notice::Generated));
         assert_eq!(rows.rows[4].kind, RowKind::Notice(Notice::Large { lines: 1600 }));
@@ -413,6 +503,7 @@ mod tests {
                 loaded: &loaded,
             },
             &[],
+            DiffMode::Unified,
         );
         assert_eq!(rows.rows[1].kind, RowKind::Hunk { hunk: 0 });
     }
@@ -484,6 +575,7 @@ mod tests {
                 loaded: &none,
             },
             &threads,
+            DiffMode::Unified,
         );
         use RowKind::*;
         assert_eq!(
@@ -523,6 +615,7 @@ mod tests {
                 loaded: &none,
             },
             &threads,
+            DiffMode::Unified,
         );
         assert_eq!(rows.rows[0].kind, RowKind::Thread { slot: 1 });
         assert_eq!(rows.lead(), 1);
@@ -549,8 +642,265 @@ mod tests {
                 loaded: &none,
             },
             &threads,
+            DiffMode::Unified,
         );
         assert!(rows.rows.is_empty());
         assert_eq!(rows.thread_row(0), None);
+    }
+
+    fn split_of(files: &[Arc<FileDiff>], threads: &[ThreadSlot]) -> Rows {
+        let none = HashSet::new();
+        build(
+            files,
+            Visibility {
+                collapsed: &none,
+                loaded: &none,
+            },
+            threads,
+            DiffMode::Split,
+        )
+    }
+
+    type Cells = (Option<u32>, Option<u32>);
+
+    fn pairs_of(spec: &str) -> Vec<Cells> {
+        let rows = split_of(&[file("a.ts", vec![lines_of(spec)])], &[]);
+        rows.rows
+            .iter()
+            .filter_map(|row| match row.kind {
+                RowKind::Pair { left, right, .. } => Some((left, right)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    const NONE: Option<u32> = None;
+
+    fn at(line: u32) -> Option<u32> {
+        Some(line)
+    }
+
+    #[test]
+    fn a_balanced_change_puts_each_deletion_beside_its_addition() {
+        assert_eq!(pairs_of("ddaa"), [(at(0), at(2)), (at(1), at(3))]);
+    }
+
+    #[test]
+    fn extra_deletions_have_nothing_on_the_right() {
+        assert_eq!(pairs_of("ddda"), [(at(0), at(3)), (at(1), NONE), (at(2), NONE)]);
+    }
+
+    #[test]
+    fn extra_additions_have_nothing_on_the_left() {
+        assert_eq!(pairs_of("daaa"), [(at(0), at(1)), (NONE, at(2)), (NONE, at(3))]);
+    }
+
+    #[test]
+    fn context_lines_are_on_both_sides_and_split_the_changes_around_them() {
+        assert_eq!(
+            pairs_of("cdacaac"),
+            [
+                (at(0), at(0)),
+                (at(1), at(2)),
+                (at(3), at(3)),
+                (NONE, at(4)),
+                (NONE, at(5)),
+                (at(6), at(6)),
+            ]
+        );
+    }
+
+    #[test]
+    fn interleaved_changes_in_one_run_pair_in_order() {
+        assert_eq!(pairs_of("dada"), [(at(0), at(1)), (at(2), at(3))]);
+        assert_eq!(pairs_of("ad"), [(at(1), at(0))]);
+    }
+
+    #[test]
+    fn every_line_is_shown_once_on_the_side_it_belongs_to() {
+        for spec in ["", "c", "d", "a", "cc", "dddaa", "adadad", "cdcacdda", "aaaccddd"] {
+            let lines = lines_of(spec);
+            let pairs = pairs_of(spec);
+            for (index, line) in lines.iter().enumerate() {
+                let index = Some(index as u32);
+                let left = pairs.iter().filter(|(left, _)| *left == index).count();
+                let right = pairs.iter().filter(|(_, right)| *right == index).count();
+                let want = match line.kind {
+                    LineKind::Context => (1, 1),
+                    LineKind::Deleted => (1, 0),
+                    LineKind::Added => (0, 1),
+                };
+                assert_eq!((left, right), want, "{spec} line {index:?}");
+            }
+            assert!(pairs.iter().all(|pair| *pair != (NONE, NONE)), "{spec}");
+        }
+    }
+
+    #[test]
+    fn an_added_file_has_an_empty_left_side_and_a_deleted_file_an_empty_right_side() {
+        assert_eq!(pairs_of("aaa"), [(NONE, at(0)), (NONE, at(1)), (NONE, at(2))]);
+        assert_eq!(pairs_of("ddd"), [(at(0), NONE), (at(1), NONE), (at(2), NONE)]);
+    }
+
+    #[test]
+    fn hunk_headers_stay_whole_rows_and_the_other_row_kinds_do_not_change() {
+        let rows = split_of(&sample(), &[]);
+        use RowKind::*;
+        assert_eq!(
+            kinds(&rows),
+            [
+                (0, FileHeader),
+                (0, Hunk { hunk: 0 }),
+                (
+                    0,
+                    Pair {
+                        hunk: 0,
+                        left: at(0),
+                        right: at(0)
+                    }
+                ),
+                (
+                    0,
+                    Pair {
+                        hunk: 0,
+                        left: at(1),
+                        right: at(2)
+                    }
+                ),
+                (0, Hunk { hunk: 1 }),
+                (
+                    0,
+                    Pair {
+                        hunk: 1,
+                        left: NONE,
+                        right: at(0)
+                    }
+                ),
+                (0, Gap),
+                (1, FileHeader),
+                (1, Hunk { hunk: 0 }),
+                (
+                    1,
+                    Pair {
+                        hunk: 0,
+                        left: NONE,
+                        right: at(0)
+                    }
+                ),
+                (1, Gap),
+            ]
+        );
+        assert_eq!(rows.file_start, [0, 7, 11]);
+        assert_eq!(rows.rows[3].hunk(), Some(0));
+    }
+
+    #[test]
+    fn files_without_a_body_show_the_same_notice_in_both_modes() {
+        let mut binary = FileDiff::new("logo.png", FileStatus::Added);
+        binary.is_binary = true;
+        let mut renamed = FileDiff::new("b.txt", FileStatus::Renamed);
+        renamed.old_path = Some("a.txt".into());
+        let files = [Arc::new(binary), Arc::new(renamed)];
+        let split = split_of(&files, &[]);
+        assert_eq!(kinds(&split), kinds(&rows_of(&files, &[])));
+        assert_eq!(split.rows[1].kind, RowKind::Notice(Notice::Binary));
+        assert_eq!(split.rows[4].kind, RowKind::Notice(Notice::Renamed));
+    }
+
+    #[test]
+    fn a_rename_with_edits_pairs_its_lines() {
+        let mut renamed = diff_hunks("b.ts", vec![lines_of("cda")]);
+        renamed.status = FileStatus::Renamed;
+        renamed.old_path = Some("a.ts".into());
+        let rows = split_of(&[Arc::new(renamed)], &[]);
+        assert_eq!(rows.rows.len(), 1 + 1 + 2 + 1);
+        assert!(matches!(
+            rows.rows[3].kind,
+            RowKind::Pair {
+                left: Some(1),
+                right: Some(2),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_no_newline_marker_adds_no_row_and_does_not_split_a_change() {
+        let text = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,2 @@\n same\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n";
+        let files: Vec<_> = diffpilot_core::diff::parse(text).into_iter().map(Arc::new).collect();
+        let rows = split_of(&files, &[]);
+        let pairs: Vec<_> = rows
+            .rows
+            .iter()
+            .filter_map(|row| match row.kind {
+                RowKind::Pair { left, right, .. } => Some((left, right)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(pairs, [(at(0), at(0)), (at(1), at(2))]);
+        assert_eq!(rows.rows.len(), 1 + 1 + 2 + 1);
+    }
+
+    #[test]
+    fn a_thread_sits_under_the_row_that_shows_its_line_left_side_first() {
+        let threads = vec![
+            ThreadSlot {
+                id: ThreadId(1),
+                anchor: ThreadAnchor::line("a.ts", Side::New, 2),
+            },
+            ThreadSlot {
+                id: ThreadId(2),
+                anchor: ThreadAnchor::line("a.ts", Side::Old, 2),
+            },
+            ThreadSlot {
+                id: ThreadId(3),
+                anchor: ThreadAnchor::line("a.ts", Side::New, 1),
+            },
+            ThreadSlot {
+                id: ThreadId(4),
+                anchor: ThreadAnchor::line("a.ts", Side::Old, 1),
+            },
+        ];
+        let rows = split_of(&sample(), &threads);
+        let shown: Vec<_> = rows.rows[..7]
+            .iter()
+            .map(|row| match row.kind {
+                RowKind::Thread { slot } => format!("thread {}", slot + 1),
+                RowKind::Pair { left, right, .. } => format!("{left:?}|{right:?}"),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                "FileHeader",
+                "Hunk { hunk: 0 }",
+                "Some(0)|Some(0)",
+                "thread 3",
+                "Some(1)|Some(2)",
+                "thread 2",
+                "thread 1",
+            ],
+            "an old-side thread on a context line has no row, as in the unified rows"
+        );
+    }
+
+    #[test]
+    fn a_line_is_found_in_either_mode_by_the_row_that_shows_it() {
+        let files = sample();
+        let threads: [ThreadSlot; 0] = [];
+        let unified = rows_of(&files, &[]);
+        let split = split_of(&files, &threads);
+        assert_eq!(unified.find(0, RowRef::Line(0, 1), &threads), Some(3));
+        assert_eq!(split.find(0, RowRef::Line(0, 1), &threads), Some(3));
+        assert_eq!(split.find(0, RowRef::Line(0, 2), &threads), Some(3));
+        assert_eq!(unified.find(0, RowRef::Line(0, 2), &threads), Some(4));
+        assert_eq!(split.find(0, RowRef::Line(0, 3), &threads), None);
+        assert_eq!(split.row_ref(3, &threads), RowRef::Line(0, 1));
+        assert_eq!(split.row_ref(2, &threads), RowRef::Line(0, 0));
+        assert_eq!(split.row_ref(5, &threads), RowRef::Line(1, 0));
+        assert!(split.rows[3].shows_line(0, 2));
+        assert!(!split.rows[3].shows_line(1, 2));
+        assert!(!split.rows[1].shows_line(0, 0), "a hunk header shows no line");
     }
 }

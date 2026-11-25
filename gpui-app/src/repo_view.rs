@@ -5,12 +5,13 @@ use crate::sidebar::{LoadedChanges, Sidebar, SidebarEvent};
 use diffpilot_core::changes;
 use diffpilot_core::claude::{ClaudeCliReplier, Replier, Reviewer, ScriptedReplier, reviewer_from_env};
 use diffpilot_core::comparison::{self, Comparison};
-use diffpilot_core::diff::{self, FileDiff};
+use diffpilot_core::diff::{self, DiffMode, FileDiff};
 use diffpilot_core::refs::Refs;
-use diffpilot_core::settings::Settings;
+use diffpilot_core::settings::{self, Settings};
 use diffpilot_core::tree;
 use diffpilot_core::viewed::{ViewedFiles, ViewedKey, ViewedStore};
 use diffpilot_core::watcher::{self, WatchGuard};
+use diffpilot_diff_pane::layout::SPLIT_MIN_WIDTH;
 use diffpilot_review_ui::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
 use diffpilot_ui_kit::components::{Button, Look, OnSelect, State, capsule, segmented, toggle_capsule};
 use diffpilot_ui_kit::{Glyph, Theme};
@@ -19,6 +20,7 @@ use gpui::{
     Context, Entity, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render,
     SharedString, Styled, Subscription, Task, Window, WindowControlArea, div, px,
 };
+use gpui_component::tooltip::Tooltip;
 use gpui_component::{ActiveTheme, InteractiveElementExt as _, StyledExt, h_flex, v_flex};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
@@ -37,22 +39,7 @@ const TOOLBAR_HEIGHT: f32 = 52.0;
 const GLASS_HEIGHT: f32 = 35.0;
 const TRAFFIC_LIGHTS: f32 = 96.0;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum PaneMode {
-    Diff,
-    Edit,
-}
-
-impl PaneMode {
-    const ALL: [PaneMode; 2] = [PaneMode::Diff, PaneMode::Edit];
-
-    fn title(self) -> &'static str {
-        match self {
-            PaneMode::Diff => "Diff",
-            PaneMode::Edit => "Edit",
-        }
-    }
-}
+const DIFF_MODES: [(DiffMode, &str); 2] = [(DiffMode::Unified, "Unified"), (DiffMode::Split, "Split")];
 
 #[derive(Clone, PartialEq)]
 struct SessionKey {
@@ -171,7 +158,7 @@ pub struct RepoView {
     resizing: bool,
     should_move: Rc<Cell<bool>>,
     wrap: bool,
-    mode: PaneMode,
+    mode: DiffMode,
     compact_toolbar: bool,
     visible_file: Option<String>,
     watch: Option<WatchGuard>,
@@ -193,6 +180,7 @@ impl RepoView {
             |name| name.to_string_lossy().into_owned(),
         );
         window.set_window_title(&folder_name);
+        let mode = settings::diff_mode_override().unwrap_or_else(|| settings.diff_mode());
         let mut this = Self {
             repo,
             folder_name: folder_name.into(),
@@ -209,7 +197,7 @@ impl RepoView {
             resizing: false,
             should_move: Rc::new(Cell::new(false)),
             wrap: false,
-            mode: PaneMode::Diff,
+            mode,
             compact_toolbar: false,
             visible_file: None,
             watch: None,
@@ -235,6 +223,20 @@ impl RepoView {
                 .sidebar
                 .update(cx, |sidebar, cx| sidebar.set_comments(counts, cx));
         }
+    }
+
+    pub fn set_diff_mode(&mut self, mode: DiffMode, cx: &mut Context<Self>) {
+        if mode == self.mode {
+            return;
+        }
+        self.mode = mode;
+        if let Some(session) = &self.session {
+            session.pane.update(cx, |pane, cx| pane.set_mode(mode, cx));
+        }
+        let settings = self.settings.clone();
+        cx.background_spawn(async move { settings.set_diff_mode(mode) })
+            .detach();
+        cx.notify();
     }
 
     pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
@@ -295,8 +297,11 @@ impl RepoView {
         self.next_session_id += 1;
         let sidebar = cx.new(|cx| Sidebar::new(window, cx));
         let pane = cx.new(|cx| DiffPane::new(window, cx));
-        let wrap = self.wrap;
-        pane.update(cx, |pane, cx| pane.set_wrap(wrap, cx));
+        let (wrap, mode) = (self.wrap, self.mode);
+        pane.update(cx, |pane, cx| {
+            pane.set_wrap(wrap, cx);
+            pane.set_mode(mode, cx);
+        });
         let mut host = ReviewHost::new(Some(self.repo.clone()), comparison);
         host.branch_name = branch_name;
         let review = {
@@ -339,6 +344,7 @@ impl RepoView {
                     DiffPaneEvent::ToggleViewed(path) => this.toggle_viewed(path.clone(), window, cx),
                     DiffPaneEvent::VisibleFile(path) => this.visible_file = Some(path.clone()),
                     DiffPaneEvent::FirstPaint => Bench::mark_now(cx, Mark::FirstDiffPaint),
+                    DiffPaneEvent::ShownMode(_) => cx.notify(),
                 },
             ),
         ];
@@ -616,24 +622,31 @@ impl RepoView {
     fn segmented(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let view = cx.entity().downgrade();
         let on_select: OnSelect = Rc::new(move |index, _, cx| {
-            view.update(cx, |this, cx| {
-                this.mode = PaneMode::ALL[index];
-                cx.notify();
-            })
-            .ok();
+            view.update(cx, |this, cx| this.set_diff_mode(DIFF_MODES[index].0, cx))
+                .ok();
         });
-        let titles = PaneMode::ALL.map(PaneMode::title);
-        let selected = PaneMode::ALL.iter().position(|mode| *mode == self.mode).unwrap_or(0);
-        segmented(
-            "pane-mode",
+        let titles = DIFF_MODES.map(|(_, title)| title);
+        let shown = self
+            .session
+            .as_ref()
+            .map_or(self.mode, |session| session.pane.read(cx).state().shown_mode());
+        let selected = DIFF_MODES.iter().position(|(mode, _)| *mode == shown).unwrap_or(0);
+        let control = segmented(
+            "diff-mode",
             &titles,
             selected,
             GLASS_HEIGHT,
             State::Normal,
             &Theme::of(cx),
             on_select,
-        )
-        .into_any_element()
+        );
+        if shown == self.mode {
+            return control.into_any_element();
+        }
+        let hint = format!("Split view needs a pane at least {} pt wide", SPLIT_MIN_WIDTH as u32);
+        control
+            .tooltip(move |window, cx| Tooltip::new(hint.clone()).build(window, cx))
+            .into_any_element()
     }
 
     fn wrap_button(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
@@ -925,11 +938,15 @@ mod tests {
     }
 
     fn open(cx: &mut TestAppContext) -> (Opened, &mut gpui::VisualTestContext) {
+        open_with(cx, Settings::in_memory())
+    }
+
+    fn open_with(cx: &mut TestAppContext, settings: Settings) -> (Opened, &mut gpui::VisualTestContext) {
         cx.update(diffpilot_ui_kit::init);
         let dir = fixture();
         let repo = dir.path().to_path_buf();
         let store = Arc::new(ViewedStore::in_memory());
-        let settings = Arc::new(Settings::in_memory());
+        let settings = Arc::new(settings);
         let shared = store.clone();
         let mut view = None;
         let handle = cx.add_window(|window, cx| {
@@ -990,6 +1007,65 @@ mod tests {
             view.settings.comparison(&key)
         });
         assert_eq!(saved, Some(Comparison::WorkingTree));
+    }
+
+    #[gpui::test]
+    fn the_diff_mode_is_remembered_and_reaches_every_session(cx: &mut TestAppContext) {
+        let (opened, cx) = open(cx);
+        let pane_mode = |opened: &Opened, cx: &mut gpui::VisualTestContext| {
+            let pane = opened.view.read_with(cx, |view, _| view.current().pane.clone());
+            pane.read_with(cx, |pane, _| pane.state().mode())
+        };
+        assert_eq!(pane_mode(&opened, cx), DiffMode::Unified);
+
+        opened
+            .view
+            .update(cx, |view, cx| view.set_diff_mode(DiffMode::Split, cx));
+        cx.run_until_parked();
+        assert_eq!(pane_mode(&opened, cx), DiffMode::Split);
+        assert_eq!(
+            opened.view.read_with(cx, |view, _| view.settings.diff_mode()),
+            DiffMode::Split
+        );
+
+        opened.view.update_in(cx, |view, window, cx| {
+            view.select_comparison(Comparison::Staged, window, cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            pane_mode(&opened, cx),
+            DiffMode::Split,
+            "the next session starts in split"
+        );
+    }
+
+    #[gpui::test]
+    fn a_saved_diff_mode_is_used_when_the_folder_opens(cx: &mut TestAppContext) {
+        let settings = Settings::in_memory();
+        settings.set_diff_mode(DiffMode::Split);
+        let (opened, cx) = open_with(cx, settings);
+        let pane = opened.view.read_with(cx, |view, _| view.current().pane.clone());
+        pane.read_with(cx, |pane, _| assert_eq!(pane.state().mode(), DiffMode::Split));
+    }
+
+    #[gpui::test]
+    fn a_narrow_window_shows_unified_rows_while_the_choice_stays_split(cx: &mut TestAppContext) {
+        let (opened, cx) = open(cx);
+        opened
+            .view
+            .update(cx, |view, cx| view.set_diff_mode(DiffMode::Split, cx));
+        cx.simulate_resize(gpui::size(px(1400.0), px(800.0)));
+        cx.run_until_parked();
+        let pane = opened.view.read_with(cx, |view, _| view.current().pane.clone());
+        pane.read_with(cx, |pane, _| assert_eq!(pane.state().shown_mode(), DiffMode::Split));
+
+        cx.simulate_resize(gpui::size(px(800.0), px(800.0)));
+        cx.run_until_parked();
+        pane.read_with(cx, |pane, _| {
+            assert_eq!(pane.state().mode(), DiffMode::Split);
+            assert_eq!(pane.state().shown_mode(), DiffMode::Unified);
+        });
+        assert_eq!(opened.view.read_with(cx, |view, _| view.mode), DiffMode::Split);
     }
 
     #[gpui::test]

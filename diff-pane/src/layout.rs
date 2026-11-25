@@ -1,6 +1,6 @@
 use crate::rows::{Row, RowKind, Rows};
-use diffpilot_core::diff::FileDiff;
-use diffpilot_core::threads::ThreadAnchor;
+use diffpilot_core::diff::{DiffMode, FileDiff};
+use diffpilot_core::threads::{Side, ThreadAnchor};
 use std::ops::Range;
 use std::sync::Arc;
 use unicode_width::UnicodeWidthChar;
@@ -22,6 +22,10 @@ pub const NUMBER_COLUMN: f32 = 40.0;
 pub const RIBBON: f32 = 3.0;
 pub const CODE_PADDING: f32 = 12.0;
 pub const GUTTER: f32 = NUMBER_COLUMN * 2.0 + RIBBON + CODE_PADDING;
+pub const SPLIT_MIN_WIDTH: f32 = 900.0;
+pub const SPLIT_DIVIDER: f32 = 1.0;
+pub const SPLIT_GUTTER: f32 = NUMBER_COLUMN + RIBBON + CODE_PADDING;
+pub const SPLIT_THREAD_LEFT: f32 = NUMBER_COLUMN + RIBBON + 3.0;
 const TAB_CELLS: usize = 4;
 
 pub fn cell_width(ch: char) -> usize {
@@ -76,8 +80,29 @@ pub fn columns_for(width: f32, cell: f32) -> usize {
     (((width - GUTTER) / cell - 0.01).floor() as isize).max(1) as usize
 }
 
+/// Split rows need room for two columns. A narrower pane shows the unified rows instead.
+pub fn shown_mode(mode: DiffMode, width: f32) -> DiffMode {
+    if width >= SPLIT_MIN_WIDTH {
+        mode
+    } else {
+        DiffMode::Unified
+    }
+}
+
+pub fn column_width(width: f32) -> f32 {
+    ((width - SPLIT_DIVIDER) / 2.0).max(0.0)
+}
+
+pub fn split_columns_for(width: f32, cell: f32) -> usize {
+    if cell <= 0.0 {
+        return 1;
+    }
+    (((column_width(width) - SPLIT_GUTTER) / cell - 0.01).floor() as isize).max(1) as usize
+}
+
 /// Space around a thread card inside its row: left, right, top, bottom. A line thread sits under the code
-/// gutter. A file or change thread spans the pane and has a rule below it.
+/// gutter. In split rows it fills the half its side is on. A file or change thread spans the pane and has a
+/// rule below it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ThreadFrame {
     pub left: f32,
@@ -88,15 +113,23 @@ pub struct ThreadFrame {
 }
 
 impl ThreadFrame {
-    pub fn of(anchor: &ThreadAnchor) -> Self {
+    /// `split_width` is the pane width when the pane shows split rows.
+    pub fn of(anchor: &ThreadAnchor, split_width: Option<f32>) -> Self {
         match anchor {
-            ThreadAnchor::Line { .. } => Self {
-                left: LINE_THREAD_LEFT,
-                right: THREAD_RIGHT,
-                top: LINE_THREAD_TOP,
-                bottom: LINE_THREAD_BOTTOM,
-                rule: false,
-            },
+            ThreadAnchor::Line { side, .. } => {
+                let (left, right) = match (split_width, side) {
+                    (None, _) => (LINE_THREAD_LEFT, THREAD_RIGHT),
+                    (Some(width), Side::Old) => (SPLIT_THREAD_LEFT, width - column_width(width) + THREAD_RIGHT),
+                    (Some(width), Side::New) => (column_width(width) + SPLIT_DIVIDER + SPLIT_THREAD_LEFT, THREAD_RIGHT),
+                };
+                Self {
+                    left,
+                    right,
+                    top: LINE_THREAD_TOP,
+                    bottom: LINE_THREAD_BOTTOM,
+                    rule: false,
+                }
+            }
             _ => Self {
                 left: FILE_THREAD_LEFT,
                 right: THREAD_RIGHT,
@@ -127,6 +160,17 @@ pub fn row_height(row: Row, files: &[Arc<FileDiff>], wrap: Option<usize>, thread
             let Some(cols) = wrap else { return LINE };
             let text = &files[row.file as usize].hunks[hunk as usize].lines[line as usize].text;
             LINE * wrapped_lines(text, cols) as f32
+        }
+        RowKind::Pair { hunk, left, right } => {
+            let Some(cols) = wrap else { return LINE };
+            let lines = &files[row.file as usize].hunks[hunk as usize].lines;
+            let wrapped = |cell: Option<u32>| cell.map_or(1, |line| wrapped_lines(&lines[line as usize].text, cols));
+            let tall = if left == right {
+                wrapped(left)
+            } else {
+                wrapped(left).max(wrapped(right))
+            };
+            LINE * tall as f32
         }
     }
 }
@@ -248,8 +292,8 @@ pub fn position(rows: &Rows, tops: &Tops, scroll: f32) -> Option<Position> {
 mod tests {
     use super::*;
     use crate::rows::{ThreadSlot, Visibility, build};
-    use crate::testing::{added, diff};
-    use diffpilot_core::diff::DiffLine;
+    use crate::testing::{added, diff, line, lines_with};
+    use diffpilot_core::diff::{DiffLine, DiffMode, LineKind};
     use diffpilot_core::threads::{Side, ThreadId};
     use std::collections::HashSet;
 
@@ -274,6 +318,7 @@ mod tests {
                 loaded: &none,
             },
             &[],
+            DiffMode::Unified,
         );
         let tops = Tops::new(&rows.rows, &files, wrap);
         (files, rows, tops)
@@ -357,6 +402,7 @@ mod tests {
                 loaded: &none,
             },
             &[],
+            DiffMode::Unified,
         );
         let tops = Tops::new(&rows.rows, &files, Some(10));
         assert_eq!(tops.height(2), 3.0 * LINE);
@@ -452,6 +498,7 @@ mod tests {
                 loaded: &none,
             },
             &threads,
+            DiffMode::Unified,
         );
         let row = rows.thread_row(0).unwrap();
         assert_eq!(Tops::new(&rows.rows, &files, None).height(row), THREAD);
@@ -474,6 +521,7 @@ mod tests {
                 loaded: &none,
             },
             &threads,
+            DiffMode::Unified,
         );
         let row = rows.thread_row(0).unwrap();
         let mut tops = Tops::with_threads(&rows.rows, &files, None, &[150.0]);
@@ -485,13 +533,13 @@ mod tests {
 
     #[test]
     fn a_thread_frame_insets_the_card_and_adds_its_padding() {
-        let line = ThreadFrame::of(&ThreadAnchor::line("a.ts", Side::New, 1));
+        let line = ThreadFrame::of(&ThreadAnchor::line("a.ts", Side::New, 1), None);
         assert_eq!(line.card_width(900.0), 900.0 - 86.0 - 16.0);
         assert_eq!(line.row_height(100.0), 118.0);
-        let file = ThreadFrame::of(&ThreadAnchor::file("a.ts"));
+        let file = ThreadFrame::of(&ThreadAnchor::file("a.ts"), None);
         assert_eq!(file.card_width(900.0), 868.0);
         assert_eq!(file.row_height(100.0), 121.0);
-        assert_eq!(ThreadFrame::of(&ThreadAnchor::Change), file);
+        assert_eq!(ThreadFrame::of(&ThreadAnchor::Change, None), file);
     }
 
     #[test]
@@ -509,6 +557,7 @@ mod tests {
                 loaded: &none,
             },
             &threads,
+            DiffMode::Unified,
         );
         let tops = Tops::new(&rows.rows, &files, None);
         assert_eq!(position(&rows, &tops, 0.0), Some(Position { file: 0, sticky: None }));
@@ -517,5 +566,134 @@ mod tests {
             Some(Position { file: 0, sticky: None })
         );
         assert_eq!(position(&rows, &tops, THREAD), Some(Position { file: 0, sticky: None }));
+    }
+
+    fn split_model(spec: &str, text: &str, wrap: Option<usize>) -> (Rows, Tops) {
+        let files = vec![Arc::new(diff("a.ts", lines_with(spec, text)))];
+        let none = HashSet::new();
+        let rows = build(
+            &files,
+            Visibility {
+                collapsed: &none,
+                loaded: &none,
+            },
+            &[],
+            DiffMode::Split,
+        );
+        let tops = Tops::new(&rows.rows, &files, wrap);
+        (rows, tops)
+    }
+
+    #[test]
+    fn split_rows_are_one_line_tall_without_wrap() {
+        let (rows, tops) = split_model("cddaaa", &"x".repeat(500), None);
+        let pairs = rows.rows.len() - 3;
+        assert_eq!(pairs, 4);
+        assert_eq!(tops.total(), FILE_HEADER + HUNK + pairs as f32 * LINE + GAP);
+    }
+
+    #[test]
+    fn a_split_row_is_as_tall_as_its_taller_side() {
+        let files = vec![Arc::new(diff(
+            "a.ts",
+            vec![
+                line(LineKind::Deleted, Some(1), None, &"d".repeat(25)),
+                line(LineKind::Added, None, Some(1), "short"),
+                line(LineKind::Deleted, Some(2), None, "short"),
+                line(LineKind::Added, None, Some(2), &"a".repeat(45)),
+                line(LineKind::Context, Some(3), Some(3), &"c".repeat(35)),
+                line(LineKind::Added, None, Some(4), &"n".repeat(11)),
+            ],
+        ))];
+        let none = HashSet::new();
+        let rows = build(
+            &files,
+            Visibility {
+                collapsed: &none,
+                loaded: &none,
+            },
+            &[],
+            DiffMode::Split,
+        );
+        let tops = Tops::new(&rows.rows, &files, Some(10));
+        let heights: Vec<f32> = (2..rows.rows.len() - 1).map(|index| tops.height(index)).collect();
+        assert_eq!(heights, [3.0 * LINE, 5.0 * LINE, 4.0 * LINE, 2.0 * LINE]);
+    }
+
+    #[test]
+    fn a_split_row_is_as_tall_as_the_chunks_it_paints() {
+        let texts = [
+            "",
+            "abc",
+            "0123456789",
+            "01234567890",
+            "\t\tab",
+            "\u{4e2d}\u{4e2d}\u{4e2d}a",
+        ];
+        for cols in [1, 3, 10] {
+            for left in texts {
+                for right in texts {
+                    let lines = vec![
+                        line(LineKind::Deleted, Some(1), None, left),
+                        line(LineKind::Added, None, Some(1), right),
+                    ];
+                    let files = vec![Arc::new(diff("a.ts", lines))];
+                    let pair = Row {
+                        file: 0,
+                        kind: RowKind::Pair {
+                            hunk: 0,
+                            left: Some(0),
+                            right: Some(1),
+                        },
+                    };
+                    let painted = wrap_ranges(left, cols).len().max(wrap_ranges(right, cols).len());
+                    assert_eq!(
+                        row_height(pair, &files, Some(cols), &[]),
+                        painted as f32 * LINE,
+                        "{left:?} | {right:?} at {cols}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_pair_row_with_one_side_wraps_like_a_unified_line() {
+        let (rows, tops) = split_model("aa", &"x".repeat(25), Some(10));
+        assert_eq!(rows.rows.len(), 5);
+        assert_eq!(tops.height(2), 3.0 * LINE);
+        assert_eq!(tops.height(3), 3.0 * LINE);
+    }
+
+    #[test]
+    fn two_split_columns_share_the_pane_around_a_divider() {
+        assert_eq!(column_width(1001.0), 500.0);
+        assert_eq!(column_width(901.0) * 2.0 + SPLIT_DIVIDER, 901.0);
+        assert_eq!(split_columns_for(1001.0, 7.0), 63);
+        assert_eq!(split_columns_for(10.0, 7.0), 1);
+        assert!(split_columns_for(1200.0, 7.2) < columns_for(1200.0, 7.2));
+    }
+
+    #[test]
+    fn split_needs_a_wide_pane() {
+        assert_eq!(shown_mode(DiffMode::Split, SPLIT_MIN_WIDTH), DiffMode::Split);
+        assert_eq!(shown_mode(DiffMode::Split, SPLIT_MIN_WIDTH - 0.5), DiffMode::Unified);
+        assert_eq!(shown_mode(DiffMode::Unified, 2000.0), DiffMode::Unified);
+    }
+
+    #[test]
+    fn a_split_thread_fills_the_half_of_its_side() {
+        let width = 1001.0;
+        let old = ThreadFrame::of(&ThreadAnchor::line("a.ts", Side::Old, 1), Some(width));
+        let new = ThreadFrame::of(&ThreadAnchor::line("a.ts", Side::New, 1), Some(width));
+        let column = column_width(width);
+        assert_eq!(old.left, SPLIT_THREAD_LEFT);
+        assert_eq!(old.left + old.card_width(width), column - THREAD_RIGHT);
+        assert_eq!(new.left, column + SPLIT_DIVIDER + SPLIT_THREAD_LEFT);
+        assert_eq!(new.left + new.card_width(width), width - THREAD_RIGHT);
+        assert_eq!(old.card_width(width), new.card_width(width));
+        assert_eq!(old.row_height(100.0), 118.0);
+        let file = ThreadFrame::of(&ThreadAnchor::file("a.ts"), Some(width));
+        assert_eq!(file, ThreadFrame::of(&ThreadAnchor::file("a.ts"), None));
     }
 }

@@ -1,11 +1,30 @@
 use crate::changes::FileStatus;
 use crate::comparison::Comparison;
 use crate::git::{self, GitError};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 
 pub const DIFF_ARGS: [&str; 6] = ["-c", "core.quotepath=false", "diff", "-U3", "-M", "--no-color"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DiffMode {
+    #[default]
+    Unified,
+    Split,
+}
+
+impl DiffMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "unified" => Some(Self::Unified),
+            "split" => Some(Self::Split),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LineKind {
