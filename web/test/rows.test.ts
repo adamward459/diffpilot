@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { DiffLine, ReviewThread } from '../src/bridge.ts';
-import { BIG_LINES, buildChangeRows, buildFileRows, codeHtml, esc, wordRanges } from '../src/rows.ts';
+import { BIG_LINES, buildChangeRows, buildFileRows, codeHtml, esc, isPlain, wordRanges, wrapLines } from '../src/rows.ts';
 import type { LineRow, PageFile, Row } from '../src/rows.ts';
 
 const file = (over: Partial<PageFile> = {}): PageFile => ({
@@ -190,4 +190,24 @@ test('buildChangeRows puts each change thread in its own fc row before any file 
 test('buildFileRows ignores change threads', () => {
   const change: ReviewThread = { id: 9, anchor: { kind: 'change' }, comments: [] };
   assert.deepEqual(kinds(buildFileRows(file(), 0, [change])), kinds(buildFileRows(file(), 0, [])));
+});
+
+test('wrapLines counts one visual line per cols cells', () => {
+  assert.equal(wrapLines('', 10), 1);
+  assert.equal(wrapLines('x'.repeat(10), 10), 1);
+  assert.equal(wrapLines('x'.repeat(11), 10), 2);
+  assert.equal(wrapLines('x'.repeat(30), 10), 3);
+  assert.equal(wrapLines(' '.repeat(25), 10), 3);
+  assert.equal(wrapLines('x', 0), 1);
+});
+
+test('wrapLines counts a tab as 4 cells', () => {
+  assert.equal(wrapLines('\t\t', 8), 1);
+  assert.equal(wrapLines('\t\tx', 8), 2);
+});
+
+test('isPlain is true only for printable ASCII', () => {
+  assert.equal(isPlain('const a = 1;'), true);
+  assert.equal(isPlain('\ta'), false);
+  assert.equal(isPlain('caf\u00e9'), false);
 });
