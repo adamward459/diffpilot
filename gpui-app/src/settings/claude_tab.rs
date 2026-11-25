@@ -1,5 +1,5 @@
 use super::icons;
-use super::ui::{self, MenuEntry, MenuItem, Row, Tokens, tag};
+use super::ui::{self, MenuEntry, MenuItem, Row, Select, Tokens, tag};
 use super::window::{Load, Menu, SettingsWindow};
 use diffpilot_core::connection::{ClaudeStatus, Login, McpState};
 use diffpilot_core::policy::EditPermission;
@@ -159,7 +159,7 @@ fn model_picker(
 ) -> impl IntoElement {
     let open = window.menu == Some(menu);
     let this = cx.entity();
-    let set = move |model: ReviewModel| -> Rc<dyn Fn(&mut gpui::Window, &mut gpui::App)> {
+    let set = move |model: ReviewModel| -> Select {
         let this = this.clone();
         Rc::new(move |_, cx| {
             this.update(cx, |this, cx| {

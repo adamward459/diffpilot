@@ -367,10 +367,12 @@ pub fn segmented(
         }))
 }
 
+pub type Select = Rc<dyn Fn(&mut Window, &mut App)>;
+
 pub struct MenuItem {
     pub label: SharedString,
     pub checked: bool,
-    pub on_select: Rc<dyn Fn(&mut Window, &mut App)>,
+    pub on_select: Select,
 }
 
 pub enum MenuEntry {
