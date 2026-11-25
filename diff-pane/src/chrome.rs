@@ -1,31 +1,10 @@
-use crate::icons;
-use crate::theme::Palette;
-use diffpilot_core::changes::FileStatus;
 use diffpilot_core::diff::FileDiff;
-use diffpilot_core::file_kind::{FileTint, file_kind};
-use gpui::{
-    AnyElement, FontWeight, HighlightStyle, InteractiveElement as _, IntoElement, ParentElement as _, Styled as _,
-    StyledText, div, px,
-};
-use gpui::{Div, Font, Hsla, Stateful};
+use diffpilot_ui_kit::Theme;
+use diffpilot_ui_kit::painted;
+use gpui::{AnyElement, FontWeight, HighlightStyle, IntoElement, ParentElement as _, Styled as _, StyledText, div, px};
+use gpui::{Div, Font};
 
 const MINIBAR_CELLS: usize = 5;
-
-pub fn tint(palette: &Palette, file: &FileDiff) -> Hsla {
-    let index = match file_kind(&file.path).tint() {
-        FileTint::Blue => 0,
-        FileTint::Teal => 1,
-        FileTint::Orange => 2,
-        FileTint::Yellow => 3,
-        FileTint::Purple => 4,
-        FileTint::Secondary => 5,
-    };
-    palette.tints[index]
-}
-
-pub fn status_letter(status: FileStatus) -> &'static str {
-    status.code()
-}
 
 pub fn filled_cells(additions: u32, deletions: u32) -> usize {
     let total = additions + deletions;
@@ -35,16 +14,16 @@ pub fn filled_cells(additions: u32, deletions: u32) -> usize {
     (additions as f32 / total as f32 * MINIBAR_CELLS as f32).round() as usize
 }
 
-pub fn minibar(palette: &Palette, additions: u32, deletions: u32) -> impl IntoElement {
+pub fn minibar(theme: &Theme, additions: u32, deletions: u32) -> impl IntoElement {
     let filled = filled_cells(additions, deletions);
     let mut bar = div().flex().flex_none().gap(px(1.0));
     for cell in 0..MINIBAR_CELLS {
         let color = if cell < filled {
-            palette.add_ribbon
+            theme.success
         } else if deletions > 0 {
-            palette.del_ribbon
+            theme.danger
         } else {
-            palette.press
+            theme.diff.press
         };
         bar = bar.child(div().flex_none().size(px(6.0)).rounded(px(1.5)).bg(color));
     }
@@ -52,7 +31,7 @@ pub fn minibar(palette: &Palette, additions: u32, deletions: u32) -> impl IntoEl
 }
 
 /// The path with its folder in the muted color and the file name in bold, as one ellipsized text.
-pub fn path_text(palette: &Palette, file: &FileDiff) -> AnyElement {
+pub fn path_text(theme: &Theme, file: &FileDiff) -> AnyElement {
     let (folder, name) = match file.path.rfind('/') {
         Some(index) => file.path.split_at(index + 1),
         None => ("", file.path.as_str()),
@@ -65,7 +44,7 @@ pub fn path_text(palette: &Palette, file: &FileDiff) -> AnyElement {
         highlights.push((
             0..text.len(),
             HighlightStyle {
-                color: Some(palette.secondary),
+                color: Some(theme.diff.secondary),
                 ..HighlightStyle::default()
             },
         ));
@@ -76,7 +55,7 @@ pub fn path_text(palette: &Palette, file: &FileDiff) -> AnyElement {
         highlights.push((
             folder_start..text.len(),
             HighlightStyle {
-                color: Some(palette.secondary),
+                color: Some(theme.diff.secondary),
                 ..HighlightStyle::default()
             },
         ));
@@ -96,30 +75,12 @@ pub fn path_text(palette: &Palette, file: &FileDiff) -> AnyElement {
         .whitespace_nowrap()
         .text_ellipsis()
         .text_size(px(12.5))
-        .text_color(palette.text)
+        .text_color(theme.diff.text)
         .child(StyledText::new(text).with_highlights(highlights))
         .into_any_element()
 }
 
-pub fn status_badge(palette: &Palette, mono: &Font, status: FileStatus) -> impl IntoElement {
-    div()
-        .font(mono.clone())
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .h(px(16.0))
-        .min_w(px(16.0))
-        .px(px(3.0))
-        .rounded(px(4.0))
-        .bg(palette.cap)
-        .text_color(palette.muted)
-        .text_size(px(10.5))
-        .font_weight(FontWeight::SEMIBOLD)
-        .child(status_letter(status))
-}
-
-pub fn counts(palette: &Palette, mono: &Font, additions: u32, deletions: u32) -> impl IntoElement {
+pub fn counts(theme: &Theme, mono: &Font, additions: u32, deletions: u32) -> impl IntoElement {
     let added = format!("+{additions}");
     let deleted = format!("\u{2212}{deletions}");
     let text = format!("{added} {deleted}");
@@ -127,14 +88,14 @@ pub fn counts(palette: &Palette, mono: &Font, additions: u32, deletions: u32) ->
         (
             0..added.len(),
             HighlightStyle {
-                color: Some(palette.ok),
+                color: Some(theme.success),
                 ..HighlightStyle::default()
             },
         ),
         (
             added.len() + 1..text.len(),
             HighlightStyle {
-                color: Some(palette.err),
+                color: Some(theme.danger),
                 ..HighlightStyle::default()
             },
         ),
@@ -143,37 +104,11 @@ pub fn counts(palette: &Palette, mono: &Font, additions: u32, deletions: u32) ->
         .flex_none()
         .font(mono.clone())
         .text_size(px(11.5))
-        .text_color(palette.text)
+        .text_color(theme.diff.text)
         .child(StyledText::new(text).with_highlights(highlights))
 }
 
-pub fn viewed_toggle(palette: &Palette, id: impl Into<gpui::ElementId>, viewed: bool) -> Stateful<Div> {
-    let mut checkbox = div()
-        .flex()
-        .items_center()
-        .justify_center()
-        .size(px(14.0))
-        .rounded(px(3.0))
-        .border_1()
-        .border_color(if viewed { palette.accent } else { palette.line });
-    if viewed {
-        checkbox = checkbox.bg(palette.accent).child(icons::check(10.0, palette.on_accent));
-    }
-    div()
-        .id(id)
-        .flex()
-        .flex_none()
-        .items_center()
-        .gap(px(6.0))
-        .ml_auto()
-        .cursor_pointer()
-        .text_size(px(11.0))
-        .text_color(palette.muted)
-        .child(checkbox)
-        .child("Viewed")
-}
-
-pub fn thread_count(palette: &Palette, count: usize) -> impl IntoElement {
+pub fn thread_count(theme: &Theme, count: usize) -> Div {
     div()
         .flex()
         .flex_none()
@@ -181,8 +116,8 @@ pub fn thread_count(palette: &Palette, count: usize) -> impl IntoElement {
         .gap(px(2.0))
         .ml(px(4.0))
         .text_size(px(11.0))
-        .text_color(palette.muted)
-        .child(icons::bubble(12.0, palette.muted))
+        .text_color(theme.diff.muted)
+        .child(painted::bubble(12.0, theme.diff.muted))
         .child(count.to_string())
 }
 

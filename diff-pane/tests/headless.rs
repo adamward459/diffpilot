@@ -40,6 +40,7 @@ fn open(
     &mut VisualTestContext,
     Rc<RefCell<Vec<DiffPaneEvent>>>,
 ) {
+    cx.update(diffpilot_ui_kit::init);
     let (pane, cx) = cx.add_window_view(DiffPane::new);
     let events = Rc::new(RefCell::new(Vec::new()));
     let sink = events.clone();
@@ -89,7 +90,7 @@ fn draws_every_row_kind_in_both_wrap_modes(cx: &mut TestAppContext) {
     draw(&pane, cx);
     pane.update(cx, |pane, cx| pane.set_wrap(false, cx));
     draw(&pane, cx);
-    pane.update(cx, |pane, cx| pane.set_dark(Some(true), cx));
+    cx.update(|_, cx| diffpilot_ui_kit::theme::set_dark(true, None, cx));
     draw(&pane, cx);
     pane.update(cx, |pane, cx| pane.reveal("pnpm-lock.yaml", cx));
     draw(&pane, cx);

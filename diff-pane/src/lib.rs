@@ -1,11 +1,9 @@
 mod chrome;
 pub mod highlight;
-mod icons;
 pub mod layout;
 mod lines;
 pub mod rows;
 pub mod state;
-pub mod theme;
 mod view;
 mod word;
 
