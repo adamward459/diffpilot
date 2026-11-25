@@ -1,0 +1,6 @@
+{"data":{"repository":{"pullRequest":{"id":"PR_kwDOB482","number":482,"title":"Undo keeps a timer per message","url":"https://github.com/o/r/pull/482",
+ "state":"OPEN","isDraft":false,"author":{"login":"mira"},"baseRefName":"main","headRefName":"feature/undo",
+ "headRefOid":"3f2a91c0d4e5b6a7988776655443322110ffeedd","reviewDecision":"CHANGES_REQUESTED","body":"Adds undo.",
+ "headRepository":{"nameWithOwner":"o/r"},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE"}}}]},
+ "createdAt":"2026-11-20T09:00:00Z","updatedAt":"2026-11-24T10:00:00Z","additions":369,"deletions":36,"changedFiles":12,
+ "isCrossRepository":false,"reviewThreads":{"totalCount":3}}}}}

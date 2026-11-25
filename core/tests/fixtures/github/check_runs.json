@@ -1,0 +1,20 @@
+{"total_count":6,"check_runs":[
+ {"id":5001,"name":"lint","status":"completed","conclusion":"success","started_at":"2026-11-25T10:00:00Z","completed_at":"2026-11-25T10:00:34Z",
+  "html_url":"https://github.com/o/r/actions/runs/1289/job/5001","details_url":"https://github.com/o/r/actions/runs/1289/job/5001",
+  "app":{"slug":"github-actions","name":"GitHub Actions"},"output":{"title":null,"summary":null}},
+ {"id":5002,"name":"unit tests","status":"completed","conclusion":"failure","started_at":"2026-11-25T10:00:05Z","completed_at":"2026-11-25T10:02:05Z",
+  "html_url":"https://github.com/o/r/runs/5002","details_url":"https://github.com/o/r/actions/runs/1289/job/5002",
+  "app":{"slug":"github-actions","name":"GitHub Actions"},"output":{"title":"1 test failed","summary":"src/undo.test.ts"}},
+ {"id":5003,"name":"build","status":"in_progress","conclusion":null,"started_at":"2026-11-25T10:01:20Z","completed_at":null,
+  "html_url":"https://github.com/o/r/actions/runs/1289/job/5003","details_url":"https://github.com/o/r/actions/runs/1289/job/5003",
+  "app":{"slug":"github-actions","name":"GitHub Actions"},"output":{"title":null,"summary":null}},
+ {"id":5004,"name":"e2e","status":"completed","conclusion":"skipped","started_at":"2026-11-25T10:00:01Z","completed_at":"2026-11-25T10:00:01Z",
+  "html_url":"https://github.com/o/r/actions/runs/1289/job/5004","details_url":"https://github.com/o/r/actions/runs/1289/job/5004",
+  "app":{"slug":"github-actions","name":"GitHub Actions"},"output":{"title":null,"summary":null}},
+ {"id":9001,"name":"Vercel","status":"completed","conclusion":"success","started_at":"2026-11-25T10:00:10Z","completed_at":"2026-11-25T10:01:10Z",
+  "html_url":"https://vercel.com/o/r/abc","details_url":"https://vercel.com/o/r/abc",
+  "app":{"slug":"vercel","name":"Vercel"},"output":{"title":"Deployment ready","summary":null}},
+ {"id":5005,"name":"deploy","status":"queued","conclusion":null,"started_at":null,"completed_at":null,
+  "html_url":"https://github.com/o/r/actions/runs/1289/job/5005","details_url":"https://github.com/o/r/actions/runs/1289/job/5005",
+  "app":{"slug":"github-actions","name":"GitHub Actions"},"output":{"title":null,"summary":null}}
+]}

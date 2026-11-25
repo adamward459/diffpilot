@@ -28,7 +28,11 @@ pub fn init(cx: &mut App) {
     cx.set_menus(vec![
         Menu {
             name: "diffpilot".into(),
-            items: vec![MenuItem::action("Quit diffpilot", Quit)],
+            items: vec![
+                MenuItem::action("Settings…", crate::settings::OpenSettings),
+                MenuItem::separator(),
+                MenuItem::action("Quit diffpilot", Quit),
+            ],
         },
         Menu {
             name: "File".into(),
@@ -80,7 +84,7 @@ impl Workspace {
     fn show_folder(&mut self, folder: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let settings = self.settings.clone();
         let viewed_store = self.viewed_store.clone();
-        let claude = Claude::from_env(&folder);
+        let claude = Claude::from_env(&folder, &settings);
         self.repo = Some(cx.new(|cx| RepoView::new(folder, settings, viewed_store, claude, window, cx)));
         cx.notify();
     }

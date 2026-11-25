@@ -1,0 +1,32 @@
+﻿2026-11-25T10:01:00.0000000Z ##[group]Set up job
+2026-11-25T10:01:02.1000000Z Current runner version: '2.321.0'
+2026-11-25T10:01:04.2000000Z Runner Image
+2026-11-25T10:01:06.3000000Z   Image: ubuntu-24.04
+2026-11-25T10:01:08.4000000Z ##[endgroup]
+2026-11-25T10:01:10.5000000Z ##[group]Run actions/checkout@v4
+2026-11-25T10:01:12.6000000Z with:
+2026-11-25T10:01:14.7000000Z   repository: o/r
+2026-11-25T10:01:16.8000000Z ##[endgroup]
+2026-11-25T10:01:18.9000000Z Syncing repository: o/r
+2026-11-25T10:01:20.0000000Z [command]/usr/bin/git init /home/runner/work/r/r
+2026-11-25T10:01:22.1000000Z ##[group]Run npm ci
+2026-11-25T10:01:24.2000000Z npm ci
+2026-11-25T10:01:26.3000000Z shell: /usr/bin/bash -e {0}
+2026-11-25T10:01:28.4000000Z ##[endgroup]
+2026-11-25T10:01:30.5000000Z [command]/usr/bin/npm ci
+2026-11-25T10:01:32.6000000Z added 312 packages in 9s
+2026-11-25T10:01:34.7000000Z ##[warning]Node.js 16 is deprecated
+2026-11-25T10:01:36.8000000Z ##[group]Run npm test
+2026-11-25T10:01:38.9000000Z npm test
+2026-11-25T10:01:40.0000000Z shell: /usr/bin/bash -e {0}
+2026-11-25T10:01:42.1000000Z ##[endgroup]
+2026-11-25T10:01:44.2000000Z > app@1.0.0 test
+2026-11-25T10:01:46.3000000Z > vitest run
+2026-11-25T10:01:48.4000000Z  [31mFAIL[0m  src/undo.test.ts > keeps a timer per message
+2026-11-25T10:01:50.5000000Z AssertionError: expected 1 to be 2
+2026-11-25T10:01:52.0000000Z  Tests  1 failed | 4 passed (5)
+2026-11-25T10:01:52.6000000Z ##[error]Process completed with exit code 1.
+2026-11-25T10:01:54.7000000Z ##[group]Post job cleanup.
+2026-11-25T10:01:56.8000000Z [command]/usr/bin/git version
+2026-11-25T10:01:58.9000000Z ##[error]Cleanup could not find the cache
+2026-11-25T10:02:00.0000000Z ##[endgroup]

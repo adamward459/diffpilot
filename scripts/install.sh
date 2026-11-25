@@ -78,10 +78,13 @@ fi
 command -v git >/dev/null 2>&1 || fail "git is not installed. Run: xcode-select --install"
 
 say "Building release binary (the first build takes a few minutes)"
-(cd "$ROOT" && cargo build --release -p diffpilot)
+(cd "$ROOT" && cargo build --release -p diffpilot -p diffpilot-core --bins)
 TARGET_DIR="$(cd "$ROOT" && cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
 BINARY="$TARGET_DIR/release/$APP_NAME"
-[[ -x "$BINARY" ]] || fail "build finished but $BINARY is missing"
+HELPERS=(diffpilot-guard diffpilot-mcp)
+for bin in "$BINARY" "${HELPERS[@]/#/$TARGET_DIR/release/}"; do
+    [[ -x "$bin" ]] || fail "build finished but $bin is missing"
+done
 
 VERSION="$(cd "$ROOT" && cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "diffpilot"))')"
 
@@ -90,6 +93,9 @@ trap 'rm -rf "$STAGE"' EXIT
 BUNDLE="$STAGE/$APP_NAME.app"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp "$BINARY" "$BUNDLE/Contents/MacOS/$APP_NAME"
+for helper in "${HELPERS[@]}"; do
+    cp "$TARGET_DIR/release/$helper" "$BUNDLE/Contents/MacOS/$helper"
+done
 cat >"$BUNDLE/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

@@ -4,6 +4,7 @@ mod comparison_menu;
 mod format;
 mod pane;
 mod repo_view;
+mod settings;
 mod sidebar;
 mod sidebar_rows;
 mod workspace;
@@ -42,30 +43,40 @@ fn main() {
         };
         let settings = Arc::new(settings);
         let viewed_store = Arc::new(viewed_store);
+        settings::init(settings.clone(), settings::Services::system(), cx);
         let folder = match folder_argument() {
             Some(folder) => {
                 settings.remember_folder(&folder);
                 Some(folder)
             }
-            None => settings.recent_folder(),
+            None => settings.launch_folder(),
         };
 
-        let bounds = Bounds::centered(None, size(px(1388.), px(923.)), cx);
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
-            titlebar: Some(TitlebarOptions {
-                traffic_light_position: Some(point(px(20.), px(19.))),
-                ..TitleBar::title_bar_options()
-            }),
-            window_min_size: Some(size(px(720.), px(420.))),
-            ..Default::default()
-        };
-        cx.open_window(options, move |window, cx| {
-            diffpilot_ui_kit::theme::install(window, cx);
-            let workspace = cx.new(|cx| Workspace::new(settings, viewed_store, folder, bench.is_some(), window, cx));
-            cx.new(|cx| Root::new(workspace, window, cx))
-        })
-        .expect("open the main window");
+        let settings_tab = std::env::var("DIFFPILOT_SETTINGS")
+            .ok()
+            .as_deref()
+            .and_then(settings::Tab::parse);
+        if let Some(tab) = settings_tab {
+            settings::open(Some(tab), cx);
+        } else {
+            let bounds = Bounds::centered(None, size(px(1388.), px(923.)), cx);
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                titlebar: Some(TitlebarOptions {
+                    traffic_light_position: Some(point(px(20.), px(19.))),
+                    ..TitleBar::title_bar_options()
+                }),
+                window_min_size: Some(size(px(720.), px(420.))),
+                ..Default::default()
+            };
+            cx.open_window(options, move |window, cx| {
+                settings::install_theme(window, cx);
+                let workspace =
+                    cx.new(|cx| Workspace::new(settings, viewed_store, folder, bench.is_some(), window, cx));
+                cx.new(|cx| Root::new(workspace, window, cx))
+            })
+            .expect("open the main window");
+        }
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
                 cx.quit();

@@ -194,7 +194,7 @@ pub fn claude_binary() -> Option<PathBuf> {
     find_executable(&candidates, "claude")
 }
 
-fn claude_command(binary: &Path, repo: &Path) -> Command {
+pub(crate) fn claude_command(binary: &Path, repo: &Path) -> Command {
     let mut command = Command::new(binary);
     command.current_dir(repo);
     let home = binary.parent().map(|dir| dir.to_string_lossy().into_owned());
@@ -241,14 +241,14 @@ impl Reviewer for ClaudeCliReviewer {
     }
 }
 
-struct Finished {
-    status: ExitStatus,
-    stderr: Vec<u8>,
+pub(crate) struct Finished {
+    pub status: ExitStatus,
+    pub stderr: Vec<u8>,
 }
 
 /// `on_stdout` returns false to stop the process early, which reports `Cancelled`.
 /// On cancel the child's process group is stopped and its pipe threads are left to end on their own.
-fn run_process(
+pub(crate) fn run_process(
     mut command: Command,
     cancel: &CancelToken,
     mut on_stdout: impl FnMut(&[u8]) -> bool + Send + 'static,
@@ -468,7 +468,7 @@ impl Utf8Chunks {
 mod tests {
     use super::*;
     use crate::review::{Effort, ModelName, ReviewModel, Severity};
-    use crate::threads::{Side, ThreadComment, ThreadId, ThreadStore};
+    use crate::threads::{Side, ThreadStore};
     use std::os::unix::fs::PermissionsExt;
     use std::time::Instant;
 
@@ -842,17 +842,11 @@ mod tests {
 
     #[test]
     fn the_reply_prompt_skips_the_comment_still_streaming() {
-        let thread = ReviewThread {
-            id: ThreadId(1),
-            anchor: ThreadAnchor::Change,
-            comments: vec![ThreadComment {
-                id: 1,
-                author: "Claude".into(),
-                body: "partial".into(),
-                is_streaming: true,
-            }],
-            finding: None,
-        };
+        let mut store = ThreadStore::new();
+        let id = store.create(ThreadAnchor::Change).id;
+        store.begin_claude_reply(id);
+        store.append_claude(id, "partial", false);
+        let thread = store.get(id).unwrap().clone();
         assert!(!reply_prompt(&thread).contains("partial"));
     }
 
