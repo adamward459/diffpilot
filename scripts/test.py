@@ -11,7 +11,9 @@ also touches the crates that depend on it; a change to the root Cargo files touc
                                            run each crate's DIFFPILOT_BENCH=1 mode and compare it with
                                            baselines/bench.json on the PR base ref (or REF); fail on
                                            metrics more than 5% worse
-  scripts/test.py baseline [--rounds N]    run every bench mode N times and write baselines/bench.json
+  scripts/test.py baseline [crate...] [--rounds N]
+                                           run each bench mode N times and write its part of
+                                           baselines/bench.json
   scripts/test.py screenshot [crate...] [--compare [--base REF]]
                                            capture the app window into screenshots/feature/<crate>/;
                                            --compare also diffs each image with the base ref's copy
@@ -357,9 +359,9 @@ def baseline(crates: list[Crate], rounds: int) -> int:
     if code := build_benches(benched, ROOT):
         return code
     samples: dict[str, dict[str, list[float]]] = {c.folder: {} for c in benched}
-    for round in range(rounds):
+    for n in range(rounds):
         for c in benched:
-            print(f"== baseline {c.folder} round {round + 1}/{rounds}", file=sys.stderr)
+            print(f"== baseline {c.folder} round {n + 1}/{rounds}", file=sys.stderr)
             try:
                 metrics = bench_once(c, ROOT)
             except RuntimeError as e:
@@ -367,16 +369,17 @@ def baseline(crates: list[Crate], rounds: int) -> int:
                 return 1
             for name, value in metrics.items():
                 samples[c.folder].setdefault(name, []).append(value)
-    data = {
-        "host": host(),
-        "metrics": {
-            folder: {
-                name: {"median": round(statistics.median(v), 4), "p95": round(p95(v), 4), "runs": len(v)}
-                for name, v in sorted(by_name.items())
-            }
-            for folder, by_name in samples.items()
-        },
+    now = host()
+    old = json.loads(BASELINE.read_text()) if BASELINE.is_file() else {}
+    kept = old.get("metrics", {}) if old.get("host") == now else {}
+    fresh = {
+        folder: {
+            name: {"median": round(statistics.median(v), 4), "p95": round(p95(v), 4), "runs": len(v)}
+            for name, v in sorted(by_name.items())
+        }
+        for folder, by_name in samples.items()
     }
+    data = {"host": now, "metrics": dict(sorted({**kept, **fresh}.items()))}
     BASELINE.parent.mkdir(exist_ok=True)
     BASELINE.write_text(json.dumps(data, indent=2) + "\n")
     print(f"wrote {BASELINE.relative_to(ROOT)}; commit it with the PR", file=sys.stderr)
@@ -421,6 +424,9 @@ def hotpath(crates: list[Crate], base: str | None) -> int:
     warn_if_busy("hotpath")
     ref = resolve_base(base)
     data, why = committed_baseline(ref)
+    missing = [c.folder for c in benched if data is not None and c.folder not in data["metrics"]]
+    if missing:
+        data, why = None, f"the baseline on {ref} has no {', '.join(missing)}"
     if data is None:
         print(f"== hotpath: building the base, because {why}", file=sys.stderr)
         return hotpath_against_build(benched, ref)
@@ -430,8 +436,8 @@ def hotpath(crates: list[Crate], base: str | None) -> int:
     regressions = 0
     for c in benched:
         samples: dict[str, list[float]] = {}
-        for round in range(HOTPATH_ROUNDS):
-            print(f"== hotpath {c.folder} round {round + 1}/{HOTPATH_ROUNDS}", file=sys.stderr)
+        for n in range(HOTPATH_ROUNDS):
+            print(f"== hotpath {c.folder} round {n + 1}/{HOTPATH_ROUNDS}", file=sys.stderr)
             try:
                 metrics = bench_once(c, ROOT)
             except RuntimeError as e:
@@ -476,9 +482,9 @@ def hotpath_against_build(benched: list[Crate], ref: str) -> int:
         samples: dict[str, dict[str, list[float]]] = {"base": {}, "head": {}}
         # Alternate base and head so slow drift on the machine hits both sides equally.
         try:
-            for round in range(HOTPATH_ROUNDS):
+            for n in range(HOTPATH_ROUNDS):
                 for side, cwd in sides:
-                    print(f"== hotpath {c.folder} round {round + 1}/{HOTPATH_ROUNDS}: {side}", file=sys.stderr)
+                    print(f"== hotpath {c.folder} round {n + 1}/{HOTPATH_ROUNDS}: {side}", file=sys.stderr)
                     try:
                         metrics = bench_once(c, cwd)
                     except RuntimeError as e:
@@ -747,7 +753,7 @@ def main(argv: list[str]) -> int:
         if command == "hotpath":
             return hotpath(chosen, base)
         if command == "baseline":
-            return baseline(crates, int(rounds or BASELINE_ROUNDS))
+            return baseline(chosen, int(rounds or BASELINE_ROUNDS))
         code = screenshot(chosen)
         if code == 0 and compare_flag:
             ref = resolve_base(base)
