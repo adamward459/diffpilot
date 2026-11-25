@@ -1,3 +1,6 @@
+// Adapted from diffity (MIT License, Copyright (c) 2026 Kamran Ahmed).
+// The license text is in core/THIRD_PARTY_LICENSES.
+
 //! Fetch, pull and push. Only the user starts these; Claude runs never call them.
 
 use crate::exec;

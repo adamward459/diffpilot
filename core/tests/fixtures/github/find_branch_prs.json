@@ -1,0 +1,13 @@
+{"data":{"repository":{"pullRequests":{"nodes":[
+ {"id":"PR_old","number":301,"title":"Undo, first try","url":"https://github.com/o/r/pull/301","state":"MERGED","isDraft":false,
+  "author":{"login":"mira"},"baseRefName":"main","headRefName":"feature/undo","headRefOid":"1111111111111111111111111111111111111111",
+  "reviewDecision":"APPROVED","body":"","headRepository":{"nameWithOwner":"o/r"},
+  "commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}},
+ {"id":"PR_kwDOB482","number":482,"title":"Undo keeps a timer per message","url":"https://github.com/o/r/pull/482","state":"OPEN",
+  "isDraft":false,"author":{"login":"mira"},"baseRefName":"main","headRefName":"feature/undo",
+  "headRefOid":"3f2a91c0d4e5b6a7988776655443322110ffeedd","reviewDecision":null,"body":"",
+  "headRepository":{"nameWithOwner":"O/R"},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING"}}}]}},
+ {"id":"PR_fork","number":9,"title":"From a fork","url":"https://github.com/o/r/pull/9","state":"OPEN","isDraft":false,
+  "author":{"login":"zed"},"baseRefName":"main","headRefName":"feature/undo","headRefOid":"2222222222222222222222222222222222222222",
+  "reviewDecision":null,"body":"","headRepository":{"nameWithOwner":"zed/r"},"commits":{"nodes":[]}}
+]}}}}

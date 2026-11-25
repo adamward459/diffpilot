@@ -1,3 +1,6 @@
+// Adapted from diffity (MIT License, Copyright (c) 2026 Kamran Ahmed).
+// The license text is in core/THIRD_PARTY_LICENSES.
+
 use crate::comparison::Comparison;
 use crate::diff::{self, FileDiff};
 use crate::exec;
