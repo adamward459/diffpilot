@@ -38,19 +38,16 @@ final class DiffPaneScreenshotUITests: XCTestCase {
         XCTAssertTrue(pane.waitUntil { pane.recognizedText().contains("change any code") })
         try attach(pane.window, named: "diffpane-thread-\(appearance)")
 
+        pane.paneCoordinate(x: pane.paneFrame.minX + 15, y: pane.paneFrame.midY).click()
+        pane.app.typeKey(.home, modifierFlags: [])
+        Thread.sleep(forTimeInterval: 1.5)
         pane.startReview()
         XCTAssertTrue(pane.waitUntil(pollEvery: 0.5) { pane.review == "running" })
         Thread.sleep(forTimeInterval: 1.5)
         try attach(pane.window, named: "diffpane-reviewing-\(appearance)")
         XCTAssertTrue(pane.waitUntil(timeout: 20, pollEvery: 0.5) { pane.review.hasPrefix("done") })
-        // The pill shows the result for 5 s only, so capture it before the page scrolls.
+        // The pill shows the result for 5 s only, so capture it first.
         try attach(pane.window, named: "diffpane-review-done-\(appearance)")
-        pane.paneCoordinate(x: pane.paneFrame.minX + 15, y: pane.paneFrame.midY).click()
-        // Measuring rows above the view moves the scroll position, which stops the first smooth scroll short.
-        for _ in 0..<2 {
-            pane.app.typeKey(.home, modifierFlags: [])
-            Thread.sleep(forTimeInterval: 1)
-        }
         XCTAssertTrue(pane.waitUntil { pane.recognizedText().contains("Review summary") })
         try attach(pane.window, named: "diffpane-review-\(appearance)")
     }
