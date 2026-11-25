@@ -1,0 +1,2 @@
+{"data":{"node":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
+ {"databaseId":103,"body":"Fixed in the next commit","createdAt":"2026-11-24T10:00:00Z","author":{"login":"alice","__typename":"User"},"pullRequestReview":{"id":"PRR_3"}}]}}}}

@@ -1,0 +1,6 @@
+[
+ {"filename":"src/undo.ts","status":"modified","additions":2,"deletions":1,"changes":3,
+  "patch":"@@ -10,4 +10,5 @@ function undo()\n ctx10\n-old11\n+new11\n+new12\n ctx12\n ctx13"},
+ {"filename":"src/b.ts","status":"added","additions":2,"deletions":0,"changes":2,"patch":"@@ -0,0 +1,2 @@\n+x\n+y"},
+ {"filename":"logo.png","status":"added","additions":0,"deletions":0,"changes":0}
+]

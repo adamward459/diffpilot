@@ -1,0 +1,14 @@
+{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
+ {"id":"PRRT_other","isResolved":false,"isOutdated":false,"path":"src/undo.ts","line":11,"startLine":null,"originalLine":11,"originalStartLine":null,
+  "diffSide":"RIGHT","startDiffSide":null,
+  "comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
+   {"databaseId":8000,"body":"**[must-fix]** missing await","createdAt":"2026-11-20T09:00:00Z","author":{"login":"zed","__typename":"User"},"pullRequestReview":{"id":"PRR_elsewhere"}}]}},
+ {"id":"PRRT_c2","isResolved":false,"isOutdated":false,"path":"src/undo.ts","line":11,"startLine":null,"originalLine":11,"originalStartLine":null,
+  "diffSide":"LEFT","startDiffSide":null,
+  "comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
+   {"databaseId":9002,"body":"why remove this?","createdAt":"2026-11-25T09:00:00Z","author":{"login":"adam","__typename":"User"},"pullRequestReview":{"id":"PRR_new"}}]}},
+ {"id":"PRRT_c1","isResolved":false,"isOutdated":false,"path":"src/undo.ts","line":11,"startLine":null,"originalLine":11,"originalStartLine":null,
+  "diffSide":"RIGHT","startDiffSide":null,
+  "comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
+   {"databaseId":9001,"body":"**[must-fix]** missing await","createdAt":"2026-11-25T09:00:00Z","author":{"login":"adam","__typename":"User"},"pullRequestReview":{"id":"PRR_new"}}]}}
+]}}}}}

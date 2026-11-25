@@ -28,6 +28,10 @@ pub enum GithubError {
     Dirty,
     #[error("the branch is already checked out in {0}")]
     InWorktree(String),
+    #[error("the pull request moved from {expected} to {actual}; review it again before posting")]
+    HeadMoved { expected: String, actual: String },
+    #[error("you already have a pending review on this pull request with {0} comments")]
+    PendingReviewExists(u32),
     #[error("could not fetch {0}")]
     FetchFailed(String),
     #[error(transparent)]

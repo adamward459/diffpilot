@@ -7,6 +7,7 @@ pub mod http;
 pub mod log;
 pub mod pr_git;
 pub mod remote;
+pub mod review;
 pub mod types;
 
 mod time;
