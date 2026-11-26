@@ -430,3 +430,31 @@ fn a_rebuilt_session_adopts_the_run_that_is_still_writing(app: &mut TestAppConte
     });
     assert_eq!(guide.read_with(cx, |guide, _| guide.run().clone()), GuideRun::Idle);
 }
+
+#[gpui::test]
+fn the_reading_stays_until_the_new_one_lands_and_a_stale_result_is_dropped(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    store_guide(&world, cx);
+    show_guide(&world, cx);
+    let guide = world.view.read_with(cx, |view, _| view.guide());
+    let chapters = |cx: &mut VisualTestContext| guide.read_with(cx, |guide, _| guide.reading().chapters.len());
+    assert_eq!(chapters(cx), 2);
+
+    let all = diff_files(&world, cx);
+    let without: Vec<FileDiff> = all
+        .iter()
+        .filter(|file| file.path != "src/staged.rs")
+        .cloned()
+        .collect();
+    let pane = world.view.read_with(cx, |view, _| view.pane());
+    pane.update(cx, |pane, cx| pane.set_files(without.clone(), cx));
+    assert_eq!(chapters(cx), 2, "the last good reading stays until the new one lands");
+    cx.run_until_parked();
+    assert_eq!(chapters(cx), 1);
+
+    pane.update(cx, |pane, cx| pane.set_files(all.clone(), cx));
+    pane.update(cx, |pane, cx| pane.set_files(without, cx));
+    pane.update(cx, |pane, cx| pane.set_files(all, cx));
+    cx.run_until_parked();
+    assert_eq!(chapters(cx), 2, "only the last diff counts");
+}

@@ -48,7 +48,8 @@ pub struct GuideSession {
     reading: Reading,
     staleness: Option<Staleness>,
     commits: Option<u32>,
-    commits_epoch: u64,
+    epoch: u64,
+    analysed: Option<GuideId>,
     kept: Option<GuideId>,
     run: GuideRun,
     step: Step,
@@ -79,7 +80,8 @@ impl GuideSession {
             reading: Reading::default(),
             staleness: None,
             commits: None,
-            commits_epoch: 0,
+            epoch: 0,
+            analysed: None,
             kept: None,
             run: GuideRun::Idle,
             step: Step::Overview,
@@ -304,37 +306,53 @@ impl GuideSession {
     }
 
     fn recompute(&mut self, cx: &mut Context<Self>) {
+        self.epoch = self.epoch.wrapping_add(1);
+        let epoch = self.epoch;
         let Some(stored) = &self.stored else {
             self.reading = Reading::default();
             self.staleness = None;
+            self.analysed = None;
             self.commits = None;
-            return;
+            return self.announce(cx);
         };
-        self.reading = reading(&stored.guide, &self.files);
-        let staleness = (!self.files.is_empty()).then(|| stale::check(&stored.guide, &self.files));
-        let behind = match (&staleness, self.review.read(cx).host().repo.clone()) {
-            (Some(staleness), Some(repo)) if staleness.is_stale => Some((repo, stored.guide.clone())),
-            _ => None,
-        };
-        self.commits = None;
-        self.commits_epoch = self.commits_epoch.wrapping_add(1);
-        let epoch = self.commits_epoch;
-        self.staleness = staleness;
-        if let Some((repo, guide)) = behind {
-            cx.spawn(async move |this, cx| {
-                let commits = cx
-                    .background_spawn(async move { stale::commits_since(&repo, &guide) })
-                    .await;
-                this.update(cx, |session, cx| {
-                    if session.commits_epoch == epoch && session.commits != commits {
-                        session.commits = commits;
-                        session.announce(cx);
-                    }
-                })
-                .ok();
-            })
-            .detach();
+        if self.analysed != Some(stored.id) {
+            self.reading = Reading::default();
+            self.staleness = None;
         }
+        let (id, guide, files) = (stored.id, stored.guide.clone(), self.files.clone());
+        let repo = self.review.read(cx).host().repo.clone();
+        cx.spawn(async move |this, cx| {
+            let analysis = cx
+                .background_spawn(async move {
+                    let reading = reading(&guide, &files);
+                    let staleness = (!files.is_empty()).then(|| stale::check(&guide, &files));
+                    let commits = match (&staleness, repo) {
+                        (Some(staleness), Some(repo)) if staleness.is_stale => stale::commits_since(&repo, &guide),
+                        _ => None,
+                    };
+                    (reading, staleness, commits)
+                })
+                .await;
+            this.update(cx, |session, cx| {
+                if session.epoch == epoch {
+                    session.land(id, analysis, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn land(
+        &mut self,
+        id: GuideId,
+        (reading, staleness, commits): (Reading, Option<Staleness>, Option<u32>),
+        cx: &mut Context<Self>,
+    ) {
+        self.reading = reading;
+        self.staleness = staleness;
+        self.commits = commits;
+        self.analysed = Some(id);
         if let Step::Chapter(index) = self.step
             && index >= self.reading.chapters.len()
         {
