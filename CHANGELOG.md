@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - Hunk actions (Stage Hunk, Revert, Open in Editor, Copy, Ask Claude) appear in a floating bar when you hover a hunk header, like the selection bar.
 - Copy Path and Reveal in Finder are now buttons in each file header, so you no longer need the More menu for them.
 - Markdown Preview now fills the whole width. A changed file shows as one document, like GitHub's rich diff: added blocks are marked green and removed blocks red.
+- The app uses about 100 MB less memory. A diff window now takes about 117 MB instead of 219 MB.
 
 ### Removed
 

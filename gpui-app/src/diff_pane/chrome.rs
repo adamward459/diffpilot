@@ -1,6 +1,6 @@
 use diffpilot_core::diff::FileDiff;
-use diffpilot_ui_kit::Theme;
-use diffpilot_ui_kit::painted;
+use diffpilot_ui_kit::components::glyph_icon;
+use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::{AnyElement, FontWeight, HighlightStyle, IntoElement, ParentElement as _, Styled as _, StyledText, div, px};
 use gpui::{Div, Font};
 
@@ -117,7 +117,7 @@ pub fn thread_count(theme: &Theme, count: usize) -> Div {
         .ml(px(4.0))
         .text_size(px(11.0))
         .text_color(theme.diff.muted)
-        .child(painted::bubble(12.0, theme.diff.muted))
+        .child(glyph_icon(Glyph::Bubble, 12.0, theme.diff.muted))
         .child(count.to_string())
 }
 

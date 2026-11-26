@@ -18,11 +18,12 @@ use diffpilot_core::diff::{DiffMode, FileDiff, LineKind};
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use diffpilot_ui_kit::Glyph;
+use diffpilot_ui_kit::Theme;
 use diffpilot_ui_kit::components::menu::{MenuAt, MenuItem, MenuSection, menu_at, menu_button};
 use diffpilot_ui_kit::components::{
-    BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, label_switch, status_badge, tag, viewed_toggle,
+    BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, glyph_icon, label_switch, status_badge, tag,
+    viewed_toggle,
 };
-use diffpilot_ui_kit::{Theme, painted};
 use gpui::{
     AnyView, App, AppContext as _, ClickEvent, Context, Div, Entity, EventEmitter, FontWeight, Hsla,
     InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
@@ -1171,7 +1172,11 @@ impl DiffPane {
             .h(px(20.0))
             .cursor_pointer()
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle_collapsed(&collapse_path, cx)))
-            .child(painted::chevron(!collapsed, 12.0, theme.diff.muted));
+            .child(glyph_icon(
+                if collapsed { Glyph::CaretRight } else { Glyph::CaretDown },
+                12.0,
+                theme.diff.muted,
+            ));
         let id = if pinned { "pinned-header" } else { "file-header" };
         let left = div()
             .flex()
@@ -1179,7 +1184,11 @@ impl DiffPane {
             .gap(px(7.0))
             .min_w_0()
             .child(chevron)
-            .child(painted::document(14.0, theme.tint(file_kind(&diff.path).tint())))
+            .child(glyph_icon(
+                Glyph::FileLines,
+                14.0,
+                theme.tint(file_kind(&diff.path).tint()),
+            ))
             .child(chrome::path_text(theme, diff))
             .child(status_badge(
                 diff.status.code(),
@@ -1549,7 +1558,7 @@ impl DiffPane {
             .rounded(px(4.0))
             .bg(theme.accent)
             .cursor_pointer()
-            .child(painted::plus(12.0, theme.on_accent))
+            .child(glyph_icon(Glyph::Plus, 12.0, theme.on_accent))
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 this.add_comment(hovered.file, (hovered.hunk, hovered.line), window, cx)
             }))

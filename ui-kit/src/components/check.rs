@@ -1,5 +1,6 @@
+use super::form::glyph_icon;
 use super::interaction::{Fills, State, interactive};
-use crate::painted;
+use crate::icons::Glyph;
 use crate::theme::{Rise, Theme};
 use gpui::prelude::*;
 use gpui::{Div, ElementId, Stateful, div, px};
@@ -18,7 +19,7 @@ pub fn viewed_toggle(theme: &Theme, id: impl Into<ElementId>, viewed: bool, stat
         checkbox
             .border_color(theme.accent)
             .bg(theme.glass_body(theme.accent))
-            .child(painted::check(11.0, theme.on_accent))
+            .child(glyph_icon(Glyph::CheckBold, 11.0, theme.on_accent))
     } else {
         checkbox
             .border_color(theme.ui.faint)

@@ -6,7 +6,7 @@ use diffpilot_ui_kit::components::{
     icon_button, interactive, segmented, segmented_control, severity_badge, status_badge, toggle_capsule,
     viewed_toggle,
 };
-use diffpilot_ui_kit::{Assets, Glyph, Theme, painted};
+use diffpilot_ui_kit::{Assets, Glyph, Theme};
 use gpui::{
     AnyElement, App, Application, Bounds, Context, IntoElement, ParentElement, Render, Styled, Window, WindowBounds,
     WindowOptions, div, font, point, prelude::*, px, size,
@@ -201,19 +201,6 @@ fn checks(theme: &Theme) -> impl IntoElement {
         .items_center()
         .child(viewed_toggle(theme, "toggle-off", false, State::Normal).ml_0())
         .child(viewed_toggle(theme, "toggle-on", true, State::Normal).ml_0())
-}
-
-fn painted_icons(theme: &Theme) -> impl IntoElement {
-    let color = theme.diff.muted;
-    h_flex()
-        .gap(px(12.))
-        .items_center()
-        .child(painted::chevron(false, 16., color))
-        .child(painted::chevron(true, 16., color))
-        .child(painted::check(16., color))
-        .child(painted::document(16., color))
-        .child(painted::bubble(16., color))
-        .child(painted::plus(16., color))
 }
 
 fn glyphs(theme: &Theme) -> impl IntoElement {
@@ -448,7 +435,6 @@ impl Render for Gallery {
             )))
             .child(section(&theme, "Badges", badges(&theme)))
             .child(section(&theme, "Viewed", checks(&theme)))
-            .child(section(&theme, "Painted icons", painted_icons(&theme)))
             .child(section(&theme, "Glyphs", glyphs(&theme)))
             .child(section(&theme, "Card", card(&theme)));
         let right = div().p(px(14.)).rounded(px(10.)).bg(theme.chrome.panel).child(section(
