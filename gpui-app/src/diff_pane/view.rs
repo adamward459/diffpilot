@@ -1247,7 +1247,7 @@ impl DiffPane {
     fn notice(&self, file: usize, notice: Notice, cx: &mut Context<Self>) -> Div {
         let theme = &self.theme;
         let path = self.state.files[file].path.clone();
-        let mut body = div()
+        let mut body = tag(div(), || format!("pane:notice:{path}"))
             .flex()
             .flex_col()
             .items_center()
