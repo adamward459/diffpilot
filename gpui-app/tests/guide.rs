@@ -2,7 +2,8 @@ use diffpilot::diff_pane::rows::{BlockId, RowKind};
 use diffpilot::guide::session::{GuideRun, Step};
 use diffpilot::repo_view::{Nav, RepoView};
 use diffpilot::runs::Runs;
-use diffpilot::testing::{canned_claude, demo_guide, fixture, open_repo_in};
+use diffpilot::testing::{canned_claude, demo_guide, fixture, open_repo_in, pick_comparison};
+use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::FileDiff;
 use diffpilot_core::guide::{Diagram, DiagramKind, FlowStep, Guide};
 use diffpilot_core::mcp::McpBridge;
@@ -369,4 +370,17 @@ fn a_chapter_diagram_is_drawn_in_the_inspector(app: &mut TestAppContext) {
     show_guide(&world, cx);
     click(cx, "guide-start-reading");
     assert!(cx.debug_bounds("guide-diagram-canvas").is_some());
+}
+
+#[gpui::test]
+fn a_second_write_while_writing_leaves_the_live_run_alone(app: &mut TestAppContext) {
+    let (world, cx) = open(app, true);
+    show_guide(&world, cx);
+    click(cx, "guide-write");
+    let guide = world.view.read_with(cx, |view, _| view.guide());
+    let before = guide.read_with(cx, |guide, _| guide.run().clone());
+    assert!(matches!(before, GuideRun::Writing { .. }));
+
+    guide.update(cx, |guide, cx| guide.write(cx));
+    assert_eq!(guide.read_with(cx, |guide, _| guide.run().clone()), before);
 }

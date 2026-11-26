@@ -340,6 +340,9 @@ impl GuideSession {
     }
 
     pub fn write(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.run, GuideRun::Writing { .. }) {
+            return;
+        }
         if let Some(reason) = self.blocker(cx) {
             self.run = GuideRun::Failed(reason);
             return self.announce(cx);
