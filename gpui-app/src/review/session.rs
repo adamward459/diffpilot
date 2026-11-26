@@ -25,6 +25,7 @@ pub const FIX_NEEDS_WORKING_TREE: &str =
     "Fix edits your working tree. Pick a comparison that includes uncommitted changes.";
 pub const NOTHING_TO_FIX_MESSAGE: &str = "There is no open comment for Claude to fix.";
 pub const RUNS_UNAVAILABLE: &str = "Claude runs are not available here.";
+const PAST_RUN_WINDOW: usize = 200;
 pub const NO_REPLY_MESSAGE: &str = "Claude did not reply. Check that the claude command is installed, then ask again.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,7 +82,7 @@ pub struct ReviewSession {
     shown: Option<RunId>,
     shown_run: Option<Run>,
     last: Option<RunSummary>,
-    requests: HashMap<RunId, RunRequest>,
+    submitted: HashSet<RunId>,
     replacing: HashMap<RunId, Vec<ThreadId>>,
     applied: HashSet<RunId>,
     owners: HashMap<RunId, bool>,
@@ -96,7 +97,7 @@ impl Drop for ReviewSession {
     fn drop(&mut self) {
         self.replies.values().for_each(|active| active.cancel.cancel());
         if let Some(engine) = &self.engine {
-            for id in self.requests.keys() {
+            for id in &self.submitted {
                 engine.stop(*id);
             }
         }
@@ -132,7 +133,7 @@ impl ReviewSession {
             shown: None,
             shown_run: None,
             last: None,
-            requests: HashMap::new(),
+            submitted: HashSet::new(),
             replacing: HashMap::new(),
             applied: HashSet::new(),
             owners: HashMap::new(),
@@ -142,10 +143,7 @@ impl ReviewSession {
         };
         if let Some(engine) = Self::global_engine(cx) {
             this.watch_runs(&engine, cx);
-            this.last = engine
-                .past_runs(&this.session_key(), 1)
-                .ok()
-                .and_then(|runs| runs.into_iter().next());
+            this.last = Self::tracked_runs(&engine, &this.session_key(), 1).into_iter().next();
             this.sync_runs(&engine);
         }
         this
@@ -345,6 +343,9 @@ impl ReviewSession {
         let Some(engine) = Self::global_engine(cx) else {
             return self.fail_review(RUNS_UNAVAILABLE.into(), cx);
         };
+        if let Some(reason) = cx.global::<Runs>().unavailable() {
+            return self.fail_review(reason.into(), cx);
+        }
         self.setup.save(&self.settings, &repo);
         let request = self
             .setup
@@ -367,13 +368,9 @@ impl ReviewSession {
 
     fn submit(&mut self, engine: &RunEngine, request: RunRequest, cx: &mut Context<Self>) -> Result<RunId, String> {
         self.watch_runs(engine, cx);
-        let kind = request.kind;
-        let id = engine.submit(request.clone()).map_err(|error| error.to_string())?;
+        let id = engine.submit(request).map_err(|error| error.to_string())?;
         self.owners.insert(id, true);
-        self.requests.insert(id, request);
-        if kind == RunKind::Review {
-            self.replacing.insert(id, self.review_threads.clone());
-        }
+        self.submitted.insert(id);
         self.shown = None;
         self.shown_run = None;
         self.sync_runs(engine);
@@ -381,22 +378,27 @@ impl ReviewSession {
     }
 
     pub fn run_again(&mut self, cx: &mut Context<Self>) {
-        let (Some(engine), Some(run)) = (Self::global_engine(cx), self.current.as_ref()) else {
+        let Some(run) = self.current.as_ref().filter(|run| run.state.is_finished()) else {
             return;
         };
-        let Some(request) = self.requests.get(&run.id).cloned() else {
-            return;
-        };
-        match self.submit(&engine, request, cx) {
-            Ok(_) => self.announce_run(cx),
-            Err(message) => self.fail_review(message, cx),
+        match run.kind {
+            RunKind::Review => self.start_review(cx),
+            RunKind::FixComments => {
+                let open = self.fixable();
+                let again: Vec<ThreadId> = run.threads.iter().copied().filter(|id| open.contains(id)).collect();
+                if again.is_empty() {
+                    return self.fail_fix(NOTHING_TO_FIX_MESSAGE.into(), cx);
+                }
+                self.fix_threads(&again, cx);
+            }
+            _ => {}
         }
     }
 
     pub fn can_run_again(&self) -> bool {
         self.current
             .as_ref()
-            .is_some_and(|run| run.state.is_finished() && self.requests.contains_key(&run.id))
+            .is_some_and(|run| run.state.is_finished() && matches!(run.kind, RunKind::Review | RunKind::FixComments))
     }
 
     pub fn current(&self) -> Option<&Run> {
@@ -415,7 +417,6 @@ impl ReviewSession {
         self.current.as_ref().is_some_and(|run| !run.state.is_finished()) || !self.queued.is_empty()
     }
 
-    /// The run the Claude area shows: the one picked from Past Runs, else the current one.
     pub fn shown(&self) -> Option<&Run> {
         match (&self.shown_run, &self.current) {
             (Some(run), _) if self.shown == Some(run.id) => Some(run),
@@ -448,8 +449,18 @@ impl ReviewSession {
     pub fn past_runs(&self, limit: usize) -> Vec<RunSummary> {
         self.engine
             .as_ref()
-            .and_then(|engine| engine.past_runs(&self.session_key(), limit).ok())
+            .map(|engine| Self::tracked_runs(engine, &self.session_key(), limit))
             .unwrap_or_default()
+    }
+
+    fn tracked_runs(engine: &RunEngine, key: &SessionKey, limit: usize) -> Vec<RunSummary> {
+        engine
+            .past_runs(key, PAST_RUN_WINDOW)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|summary| summary.kind != RunKind::Guide)
+            .take(limit)
+            .collect()
     }
 
     pub fn review_run(&self) -> Option<&Run> {
@@ -507,8 +518,12 @@ impl ReviewSession {
         if run.state != RunState::Done || !self.applied.insert(run.id) {
             return;
         }
-        for id in stale {
-            self.remove_thread(id, cx);
+        let reviewed = matches!(run.outcome, Some(RunOutcome::Review(_)))
+            || self.review_threads.iter().any(|id| !stale.contains(id));
+        if reviewed {
+            for id in stale {
+                self.remove_thread(id, cx);
+            }
         }
         if let Some(RunOutcome::Review(result)) = &run.outcome {
             for planned in plan_threads(result, &self.host.files) {
@@ -738,10 +753,11 @@ impl ReviewSession {
 
     fn owns(&mut self, engine: &RunEngine, run: RunId) -> bool {
         let session = self.store.session();
-        *self
-            .owners
-            .entry(run)
-            .or_insert_with(|| engine.run(run).is_some_and(|found| found.session == session))
+        *self.owners.entry(run).or_insert_with(|| {
+            engine
+                .run(run)
+                .is_some_and(|found| found.session == session && found.kind != RunKind::Guide)
+        })
     }
 
     fn apply_run_events(&mut self, events: Vec<RunEvent>, cx: &mut Context<Self>) {
@@ -750,18 +766,32 @@ impl ReviewSession {
         };
         let mut threads_changed = false;
         let mut touched = false;
-        let mut finished = Vec::new();
         for event in &events {
             match event {
                 RunEvent::ThreadsChanged { session, .. } => threads_changed |= *session == self.store.session(),
+                RunEvent::Started { run } if self.owns(&engine, *run) => {
+                    touched = true;
+                    if std::mem::take(&mut threads_changed) {
+                        self.take_in_threads(cx);
+                    }
+                    if engine.run(*run).is_some_and(|found| found.kind == RunKind::Review) {
+                        self.replacing.insert(*run, self.review_threads.clone());
+                    }
+                }
                 RunEvent::Finished { run, state } if self.owns(&engine, *run) => {
                     touched = true;
-                    finished.push((*run, *state));
+                    if std::mem::take(&mut threads_changed) {
+                        self.take_in_threads(cx);
+                    }
+                    if let Some(found) = engine.run(*run) {
+                        if found.kind == RunKind::Review {
+                            self.finish_review(&found, cx);
+                        }
+                        self.last = Some(found.summary());
+                    }
+                    cx.emit(ReviewEvent::RunFinished(*state));
                 }
-                RunEvent::Queued { run }
-                | RunEvent::Started { run }
-                | RunEvent::Updated { run }
-                | RunEvent::Log { run, .. }
+                RunEvent::Queued { run } | RunEvent::Updated { run } | RunEvent::Log { run, .. }
                     if self.owns(&engine, *run) =>
                 {
                     touched = true;
@@ -772,22 +802,13 @@ impl ReviewSession {
         if threads_changed {
             self.take_in_threads(cx);
         }
-        for (id, state) in finished {
-            if let Some(run) = engine.run(id) {
-                if run.kind == RunKind::Review {
-                    self.finish_review(&run, cx);
-                }
-                self.last = Some(run.summary());
-            }
-            cx.emit(ReviewEvent::RunFinished(state));
-        }
         if touched {
             self.sync_runs(&engine);
             self.announce_run(cx);
         }
     }
 
-    /// Reads what the run engine or the MCP tools wrote. Threads that Claude started during a review are its findings.
+    /// The run engine and the MCP tools write these threads.
     fn take_in_threads(&mut self, cx: &mut Context<Self>) {
         let known: HashSet<ThreadId> = self.store.threads().map(|thread| thread.id).collect();
         self.refresh_threads(cx);
@@ -806,7 +827,7 @@ impl ReviewSession {
 
     fn sync_runs(&mut self, engine: &RunEngine) {
         let session = self.store.session();
-        let ours = |run: &Run| run.session == session;
+        let ours = |run: &Run| run.session == session && run.kind != RunKind::Guide;
         let (active, mut queued) = match &self.host.repo {
             Some(repo) => (
                 engine.active(repo).filter(ours),

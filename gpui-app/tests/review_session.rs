@@ -253,7 +253,7 @@ async fn rerunning_ends_a_reply_streaming_in_a_replaced_thread(cx: &mut TestAppC
 }
 
 #[gpui::test]
-async fn run_again_starts_the_same_request_once_the_run_has_ended(cx: &mut TestAppContext) {
+async fn run_again_starts_a_review_with_the_current_setup_once_the_run_has_ended(cx: &mut TestAppContext) {
     let f = fixture(cx, two_findings());
     assert!(!f.session.read_with(cx, |s, _| s.can_run_again()));
     f.review(cx);
@@ -261,6 +261,33 @@ async fn run_again_starts_the_same_request_once_the_run_has_ended(cx: &mut TestA
     f.session.update(cx, |session, cx| session.run_again(cx));
     f.wait_for_end(cx);
     assert_eq!(f.claude.launches(), 2);
+}
+
+#[gpui::test]
+async fn a_queued_review_replaces_the_findings_of_the_review_before_it(cx: &mut TestAppContext) {
+    let f = fixture(cx, two_findings());
+    f.claude.hold();
+    f.start(cx);
+    f.wait_for_launches(cx, 1);
+    f.start(cx);
+    f.claude.finish();
+    f.wait_for_launches(cx, 2);
+    f.wait_for_end(cx);
+    assert_eq!(f.threads(cx).len(), 3);
+}
+
+#[gpui::test]
+async fn a_review_that_returns_nothing_keeps_the_old_findings(cx: &mut TestAppContext) {
+    let f = fixture(cx, two_findings());
+    f.review(cx);
+    let first: Vec<ThreadId> = f.threads(cx).iter().map(|t| t.id).collect();
+    assert_eq!(first.len(), 3);
+
+    f.claude.end_without_review();
+    f.review(cx);
+    assert_eq!(f.state(cx), Some(RunState::Done));
+    let kept: Vec<ThreadId> = f.threads(cx).iter().map(|t| t.id).collect();
+    assert_eq!(kept, first);
 }
 
 #[gpui::test]

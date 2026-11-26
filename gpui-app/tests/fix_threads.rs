@@ -8,8 +8,9 @@ use diffpilot::runs::Runs;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::mcp::McpBridge;
 use diffpilot_core::policy::EditPermission;
-use diffpilot_core::run::{Progress, RunState};
-use diffpilot_core::runner::{EngineConfig, McpLaunch, RunEngine};
+use diffpilot_core::review::ReviewModel;
+use diffpilot_core::run::{Progress, RunKind, RunState};
+use diffpilot_core::runner::{EngineConfig, McpLaunch, RunEngine, RunRequest};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::Store;
 use diffpilot_core::threads::{CLAUDE_NAME, Side, ThreadAnchor, ThreadId};
@@ -211,6 +212,110 @@ async fn stopping_a_fix_run_ends_it_as_stopped(cx: &mut TestAppContext) {
 
     wait_until(cx, "the run to stop", |cx| w.state(cx) == Some(RunState::Stopped));
     assert!(!w.session.read_with(cx, |s, _| s.fixing()));
+}
+
+#[gpui::test]
+async fn run_again_after_a_fix_fixes_the_threads_that_are_still_open(cx: &mut TestAppContext) {
+    let w = world(cx, working_tree());
+    w.comment(cx, "Rename this.");
+    w.start_fix(cx);
+    let first = w.session.read_with(cx, |s, _| s.fix_run().map(|run| run.id)).unwrap();
+    w.session.update(cx, |session, cx| session.stop_claude(cx));
+    wait_until(cx, "the run to stop", |cx| w.state(cx) == Some(RunState::Stopped));
+    assert!(w.session.read_with(cx, |s, _| s.can_run_again()));
+
+    w.session.update(cx, |session, cx| session.run_again(cx));
+    wait_until(cx, "the second fix to run", |cx| {
+        w.session.read_with(cx, |s, _| {
+            s.fix_run()
+                .is_some_and(|run| run.id != first && run.state == RunState::Running)
+        })
+    });
+    w.session.update(cx, |session, cx| session.stop_claude(cx));
+}
+
+#[gpui::test]
+async fn run_again_after_a_fix_checks_the_edit_setting_again(cx: &mut TestAppContext) {
+    let w = world(cx, working_tree());
+    w.comment(cx, "Rename this.");
+    w.start_fix(cx);
+    w.session.update(cx, |session, cx| session.stop_claude(cx));
+    wait_until(cx, "the run to stop", |cx| w.state(cx) == Some(RunState::Stopped));
+
+    w.settings.set_edit_permission(EditPermission::AskEach);
+    w.session.update(cx, |session, cx| session.run_again(cx));
+    let (fix, review) = w
+        .session
+        .read_with(cx, |s, _| (s.fix_failure().map(String::from), s.review_problem()));
+    assert_eq!(fix.as_deref(), Some(FIX_NEEDS_DONT_ASK));
+    assert_eq!(review, None);
+}
+
+#[gpui::test]
+async fn run_again_after_a_fix_with_every_thread_resolved_starts_nothing(cx: &mut TestAppContext) {
+    let w = world(cx, working_tree());
+    let id = w.comment(cx, "Rename this.");
+    w.start_fix(cx);
+    w.session.update(cx, |session, cx| session.stop_claude(cx));
+    wait_until(cx, "the run to stop", |cx| w.state(cx) == Some(RunState::Stopped));
+
+    w.session.update(cx, |session, cx| session.resolve_thread(id, cx));
+    w.session.update(cx, |session, cx| session.run_again(cx));
+    assert_eq!(
+        w.session
+            .read_with(cx, |s, _| s.fix_failure().map(String::from))
+            .as_deref(),
+        Some(NOTHING_TO_FIX_MESSAGE)
+    );
+    assert_eq!(w.state(cx), Some(RunState::Stopped));
+}
+
+#[gpui::test]
+async fn a_guide_run_is_not_part_of_the_review_session(cx: &mut TestAppContext) {
+    let w = world(cx, working_tree());
+    let key = w.session.read_with(cx, |s, _| s.session_key());
+    let engine = cx.update(|cx| cx.global::<Runs>().engine().clone());
+    let request = RunRequest::new(
+        w._repo.path(),
+        key,
+        RunKind::Guide,
+        "Writing a guide",
+        "Write it.",
+        ReviewModel::STANDARD,
+    );
+    let id = engine.submit(request).unwrap();
+    wait_until(cx, "the guide to start", |_| {
+        engine.run(id).is_some_and(|run| run.state == RunState::Running) && w.out("started").exists()
+    });
+
+    let (current, busy, last, past, can_again) = w.session.read_with(cx, |s, _| {
+        (
+            s.current().map(|run| run.id),
+            s.is_busy(),
+            s.last_run().map(|run| run.id),
+            s.past_runs(10).len(),
+            s.can_run_again(),
+        )
+    });
+    assert_eq!((current, busy, last, past, can_again), (None, false, None, 0, false));
+    assert_eq!(w.session.read_with(cx, |s, cx| s.fix_blocker(cx)), None);
+
+    std::fs::write(w.out("go"), "").unwrap();
+    wait_until(cx, "the guide to end", |_| {
+        engine.run(id).is_some_and(|run| run.state.is_finished())
+    });
+    cx.run_until_parked();
+    assert!(
+        w.session
+            .read_with(cx, |s, _| s.current().is_none() && s.last_run().is_none())
+    );
+    assert!(
+        !w.events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| matches!(event, ReviewEvent::RunFinished(_)))
+    );
 }
 
 #[gpui::test]

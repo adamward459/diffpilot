@@ -134,7 +134,6 @@ fn load_diff(repo: &std::path::Path, comparison: &Comparison) -> DiffLoaded {
     }
 }
 
-/// What a session asks when Claude replies in a thread.
 #[derive(Clone)]
 pub struct Claude {
     pub replier: Arc<dyn Replier>,
@@ -507,7 +506,9 @@ impl RepoView {
                     {
                         this.show_comment_counts(review, cx);
                     }
-                    ReviewEvent::RunFinished(RunState::Done) if review.read(cx).follows_current() => {
+                    ReviewEvent::RunFinished(RunState::Done)
+                        if review.read(cx).follows_current() && !review.read(cx).is_busy() =>
+                    {
                         this.set_claude_area(false, cx);
                     }
                     _ => {}

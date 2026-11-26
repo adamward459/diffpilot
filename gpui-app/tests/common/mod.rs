@@ -105,7 +105,7 @@ pub struct Fixture {
     _repo: tempfile::TempDir,
 }
 
-/// A session whose runs end by themselves with `result` as the review. Call `claude.hold()` to keep them going.
+/// Call `claude.hold()` to keep runs going.
 pub fn fixture(cx: &mut TestAppContext, result: ReviewResult) -> Fixture {
     let claude = fake_claude(cx);
     claude.review_with(&result);
@@ -175,7 +175,6 @@ impl Fixture {
         self.session.update(cx, |session, cx| session.start_review(cx));
     }
 
-    /// Starts a review and waits until it ends.
     pub fn review(&self, cx: &mut TestAppContext) {
         self.start(cx);
         self.wait_for_end(cx);

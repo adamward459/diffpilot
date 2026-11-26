@@ -110,7 +110,7 @@ fn comments_a_running_review_writes_become_threads_and_the_next_review_replaces_
     click(cx, "review:open");
     click(cx, "review:start");
     fake.wait_for_launches(cx, 1);
-    let comment = fake.tool(
+    let comment = fake.call_mcp_tool(
         "add_comment",
         serde_json::json!({
             "file": "base.txt", "startLine": 2, "severity": "must-fix", "title": "Edited", "body": "Check this line.",
@@ -137,4 +137,49 @@ fn comments_a_running_review_writes_become_threads_and_the_next_review_replaces_
     click(cx, "review:open");
     click(cx, "claude-area:run-again");
     wait_until_shows(cx, "jump-bar:threads:4");
+}
+
+#[gpui::test]
+fn a_review_that_only_comments_replaces_the_old_findings(app: &mut TestAppContext) {
+    let dir = fixture();
+    let fake = fake_claude(app);
+    fake.review_with(&result(
+        "",
+        vec![
+            finding("base.txt", Some(2), Severity::Nit, "First"),
+            finding("src/staged.rs", None, Severity::Nit, "Second"),
+        ],
+    ));
+    fake.finish();
+    let claude = Claude {
+        replier: Arc::new(StubReplier::default()),
+    };
+    let (_, cx) = open_repo_in(
+        app,
+        dir.path(),
+        Arc::new(Settings::in_memory()),
+        Arc::new(ViewedStore::in_memory()),
+        fake.store(),
+        claude,
+    );
+    click(cx, "review:open");
+    click(cx, "review:start");
+    wait_until_shows(cx, "jump-bar:threads:2");
+    wait_until_shows(cx, "review:done");
+
+    fake.hold();
+    fake.end_without_review();
+    click(cx, "review:open");
+    click(cx, "claude-area:run-again");
+    fake.wait_for_launches(cx, 2);
+    let comment = fake.call_mcp_tool(
+        "add_comment",
+        serde_json::json!({
+            "file": "base.txt", "startLine": 2, "severity": "must-fix", "title": "Edited", "body": "Check this line.",
+        }),
+    );
+    assert_eq!(comment["ok"], true, "{comment}");
+    wait_until_shows(cx, "jump-bar:threads:3");
+    fake.finish();
+    wait_until_shows(cx, "jump-bar:threads:1");
 }

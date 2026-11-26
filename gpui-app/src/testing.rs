@@ -176,7 +176,7 @@ pub fn open_repo(
     open_repo_in(cx, repo, settings, store, review_store, claude)
 }
 
-/// The store of the fake engine when a test installed one, so that runs and threads share a database as they do in the app.
+/// Runs and threads share one store, as in the app.
 fn engine_store(cx: &mut TestAppContext) -> Arc<Store> {
     cx.update(|cx| cx.try_global::<Runs>().map(|runs| runs.engine().store().clone()))
         .unwrap_or_else(|| Arc::new(Store::open_in_memory().expect("an in-memory store opens")))
@@ -361,8 +361,7 @@ pub fn wait_until_shows(cx: &mut VisualTestContext, selector: &str) {
     }
 }
 
-/// A `claude` script that plays a plan, a few tool calls and the run's end. Each start adds a line to
-/// `launches`. The run ends after `finish`, or after the delay `finish_after` sets.
+/// A `claude` script that plays a plan, a few tool calls and the run's end.
 pub struct FakeClaude {
     work: tempfile::TempDir,
     engine: RunEngine,
@@ -378,7 +377,6 @@ impl FakeClaude {
         self.engine.clone()
     }
 
-    /// The store the engine writes its runs and MCP comments to. A session reads threads from the same one.
     pub fn store(&self) -> Arc<Store> {
         self.engine.store().clone()
     }
@@ -407,7 +405,7 @@ impl FakeClaude {
         std::fs::write(self.work.path().join("auto"), seconds.to_string()).expect("write auto");
     }
 
-    /// The next runs write a comment for each finding, then end with `result` as their structured output.
+    /// Applies to runs that start after this call.
     pub fn review_with(&self, result: &ReviewResult) {
         let comment = |(index, finding): (usize, &Finding)| {
             let line = finding.line.unwrap_or(1);
@@ -426,6 +424,14 @@ impl FakeClaude {
         std::fs::write(self.work.path().join("after"), after.to_string()).expect("write after");
     }
 
+    pub fn end_without_review(&self) {
+        let _ = std::fs::remove_file(self.work.path().join("before"));
+        let after = serde_json::json!({
+            "type": "result", "subtype": "success", "is_error": false, "num_turns": 1, "result": "Done.",
+        });
+        std::fs::write(self.work.path().join("after"), after.to_string()).expect("write after");
+    }
+
     pub fn fail_with(&self, message: &str) {
         let after = serde_json::json!({
             "type": "result", "subtype": "error_during_execution", "is_error": true, "result": message,
@@ -433,8 +439,7 @@ impl FakeClaude {
         std::fs::write(self.work.path().join("after"), after.to_string()).expect("write after");
     }
 
-    /// Calls a diffpilot MCP tool the way the running `claude` would.
-    pub fn tool(&self, tool: &str, args: serde_json::Value) -> serde_json::Value {
+    pub fn call_mcp_tool(&self, tool: &str, args: serde_json::Value) -> serde_json::Value {
         let file = self.work.path().join("mcp.json");
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         while !file.exists() {
