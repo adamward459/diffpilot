@@ -41,7 +41,12 @@ impl CommitPopover {
             &message,
             window,
             |this, _, event: &InputEvent, window, cx| match event {
-                InputEvent::Change => cx.notify(),
+                InputEvent::Change => {
+                    if matches!(this.state, CommitState::Failed(_)) {
+                        this.state = CommitState::Idle;
+                    }
+                    cx.notify();
+                }
                 InputEvent::PressEnter { secondary: true } => this.commit(window, cx),
                 _ => {}
             },
