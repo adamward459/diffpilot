@@ -9,18 +9,19 @@ use crate::diff::FileDiff;
 use crate::git;
 use crate::threads::ThreadAnchor;
 use sha2::{Digest, Sha256};
+use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-pub fn file_fingerprints(files: &[FileDiff]) -> BTreeMap<String, String> {
+pub fn file_fingerprints<F: Borrow<FileDiff>>(files: &[F]) -> BTreeMap<String, String> {
     files
         .iter()
-        .map(|file| (file.path.clone(), file.fingerprint()))
+        .map(|file| (file.borrow().path.clone(), file.borrow().fingerprint()))
         .collect()
 }
 
 /// A hash of the whole diff: every path with the fingerprint of its file diff, in path order.
-pub fn fingerprint(files: &[FileDiff]) -> String {
+pub fn fingerprint<F: Borrow<FileDiff>>(files: &[F]) -> String {
     let mut hasher = Sha256::new();
     for (path, file) in file_fingerprints(files) {
         hasher.update(path.as_bytes());
@@ -75,7 +76,7 @@ impl Staleness {
     }
 }
 
-pub fn check(guide: &Guide, files: &[FileDiff]) -> Staleness {
+pub fn check<F: Borrow<FileDiff>>(guide: &Guide, files: &[F]) -> Staleness {
     let now = file_fingerprints(files);
     let chapters = guide
         .chapters
@@ -127,6 +128,7 @@ pub fn check(guide: &Guide, files: &[FileDiff]) -> Staleness {
         is_stale: guide.fingerprint != fingerprint(files),
         uncovered_files: files
             .iter()
+            .map(Borrow::borrow)
             .filter(|file| !guide.covers(&file.path))
             .map(|file| file.path.clone())
             .collect(),

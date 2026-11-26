@@ -3,6 +3,7 @@
 
 use super::{Attention, Guide, Note};
 use crate::diff::FileDiff;
+use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::ops::Range;
 
@@ -37,14 +38,14 @@ pub struct Reading {
 
 /// Files that left the diff are dropped, chapters left empty are dropped, and files the guide never saw are
 /// collected in a last chapter.
-pub fn reading(guide: &Guide, files: &[FileDiff]) -> Reading {
+pub fn reading<F: Borrow<FileDiff>>(guide: &Guide, files: &[F]) -> Reading {
     let mut placed: HashSet<&str> = HashSet::new();
     let mut chapters = Vec::new();
     for (index, chapter) in guide.chapters.iter().enumerate() {
         let kept: Vec<&FileDiff> = chapter
             .files
             .iter()
-            .filter_map(|file| files.iter().find(|diff| diff.path == file.path))
+            .filter_map(|file| files.iter().map(Borrow::borrow).find(|diff| diff.path == file.path))
             .filter(|diff| placed.insert(diff.path.as_str()))
             .collect();
         if kept.is_empty() {
@@ -69,6 +70,7 @@ pub fn reading(guide: &Guide, files: &[FileDiff]) -> Reading {
     }
     let rest: Vec<&FileDiff> = files
         .iter()
+        .map(Borrow::borrow)
         .filter(|diff| !placed.contains(diff.path.as_str()))
         .collect();
     if !rest.is_empty() {

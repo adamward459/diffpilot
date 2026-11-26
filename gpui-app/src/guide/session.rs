@@ -12,7 +12,7 @@ use diffpilot_core::run::{RunKind, RunState};
 use diffpilot_core::runner::{RunEngine, RunEvent};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::{GuideId, RunId, SessionId, Store, StoredGuide};
-use gpui::{App, Context, Entity, EventEmitter, Subscription, Task};
+use gpui::{App, AppContext as _, Context, Entity, EventEmitter, Subscription, Task};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -48,6 +48,7 @@ pub struct GuideSession {
     reading: Reading,
     staleness: Option<Staleness>,
     commits: Option<u32>,
+    commits_epoch: u64,
     kept: Option<GuideId>,
     run: GuideRun,
     step: Step,
@@ -78,6 +79,7 @@ impl GuideSession {
             reading: Reading::default(),
             staleness: None,
             commits: None,
+            commits_epoch: 0,
             kept: None,
             run: GuideRun::Idle,
             step: Step::Overview,
@@ -266,14 +268,31 @@ impl GuideSession {
             self.commits = None;
             return;
         };
-        let files: Vec<FileDiff> = self.files.iter().map(|file| (**file).clone()).collect();
-        self.reading = reading(&stored.guide, &files);
-        let staleness = (!files.is_empty()).then(|| stale::check(&stored.guide, &files));
-        self.commits = match (&staleness, self.review.read(cx).host().repo.as_deref()) {
-            (Some(staleness), Some(repo)) if staleness.is_stale => stale::commits_since(repo, &stored.guide),
+        self.reading = reading(&stored.guide, &self.files);
+        let staleness = (!self.files.is_empty()).then(|| stale::check(&stored.guide, &self.files));
+        let behind = match (&staleness, self.review.read(cx).host().repo.clone()) {
+            (Some(staleness), Some(repo)) if staleness.is_stale => Some((repo, stored.guide.clone())),
             _ => None,
         };
+        self.commits = None;
+        self.commits_epoch = self.commits_epoch.wrapping_add(1);
+        let epoch = self.commits_epoch;
         self.staleness = staleness;
+        if let Some((repo, guide)) = behind {
+            cx.spawn(async move |this, cx| {
+                let commits = cx
+                    .background_spawn(async move { stale::commits_since(&repo, &guide) })
+                    .await;
+                this.update(cx, |session, cx| {
+                    if session.commits_epoch == epoch && session.commits != commits {
+                        session.commits = commits;
+                        session.announce(cx);
+                    }
+                })
+                .ok();
+            })
+            .detach();
+        }
         if let Step::Chapter(index) = self.step
             && index >= self.reading.chapters.len()
         {
