@@ -1,5 +1,5 @@
 use super::checks_popover::ChecksPopover;
-use super::rows::{Tone, checks_detail, overall_tone, review_badge, rollup_tone};
+use super::rows::{Tone, checks_detail, outcome_tone, overall_tone, review_badge};
 use super::sync_popover::SyncPopover;
 use super::{RemoteStatus, ReviewState, SyncState};
 use diffpilot_ui_kit::components::{Button, Look, activity_capsule, glyph_icon, spinner, status_dot, tag};
@@ -125,7 +125,7 @@ impl Render for RemoteCapsule {
             let tone = checks
                 .as_ref()
                 .and_then(|checks| overall_tone(checks.overall()))
-                .or_else(|| rollup_tone(pr.checks));
+                .or_else(|| pr.checks.map(outcome_tone));
             let detail = checks
                 .as_ref()
                 .and_then(|checks| checks_detail(checks.counts(), checks.overall()));
@@ -153,15 +153,15 @@ impl Render for RemoteCapsule {
                 .trigger(trigger)
                 .content(move |_, _, _| content.clone())
         });
-        let review =
-            pr.as_ref()
-                .and_then(|pr| review_badge(pr.review_decision))
-                .map(|(text, tone): (&'static str, Tone)| {
-                    tag(div(), move || format!("remote:review:{text}"))
-                        .px(px(6.))
-                        .text_color(tone.color(&theme))
-                        .child(text)
-                });
+        let review = pr
+            .as_ref()
+            .and_then(|pr| review_badge(pr.review))
+            .map(|(text, tone): (&'static str, Tone)| {
+                tag(div(), move || format!("remote:review:{text}"))
+                    .px(px(6.))
+                    .text_color(tone.color(&theme))
+                    .child(text)
+            });
 
         let sync_content = self.sync.clone();
         activity_capsule(&theme)

@@ -53,16 +53,27 @@ fn fetch_base(repo: &Path, remote: &str, base: &str) -> Result<String, GithubErr
     Ok(format!("{remote}/{base}"))
 }
 
-fn fetch_pull_head(repo: &Path, remote: &str, number: u64) -> Result<String, GithubError> {
+pub fn pull_head(number: u64) -> String {
+    format!("refs/pull/{number}/head")
+}
+
+fn fetch_head(repo: &Path, remote: &str, number: u64, source: &str) -> Result<String, GithubError> {
     let target = pr_ref(number);
-    fetch(repo, remote, &format!("+refs/pull/{number}/head:{target}"))?;
+    fetch(repo, remote, &format!("+{source}:{target}"))?;
     Ok(exec::git_ok(repo, &["rev-parse", &target])?.trim().to_string())
 }
 
-pub fn review_without_checkout(repo: &Path, remote: &str, pr: &PullRequest) -> Result<PrReview, GithubError> {
-    let base = fetch_base(repo, remote, &pr.base_ref)?;
-    let head_sha = fetch_pull_head(repo, remote, pr.number)?;
-    let pr_ref = pr_ref(pr.number);
+/// `head_source` is the remote ref that holds the head, such as `refs/pull/7/head`.
+pub fn review_without_checkout(
+    repo: &Path,
+    remote: &str,
+    base_ref: &str,
+    number: u64,
+    head_source: &str,
+) -> Result<PrReview, GithubError> {
+    let base = fetch_base(repo, remote, base_ref)?;
+    let head_sha = fetch_head(repo, remote, number, head_source)?;
+    let pr_ref = pr_ref(number);
     Ok(PrReview {
         comparison: Comparison::branch(&pr_ref, &base),
         head_sha,
@@ -109,7 +120,7 @@ fn fetch_target(repo: &Path, remote: &str, pr: &PullRequest) -> Result<(Target, 
             return Ok((target, base));
         }
     }
-    fetch_pull_head(repo, remote, pr.number)?;
+    fetch_head(repo, remote, pr.number, &pull_head(pr.number))?;
     let target = Target {
         local: format!("pr-{}", pr.number),
         start: pr_ref(pr.number),
@@ -209,6 +220,10 @@ mod tests {
         git(repo, &["push", "-q", "origin", "feature"]);
         let feature = git(repo, &["rev-parse", "feature"]);
         git(bare.path(), &["update-ref", "refs/pull/1/head", feature.trim()]);
+        git(
+            bare.path(),
+            &["update-ref", "refs/merge-requests/3/head", feature.trim()],
+        );
 
         git(repo, &["checkout", "-q", "-b", "forked", "main"]);
         write(repo, "g.txt", "fork\n");
@@ -236,7 +251,7 @@ mod tests {
         let before = git(repo, &["rev-parse", "HEAD"]);
         let refs_before = Refs::load(repo);
 
-        let review = review_without_checkout(repo, "origin", &sample_pr(1, "feature")).unwrap();
+        let review = review_without_checkout(repo, "origin", "main", 1, &pull_head(1)).unwrap();
         assert_eq!(review.pr_ref, "refs/diffpilot/pr/1");
         assert_eq!(
             review.comparison,
@@ -256,10 +271,20 @@ mod tests {
     }
 
     #[test]
+    fn reviews_the_head_ref_the_caller_names() {
+        let fixture = fixture();
+        let repo = fixture.local.path();
+        let review = review_without_checkout(repo, "origin", "main", 3, "refs/merge-requests/3/head").unwrap();
+        assert_eq!(review.pr_ref, "refs/diffpilot/pr/3");
+        assert_eq!(paths(repo, &review.comparison), ["f.txt"]);
+        assert_eq!(pr_number(&review.pr_ref), Some(3));
+    }
+
+    #[test]
     fn a_missing_pull_ref_is_a_fetch_failure() {
         let fixture = fixture();
         assert!(matches!(
-            review_without_checkout(fixture.local.path(), "origin", &sample_pr(99, "x")),
+            review_without_checkout(fixture.local.path(), "origin", "main", 99, &pull_head(99)),
             Err(GithubError::FetchFailed(_))
         ));
     }
@@ -268,7 +293,7 @@ mod tests {
     fn a_review_worktree_has_the_real_files_and_is_removed_after() {
         let fixture = fixture();
         let repo = fixture.local.path();
-        let review = review_without_checkout(repo, "origin", &sample_pr(1, "feature")).unwrap();
+        let review = review_without_checkout(repo, "origin", "main", 1, &pull_head(1)).unwrap();
         let tree = review_worktree(repo, &review).unwrap();
         let path = tree.path().to_path_buf();
         assert_eq!(std::fs::read_to_string(path.join("f.txt")).unwrap(), "feature\n");

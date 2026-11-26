@@ -388,6 +388,7 @@ pub const FEATURES: &[Feature] = &[
         name: "github",
         paths: &[
             "core/src/github/**",
+            "core/src/forge/**",
             "core/src/sync.rs",
             "gpui-app/src/remote/**",
             "core/examples/github_smoke.rs",
@@ -397,6 +398,10 @@ pub const FEATURES: &[Feature] = &[
             Lib {
                 package: CORE,
                 module: "github::",
+            },
+            Lib {
+                package: CORE,
+                module: "forge::",
             },
             Lib {
                 package: CORE,

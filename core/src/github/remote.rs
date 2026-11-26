@@ -51,18 +51,22 @@ impl Endpoint {
     }
 }
 
-/// `enterprise_hosts` are the GitHub Enterprise Server hosts the user signed in to.
-pub fn parse_remote_url(url: &str, enterprise_hosts: &[String]) -> Option<RepoSlug> {
+pub(crate) fn split_remote_url(url: &str) -> Option<(&str, &str)> {
     let url = url.trim();
-    let (host, path) = if let Some((_, rest)) = url.split_once("://") {
+    if let Some((_, rest)) = url.split_once("://") {
         let (authority, path) = rest.split_once('/')?;
         let authority = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
         let host = authority.split(':').next().unwrap_or(authority);
-        (host, path)
+        Some((host, path))
     } else {
         let rest = url.rsplit_once('@').map_or(url, |(_, rest)| rest);
-        rest.split_once(':')?
-    };
+        rest.split_once(':')
+    }
+}
+
+/// `enterprise_hosts` are the GitHub Enterprise Server hosts the user signed in to.
+pub fn parse_remote_url(url: &str, enterprise_hosts: &[String]) -> Option<RepoSlug> {
+    let (host, path) = split_remote_url(url)?;
     let host = known_host(host, enterprise_hosts)?;
     slug_from_path(host, path)
 }

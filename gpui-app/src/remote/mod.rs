@@ -10,15 +10,13 @@ pub use menu::RemoteMenu;
 use crate::settings;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::editor;
-use diffpilot_core::github::checks::{ChecksSnapshot, POLL_INTERVAL};
-use diffpilot_core::github::pr_git;
-use diffpilot_core::github::remote::RepoSlug;
-use diffpilot_core::github::types::PullRequest;
-use diffpilot_core::github::{Github, GithubError};
+use diffpilot_core::forge::{
+    self, Access, ChangeRequest, Checks, Forge, ForgeError, ForgeKind, JobId, Linked, POLL_INTERVAL,
+};
 use diffpilot_core::sync::{self, BranchStatus, PullMode};
 use gpui::{AppContext, Context, EventEmitter, Task};
+use rows::{Words, words};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 const RERUN_SETTLE: Duration = Duration::from_secs(3);
@@ -67,13 +65,6 @@ pub enum RemoteEvent {
     Review(Comparison),
 }
 
-#[derive(Clone)]
-struct GithubLink {
-    github: Arc<Github>,
-    slug: RepoSlug,
-    remote: String,
-}
-
 struct ChecksPoll {
     sha: String,
     _task: Task<()>,
@@ -86,9 +77,9 @@ pub struct RemoteStatus {
     sync: SyncState,
     rerun: RerunState,
     review: ReviewState,
-    link: Option<GithubLink>,
-    open_prs: Vec<PullRequest>,
-    checks: Option<ChecksSnapshot>,
+    link: Option<Linked>,
+    open_prs: Vec<ChangeRequest>,
+    checks: Option<Checks>,
     poll: Option<ChecksPoll>,
     status_task: Option<Task<()>>,
     prs_task: Option<Task<()>>,
@@ -146,35 +137,33 @@ impl RemoteStatus {
         &self.review
     }
 
-    pub fn is_github(&self) -> bool {
-        self.link.is_some()
+    pub fn kind(&self) -> Option<ForgeKind> {
+        self.link.as_ref().map(|link| link.forge.kind())
     }
 
-    pub fn pull_requests(&self) -> &[PullRequest] {
+    pub fn words(&self) -> Option<Words> {
+        self.kind().map(words)
+    }
+
+    pub fn pull_requests(&self) -> &[ChangeRequest] {
         &self.open_prs
     }
 
-    pub fn checks(&self) -> Option<&ChecksSnapshot> {
+    pub fn checks(&self) -> Option<&Checks> {
         self.checks.as_ref()
     }
 
-    pub fn branch_pr(&self) -> Option<&PullRequest> {
-        let link = self.link.as_ref()?;
+    pub fn branch_pr(&self) -> Option<&ChangeRequest> {
         let branch = self.branch.as_ref()?.branch.as_deref()?;
-        let repo = link.slug.full_name();
-        self.open_prs.iter().find(|pr| {
-            pr.head_ref == branch
-                && pr
-                    .head_repo
-                    .as_deref()
-                    .is_some_and(|head| head.eq_ignore_ascii_case(&repo))
-        })
+        self.open_prs
+            .iter()
+            .find(|change| change.from_this_repo && change.head_ref == branch)
     }
 
-    pub fn github_url(&self) -> Option<String> {
+    pub fn web_url(&self) -> Option<String> {
         match self.branch_pr() {
-            Some(pr) => Some(pr.url.clone()),
-            None => self.link.as_ref().map(|link| link.slug.web_url()),
+            Some(change) => Some(change.url.clone()),
+            None => self.link.as_ref().map(|link| link.forge.web_url()),
         }
     }
 
@@ -203,16 +192,14 @@ impl RemoteStatus {
         let services = settings::services(cx);
         let task = cx.background_spawn(async move {
             let services = services?;
-            let hosts = [services.host.clone()];
-            let (remote, slug) = pr_git::repo_slug(&repo, &hosts).ok()?;
-            let github = Github::connect(services.http.clone(), &services.credentials, &services.host).ok()?;
-            let prs = github.list_pull_requests(&slug).ok()?;
-            let link = GithubLink {
-                github: Arc::new(github),
-                slug,
-                remote,
+            let access = Access {
+                http: services.http.clone(),
+                credentials: &services.credentials,
+                github_host: &services.host,
             };
-            Some((link, prs))
+            let link = forge::connect(&repo, &access).ok()?;
+            let changes = link.forge.change_requests().ok()?;
+            Some((link, changes))
         });
         self.prs_task = Some(cx.spawn(async move |this, cx| {
             let loaded = task.await;
@@ -222,7 +209,7 @@ impl RemoteStatus {
                     None => (None, Vec::new()),
                 };
                 this.link = link;
-                this.open_prs = prs.into_iter().filter(PullRequest::is_open).collect();
+                this.open_prs = prs;
                 this.sync_checks(cx);
                 cx.notify();
             })
@@ -263,7 +250,7 @@ impl RemoteStatus {
 
     pub fn review(&mut self, number: u64, cx: &mut Context<Self>) {
         let Some(link) = self.link.clone() else { return };
-        let Some(pr) = self.open_prs.iter().find(|pr| pr.number == number).cloned() else {
+        let Some(change) = self.open_prs.iter().find(|change| change.number == number).cloned() else {
             return;
         };
         if matches!(self.review, ReviewState::Running(_)) {
@@ -273,7 +260,8 @@ impl RemoteStatus {
         cx.notify();
         let repo = self.repo.clone();
         let task = cx.background_spawn(async move {
-            pr_git::review_without_checkout(&repo, &link.remote, &pr).map_err(|error| error.to_string())
+            forge::review_without_checkout(&repo, &link.remote, link.forge.as_ref(), &change)
+                .map_err(|error| error.to_string())
         });
         self.review_task = Some(cx.spawn(async move |this, cx| {
             let result = task.await;
@@ -291,36 +279,26 @@ impl RemoteStatus {
         }));
     }
 
-    pub fn open_on_github(&self, cx: &mut Context<Self>) {
-        let Some(url) = self.github_url() else { return };
+    pub fn open_on_host(&self, cx: &mut Context<Self>) {
+        let Some(url) = self.web_url() else { return };
         open_in_browser(url, cx);
     }
 
     pub fn rerun_failed(&mut self, cx: &mut Context<Self>) {
-        let ids = self
-            .checks
-            .as_ref()
-            .map(ChecksSnapshot::failed_run_ids)
-            .unwrap_or_default();
-        if ids.is_empty() {
+        let Some(checks) = self.checks.clone().filter(Checks::can_rerun_failed) else {
             return;
-        }
-        self.rerun_with(cx, move |github, slug| {
-            for id in ids {
-                github.rerun_failed_jobs(slug, id)?;
-            }
-            Ok(())
-        });
+        };
+        self.rerun_with(cx, move |forge| forge.rerun_failed(&checks));
     }
 
-    pub fn rerun_job(&mut self, job_id: u64, cx: &mut Context<Self>) {
-        self.rerun_with(cx, move |github, slug| github.rerun_job(slug, job_id).map(|_| ()));
+    pub fn rerun_job(&mut self, job: JobId, cx: &mut Context<Self>) {
+        self.rerun_with(cx, move |forge| forge.rerun_job(job));
     }
 
     fn rerun_with(
         &mut self,
         cx: &mut Context<Self>,
-        work: impl FnOnce(&Github, &RepoSlug) -> Result<(), GithubError> + Send + 'static,
+        work: impl FnOnce(&dyn Forge) -> Result<(), ForgeError> + Send + 'static,
     ) {
         let Some(link) = self.link.clone() else { return };
         if self.rerun == RerunState::Running {
@@ -328,8 +306,7 @@ impl RemoteStatus {
         }
         self.rerun = RerunState::Running;
         cx.notify();
-        let task =
-            cx.background_spawn(async move { work(&link.github, &link.slug).map_err(|error| error.to_string()) });
+        let task = cx.background_spawn(async move { work(link.forge.as_ref()).map_err(|error| error.to_string()) });
         self.rerun_task = Some(cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
@@ -347,7 +324,7 @@ impl RemoteStatus {
     }
 
     fn sync_checks(&mut self, cx: &mut Context<Self>) {
-        let wanted = self.branch_pr().map(|pr| pr.head_sha.clone());
+        let wanted = self.branch_pr().map(|change| change.head_sha.clone());
         if self.poll.as_ref().map(|poll| &poll.sha) == wanted.as_ref() {
             return;
         }
@@ -360,7 +337,10 @@ impl RemoteStatus {
 
     /// Polls until every check finishes. The first fetch waits `settle`, so a re-run has time to start.
     fn restart_poll(&mut self, settle: Duration, cx: &mut Context<Self>) {
-        let (Some(link), Some(sha)) = (self.link.clone(), self.branch_pr().map(|pr| pr.head_sha.clone())) else {
+        let (Some(link), Some(sha)) = (
+            self.link.clone(),
+            self.branch_pr().map(|change| change.head_sha.clone()),
+        ) else {
             self.poll = None;
             return;
         };
@@ -370,12 +350,12 @@ impl RemoteStatus {
                 cx.background_executor().timer(settle).await;
             }
             loop {
-                let (github, slug, sha) = (link.github.clone(), link.slug.clone(), sha.clone());
-                let snapshot = cx.background_spawn(async move { github.checks(&slug, &sha) }).await;
+                let (forge, sha) = (link.forge.clone(), sha.clone());
+                let snapshot = cx.background_spawn(async move { forge.checks(&sha) }).await;
                 let finished = this.update(cx, |this, cx| match snapshot {
-                    Ok(snapshot) => {
-                        let finished = snapshot.is_complete();
-                        this.checks = Some(snapshot);
+                    Ok(checks) => {
+                        let finished = checks.is_complete();
+                        this.checks = Some(checks);
                         cx.notify();
                         finished
                     }

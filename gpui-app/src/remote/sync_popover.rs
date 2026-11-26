@@ -88,7 +88,12 @@ impl Render for SyncPopover {
         let warning = pull_first_warning(&branch);
         let sync = remote.sync().clone();
         let review_failure = match remote.review_state() {
-            ReviewState::Failed { number, message } => Some(format!("Could not review #{number}. {message}")),
+            ReviewState::Failed { number, message } => {
+                let reference = remote
+                    .words()
+                    .map_or_else(|| number.to_string(), |words| words.reference(*number));
+                Some(format!("Could not review {reference}. {message}"))
+            }
             _ => None,
         };
         let fetch = SyncRow {

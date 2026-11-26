@@ -1,5 +1,4 @@
-use diffpilot_core::github::checks::{CheckRun, ChecksSnapshot, Counts, Outcome, Overall};
-use diffpilot_core::github::types::{ChecksState, PullRequest, ReviewDecision};
+use diffpilot_core::forge::{ChangeRequest, Counts, ForgeKind, Outcome, Overall, Review};
 use diffpilot_core::sync::{BranchStatus, PullMode};
 use diffpilot_ui_kit::Theme;
 use gpui::Hsla;
@@ -30,6 +29,45 @@ impl Tone {
             Tone::Passed => "passed",
             Tone::Muted => "muted",
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Words {
+    pub requests: &'static str,
+    pub host: &'static str,
+    short: &'static str,
+    marker: char,
+}
+
+pub fn words(kind: ForgeKind) -> Words {
+    match kind {
+        ForgeKind::GitHub => Words {
+            requests: "Pull requests",
+            host: "GitHub",
+            short: "PR",
+            marker: '#',
+        },
+        ForgeKind::GitLab => Words {
+            requests: "Merge requests",
+            host: "GitLab",
+            short: "MR",
+            marker: '!',
+        },
+    }
+}
+
+impl Words {
+    pub fn reference(&self, number: u64) -> String {
+        format!("{}{number}", self.marker)
+    }
+
+    pub fn label(&self, number: u64) -> String {
+        format!("{} {}", self.short, self.reference(number))
+    }
+
+    pub fn open_on_host(&self) -> String {
+        format!("Open on {}", self.host)
     }
 }
 
@@ -135,31 +173,31 @@ pub fn pull_first_warning(status: &BranchStatus) -> Option<String> {
     })
 }
 
-pub fn review_text(decision: Option<ReviewDecision>) -> Option<&'static str> {
-    match decision? {
-        ReviewDecision::Approved => Some("approved"),
-        ReviewDecision::ChangesRequested => Some("changes requested"),
-        ReviewDecision::ReviewRequired => Some("review requested"),
-        ReviewDecision::Unknown => None,
+pub fn review_text(review: Review) -> Option<&'static str> {
+    match review {
+        Review::Approved => Some("approved"),
+        Review::ChangesRequested => Some("changes requested"),
+        Review::Requested => Some("review requested"),
+        Review::None => None,
     }
 }
 
-pub fn review_badge(decision: Option<ReviewDecision>) -> Option<(&'static str, Tone)> {
-    match decision? {
-        ReviewDecision::Approved => Some(("Approved", Tone::Passed)),
-        ReviewDecision::ChangesRequested => Some(("Changes requested", Tone::Failed)),
-        ReviewDecision::ReviewRequired | ReviewDecision::Unknown => None,
+pub fn review_badge(review: Review) -> Option<(&'static str, Tone)> {
+    match review {
+        Review::Approved => Some(("Approved", Tone::Passed)),
+        Review::ChangesRequested => Some(("Changes requested", Tone::Failed)),
+        Review::Requested | Review::None => None,
     }
 }
 
-pub fn pr_title(pr: &PullRequest) -> String {
-    format!("#{} {}", pr.number, pr.title)
+pub fn pr_title(change: &ChangeRequest, words: Words) -> String {
+    format!("{} {}", words.reference(change.number), change.title)
 }
 
-pub fn pr_detail(pr: &PullRequest) -> String {
-    let mut parts = vec![pr.author.as_str()];
-    parts.extend(review_text(pr.review_decision));
-    parts.push(pr.head_ref.as_str());
+pub fn pr_detail(change: &ChangeRequest) -> String {
+    let mut parts = vec![change.author.as_str()];
+    parts.extend(review_text(change.review));
+    parts.push(change.head_ref.as_str());
     parts.join(" · ")
 }
 
@@ -171,24 +209,16 @@ pub struct PrRow {
     pub checked: bool,
 }
 
-pub fn pr_rows(prs: &[PullRequest], current: Option<u64>) -> Vec<PrRow> {
-    prs.iter()
-        .map(|pr| PrRow {
-            number: pr.number,
-            title: pr_title(pr),
-            detail: pr_detail(pr),
-            checked: current == Some(pr.number),
+pub fn pr_rows(changes: &[ChangeRequest], current: Option<u64>, words: Words) -> Vec<PrRow> {
+    changes
+        .iter()
+        .map(|change| PrRow {
+            number: change.number,
+            title: pr_title(change, words),
+            detail: pr_detail(change),
+            checked: current == Some(change.number),
         })
         .collect()
-}
-
-pub fn rollup_tone(state: Option<ChecksState>) -> Option<Tone> {
-    match state? {
-        ChecksState::Success => Some(Tone::Passed),
-        ChecksState::Failure | ChecksState::Error => Some(Tone::Failed),
-        ChecksState::Pending | ChecksState::Expected => Some(Tone::Running),
-        ChecksState::Unknown => None,
-    }
 }
 
 pub fn overall_tone(overall: Overall) -> Option<Tone> {
@@ -230,73 +260,9 @@ pub fn duration_text(seconds: u64) -> String {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JobRow {
-    pub name: String,
-    pub tone: Tone,
-    pub duration: Option<String>,
-    pub rerun: Option<u64>,
-    pub log_url: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JobGroup {
-    pub title: String,
-    pub jobs: Vec<JobRow>,
-}
-
-const OTHER_GROUP: &str = "Other";
-const STATUS_GROUP: &str = "Commit statuses";
-
-fn job_row(run: &CheckRun, now: i64) -> JobRow {
-    JobRow {
-        name: run.name.clone(),
-        tone: outcome_tone(run.outcome()),
-        duration: run.duration_seconds(now).map(duration_text),
-        rerun: run.job_id.filter(|_| run.is_actions_job()),
-        log_url: run.html_url.clone().or_else(|| run.details_url.clone()),
-    }
-}
-
-/// The check data names the app that ran a job, not its workflow stage, so jobs group by app. Commit statuses
-/// from the older status API form the last group.
-pub fn job_groups(snapshot: &ChecksSnapshot, now: i64) -> Vec<JobGroup> {
-    let mut groups: Vec<JobGroup> = Vec::new();
-    for run in &snapshot.runs {
-        let title = run.app.as_deref().unwrap_or(OTHER_GROUP);
-        let row = job_row(run, now);
-        match groups.iter_mut().find(|group| group.title == title) {
-            Some(group) => group.jobs.push(row),
-            None => groups.push(JobGroup {
-                title: title.to_string(),
-                jobs: vec![row],
-            }),
-        }
-    }
-    if !snapshot.statuses.is_empty() {
-        groups.push(JobGroup {
-            title: STATUS_GROUP.into(),
-            jobs: snapshot
-                .statuses
-                .iter()
-                .map(|status| JobRow {
-                    name: status.context.clone(),
-                    tone: outcome_tone(status.outcome()),
-                    duration: None,
-                    rerun: None,
-                    log_url: status.target_url.clone(),
-                })
-                .collect(),
-        });
-    }
-    groups
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use diffpilot_core::github::checks::{CommitStatus, Conclusion, RunStatus, StatusState};
-    use diffpilot_core::github::types::PrState;
     use std::time::Duration;
 
     fn status(ahead: u32, behind: u32) -> BranchStatus {
@@ -310,47 +276,18 @@ mod tests {
         }
     }
 
-    fn pr(number: u64, review: Option<ReviewDecision>) -> PullRequest {
-        PullRequest {
-            node_id: format!("PR_{number}"),
+    fn pr(number: u64, review: Review) -> ChangeRequest {
+        ChangeRequest {
             number,
             title: "Bulk select in the inbox".into(),
             url: format!("https://github.com/o/r/pull/{number}"),
-            state: PrState::Open,
-            is_draft: false,
             author: "jordan-lee".into(),
-            base_ref: "main".into(),
             head_ref: "feature/bulk-select".into(),
+            base_ref: "main".into(),
             head_sha: "a".repeat(40),
-            review_decision: review,
+            from_this_repo: true,
+            review,
             checks: None,
-            body: String::new(),
-            created_at: String::new(),
-            updated_at: String::new(),
-            additions: 0,
-            deletions: 0,
-            changed_files: 0,
-            review_thread_count: 0,
-            head_repo: Some("o/r".into()),
-            is_cross_repository: false,
-        }
-    }
-
-    fn run(name: &str, app: Option<&str>, conclusion: Conclusion, job: Option<u64>) -> CheckRun {
-        CheckRun {
-            id: 1,
-            name: name.into(),
-            status: RunStatus::Completed,
-            conclusion: Some(conclusion),
-            started_at: Some("2026-11-25T10:00:00Z".into()),
-            completed_at: Some("2026-11-25T10:02:05Z".into()),
-            html_url: Some(format!("https://example.com/{name}")),
-            details_url: None,
-            app: app.map(Into::into),
-            title: None,
-            summary: None,
-            run_id: job.map(|_| 7),
-            job_id: job,
         }
     }
 
@@ -421,33 +358,38 @@ mod tests {
 
     #[test]
     fn a_pull_request_row_shows_author_review_and_branch() {
-        let row = &pr_rows(&[pr(479, Some(ReviewDecision::ReviewRequired))], None)[0];
+        let github = words(ForgeKind::GitHub);
+        let row = &pr_rows(&[pr(479, Review::Requested)], None, github)[0];
         assert_eq!(row.title, "#479 Bulk select in the inbox");
         assert_eq!(row.detail, "jordan-lee · review requested · feature/bulk-select");
         assert_eq!(
-            pr_detail(&pr(1, Some(ReviewDecision::ChangesRequested))),
+            pr_detail(&pr(1, Review::ChangesRequested)),
             "jordan-lee · changes requested · feature/bulk-select"
         );
         assert_eq!(
-            pr_detail(&pr(1, Some(ReviewDecision::Approved))),
+            pr_detail(&pr(1, Review::Approved)),
             "jordan-lee · approved · feature/bulk-select"
         );
-        assert_eq!(pr_detail(&pr(1, None)), "jordan-lee · feature/bulk-select");
+        assert_eq!(pr_detail(&pr(1, Review::None)), "jordan-lee · feature/bulk-select");
     }
 
     #[test]
     fn the_row_of_the_checked_out_branch_is_marked() {
-        let rows = pr_rows(&[pr(1, None), pr(2, None)], Some(2));
+        let rows = pr_rows(
+            &[pr(1, Review::None), pr(2, Review::None)],
+            Some(2),
+            words(ForgeKind::GitHub),
+        );
         assert_eq!(rows.iter().map(|row| row.checked).collect::<Vec<_>>(), [false, true]);
     }
 
     #[test]
     fn dots_follow_the_state_of_the_checks() {
-        assert_eq!(rollup_tone(Some(ChecksState::Pending)), Some(Tone::Running));
-        assert_eq!(rollup_tone(Some(ChecksState::Failure)), Some(Tone::Failed));
-        assert_eq!(rollup_tone(Some(ChecksState::Success)), Some(Tone::Passed));
-        assert_eq!(rollup_tone(None), None);
+        assert_eq!(overall_tone(Overall::Pending), Some(Tone::Running));
+        assert_eq!(overall_tone(Overall::Failing), Some(Tone::Failed));
+        assert_eq!(overall_tone(Overall::Passing), Some(Tone::Passed));
         assert_eq!(overall_tone(Overall::None), None);
+        assert_eq!(outcome_tone(Outcome::Running), Tone::Running);
         assert_eq!(outcome_tone(Outcome::Queued), Tone::Muted);
     }
 
@@ -483,37 +425,37 @@ mod tests {
     }
 
     #[test]
-    fn jobs_group_by_app_and_only_actions_jobs_can_rerun() {
-        let snapshot = ChecksSnapshot {
-            sha: "s".into(),
-            runs: vec![
-                run("lint", Some("GitHub Actions"), Conclusion::Success, Some(11)),
-                run("Vercel", Some("Vercel"), Conclusion::Success, None),
-                run("tests", Some("GitHub Actions"), Conclusion::Failure, Some(12)),
-                run("mystery", None, Conclusion::Success, None),
-            ],
-            statuses: vec![CommitStatus {
-                context: "ci/legacy".into(),
-                state: StatusState::Pending,
-                description: None,
-                target_url: Some("https://ci.example/1".into()),
-            }],
-        };
-        let groups = job_groups(&snapshot, 0);
-        let titles: Vec<&str> = groups.iter().map(|group| group.title.as_str()).collect();
-        assert_eq!(titles, ["GitHub Actions", "Vercel", "Other", "Commit statuses"]);
-        let actions: Vec<(&str, Tone, Option<u64>)> = groups[0]
-            .jobs
-            .iter()
-            .map(|job| (job.name.as_str(), job.tone, job.rerun))
-            .collect();
+    fn words_come_from_the_forge_kind() {
+        let github = words(ForgeKind::GitHub);
         assert_eq!(
-            actions,
-            [("lint", Tone::Passed, Some(11)), ("tests", Tone::Failed, Some(12))]
+            (
+                github.requests,
+                github.reference(5),
+                github.label(5),
+                github.open_on_host()
+            ),
+            (
+                "Pull requests",
+                "#5".to_string(),
+                "PR #5".to_string(),
+                "Open on GitHub".to_string()
+            )
         );
-        assert_eq!(groups[0].jobs[1].duration.as_deref(), Some("2m 05s"));
-        assert_eq!(groups[1].jobs[0].rerun, None);
-        assert_eq!(groups[3].jobs[0].tone, Tone::Running);
-        assert_eq!(groups[3].jobs[0].log_url.as_deref(), Some("https://ci.example/1"));
+        let gitlab = words(ForgeKind::GitLab);
+        assert_eq!(
+            (
+                gitlab.requests,
+                gitlab.reference(5),
+                gitlab.label(5),
+                gitlab.open_on_host()
+            ),
+            (
+                "Merge requests",
+                "!5".to_string(),
+                "MR !5".to_string(),
+                "Open on GitLab".to_string()
+            )
+        );
+        assert_eq!(pr_title(&pr(5, Review::None), gitlab), "!5 Bulk select in the inbox");
     }
 }

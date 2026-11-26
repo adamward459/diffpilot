@@ -1,7 +1,7 @@
 use super::RemoteStatus;
-use super::rows::{PrRow, Tone, overall_tone, pr_rows, rollup_tone};
+use super::rows::{PrRow, Tone, Words, outcome_tone, overall_tone, pr_rows};
 use diffpilot_core::comparison::Comparison;
-use diffpilot_core::github::pr_git;
+use diffpilot_core::forge::pr_number;
 use diffpilot_ui_kit::components::menu::{MenuItem, MenuRow, MenuSection};
 use diffpilot_ui_kit::components::{ChipTone, chip_label, status_dot, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
@@ -17,31 +17,36 @@ pub struct PrChip {
 pub struct RemoteMenu {
     pub chip: Option<PrChip>,
     pub rows: Vec<PrRow>,
-    pub linked: bool,
+    pub words: Option<Words>,
     status: Entity<RemoteStatus>,
 }
 
 impl RemoteMenu {
     pub fn new(status: &Entity<RemoteStatus>, comparison: Option<&Comparison>, cx: &App) -> Self {
         let remote = status.read(cx);
+        let words = remote.words();
         let branch_pr = remote.branch_pr();
-        let chip = branch_pr.map(|pr| PrChip {
-            number: pr.number,
+        let chip = branch_pr.map(|change| PrChip {
+            number: change.number,
             tone: remote
                 .checks()
                 .and_then(|checks| overall_tone(checks.overall()))
-                .or_else(|| rollup_tone(pr.checks)),
+                .or_else(|| change.checks.map(outcome_tone)),
+        });
+        let rows = words.map_or_else(Vec::new, |words| {
+            pr_rows(
+                remote.pull_requests(),
+                match comparison.and_then(Comparison::branch_name) {
+                    Some(branch) => pr_number(branch),
+                    None => branch_pr.map(|change| change.number),
+                },
+                words,
+            )
         });
         Self {
             chip,
-            rows: pr_rows(
-                remote.pull_requests(),
-                match comparison.and_then(Comparison::branch_name) {
-                    Some(branch) => pr_git::pr_number(branch),
-                    None => branch_pr.map(|pr| pr.number),
-                },
-            ),
-            linked: remote.is_github(),
+            rows,
+            words,
             status: status.clone(),
         }
     }
@@ -49,21 +54,22 @@ impl RemoteMenu {
     pub fn chip_element(&self, theme: &Theme) -> Option<Div> {
         let chip = self.chip.as_ref()?;
         let number = chip.number;
+        let reference = self.words?.reference(number);
         let dot = chip.tone.map(|tone| {
             tag(status_dot(tone.color(theme)), move || {
                 format!("remote:pr-dot:{}", tone.name())
             })
         });
         Some(tag(
-            chip_label(theme, format!("#{number}"), ChipTone::Blue).children(dot),
+            chip_label(theme, reference, ChipTone::Blue).children(dot),
             move || format!("remote:pr-chip:{number}"),
         ))
     }
 
     pub fn sections(&self) -> Vec<MenuSection> {
-        if !self.linked {
+        let Some(words) = self.words else {
             return Vec::new();
-        }
+        };
         let pull_requests = self
             .rows
             .iter()
@@ -81,13 +87,13 @@ impl RemoteMenu {
             .collect();
         let status = self.status.clone();
         let remote = MenuRow::Item(
-            MenuItem::new("Open on GitHub", move |_: &mut Window, cx: &mut App| {
-                status.update(cx, |status, cx| status.open_on_github(cx));
+            MenuItem::new(words.open_on_host(), move |_: &mut Window, cx: &mut App| {
+                status.update(cx, |status, cx| status.open_on_host(cx));
             })
             .icon(Glyph::Github, None),
         );
         vec![
-            MenuSection::titled("Pull requests", pull_requests),
+            MenuSection::titled(words.requests, pull_requests),
             MenuSection::titled("Remote", vec![remote]),
         ]
     }

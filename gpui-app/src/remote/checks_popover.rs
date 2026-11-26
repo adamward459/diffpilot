@@ -1,11 +1,11 @@
-use super::rows::{JobGroup, JobRow, job_groups};
+use super::rows::{duration_text, outcome_tone};
 use super::{RemoteStatus, RerunState, open_in_browser};
+use diffpilot_core::forge::{Checks, Job, Stage};
 use diffpilot_ui_kit::components::{Button, Look, glyph_icon, status_dot, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{Context, Entity, FontWeight, IntoElement, Render, Subscription, Window, div, px};
 use gpui_component::{h_flex, v_flex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const WIDTH: f32 = 440.0;
 
@@ -23,9 +23,9 @@ impl ChecksPopover {
         }
     }
 
-    fn job_row(&self, theme: &Theme, job: JobRow, busy: bool) -> impl IntoElement + use<> {
+    fn job_row(&self, theme: &Theme, job: Job, busy: bool) -> impl IntoElement + use<> {
         let name = job.name.clone();
-        let dot = job.tone;
+        let dot = outcome_tone(job.outcome);
         let status = self.status.clone();
         h_flex()
             .gap(px(8.))
@@ -48,7 +48,7 @@ impl ChecksPopover {
                 .whitespace_nowrap()
                 .child(job.name),
             )
-            .when_some(job.duration, |this, text| {
+            .when_some(job.duration_seconds.map(duration_text), |this, text| {
                 this.child(
                     tag(div(), {
                         let (name, text) = (name.clone(), text.clone());
@@ -62,7 +62,7 @@ impl ChecksPopover {
             .when_some(job.rerun, |this, job_id| {
                 this.child(
                     tag(
-                        Button::new(("rerun-job", job_id as usize))
+                        Button::new(("rerun-job", job_id.0 as usize))
                             .look(Look::Ghost)
                             .label("Re-run")
                             .disabled(busy),
@@ -90,8 +90,8 @@ impl ChecksPopover {
             })
     }
 
-    fn group(&self, theme: &Theme, group: JobGroup, busy: bool) -> impl IntoElement + use<> {
-        let title = group.title.clone();
+    fn stage(&self, theme: &Theme, stage: Stage, busy: bool) -> impl IntoElement + use<> {
+        let title = stage.name.clone();
         v_flex()
             .child(
                 tag(div(), move || format!("checks:group:{title}"))
@@ -101,9 +101,9 @@ impl ChecksPopover {
                     .text_size(px(12.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme.ui.muted)
-                    .child(group.title),
+                    .child(stage.name),
             )
-            .children(group.jobs.into_iter().map(|job| self.job_row(theme, job, busy)))
+            .children(stage.jobs.into_iter().map(|job| self.job_row(theme, job, busy)))
     }
 }
 
@@ -116,21 +116,19 @@ impl Render for ChecksPopover {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::of(cx);
         let remote = self.status.read(cx);
-        let number = remote.branch_pr().map(|pr| pr.number);
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |elapsed| i64::try_from(elapsed.as_secs()).unwrap_or(0));
-        let groups = remote.checks().map(|checks| job_groups(checks, now));
-        let has_failed = remote
-            .checks()
-            .is_some_and(|checks| !checks.failed_run_ids().is_empty());
+        let label = remote
+            .branch_pr()
+            .zip(remote.words())
+            .map(|(change, words)| words.label(change.number));
+        let stages = remote.checks().map(|checks| checks.stages.clone());
+        let can_rerun = remote.checks().is_some_and(Checks::can_rerun_failed);
         let busy = remote.rerun_state() == &RerunState::Running;
         let error = match remote.rerun_state() {
             RerunState::Failed(message) => Some(message.clone()),
             _ => None,
         };
         let status = self.status.clone();
-        let header = number.map_or_else(|| "Checks".to_string(), |number| format!("Checks · PR #{number}"));
+        let header = label.map_or_else(|| "Checks".to_string(), |label| format!("Checks · {label}"));
         v_flex()
             .w(px(WIDTH))
             .text_size(px(13.))
@@ -157,7 +155,7 @@ impl Render for ChecksPopover {
                                 .look(Look::Plain)
                                 .icon(Glyph::RefreshCw, 12.)
                                 .label("Re-run Failed")
-                                .disabled(!has_failed || busy),
+                                .disabled(!can_rerun || busy),
                             || "checks:rerun-failed",
                         )
                         .on_click(move |_, _, cx| status.update(cx, |status, cx| status.rerun_failed(cx))),
@@ -176,13 +174,13 @@ impl Render for ChecksPopover {
                         .child(div().min_w_0().child(message)),
                 )
             })
-            .child(match groups {
-                Some(groups) if groups.is_empty() => note(&theme, "No checks ran for this commit."),
-                Some(groups) => v_flex()
+            .child(match stages {
+                Some(stages) if stages.is_empty() => note(&theme, "No checks ran for this commit."),
+                Some(stages) => v_flex()
                     .id("checks-list")
                     .max_h(px(380.))
                     .overflow_y_scroll()
-                    .children(groups.into_iter().map(|group| self.group(&theme, group, busy)))
+                    .children(stages.into_iter().map(|stage| self.stage(&theme, stage, busy)))
                     .into_any_element(),
                 None => note(&theme, "Loading checks…"),
             })
