@@ -1,7 +1,7 @@
 use crate::diff_pane::chrome;
 use crate::diff_pane::highlight::{self, FileTokens};
 use crate::diff_pane::layout::{
-    FILE_HEADER, HUNK, LINE, NOTICE, NUMBER_COLUMN, SPLIT_DIVIDER, Sticky, ThreadFrame, column_width,
+    FILE_HEADER, HUD, HUNK, LINE, NOTICE, NUMBER_COLUMN, SPLIT_DIVIDER, Sticky, ThreadFrame, column_width,
 };
 use crate::diff_pane::lines::{
     self, CODE_SIZE, Column, Fonts, Frame, LineCache, LineKey, LineRequest, PaintFiller, Style, Thumb,
@@ -1003,56 +1003,79 @@ impl DiffPane {
         let source = &self.state.files[file].hunks[hunk];
         let header = source.header.clone();
         let patch = hunk_patch(source);
-        let copy = Button::new(("hunk-copy", file * 4096 + hunk))
-            .label("Copy")
-            .look(Look::Plain)
-            .icon(Glyph::Copy, 11.0)
-            .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(patch.clone()))
-            }));
+        let key = file * 4096 + hunk;
+        let button = |id: &'static str, glyph: Glyph, label: &'static str| {
+            Button::new((id, key))
+                .label(label)
+                .look(Look::Ghost)
+                .icon(glyph, 12.0)
+                .h(px(26.0))
+        };
         let file_diff = &self.state.files[file];
         let (open_path, open_line) = (file_diff.path.clone(), source.first_new_line());
-        let open = Button::new(("hunk-open", file * 4096 + hunk))
-            .label("Open in Editor")
-            .look(Look::Plain)
-            .icon(Glyph::ExternalLink, 11.0)
-            .disabled(file_diff.status == FileStatus::Deleted)
-            .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                cx.emit(DiffPaneEvent::OpenInEditor {
-                    path: open_path.clone(),
-                    line: open_line,
-                })
-            }));
-        let action =
-            |id: &'static str, label: &'static str| Button::new(id).label(label).look(Look::Plain).disabled(true);
-        let bar = div()
+        let separator = || div().w(px(1.0)).h(px(16.0)).mx(px(2.0)).bg(theme.ui.line);
+        let hud = tag(div().id(("hunk-hud", key)), || {
+            format!("pane:hunk-hud:{}:{hunk}", file_diff.path)
+        })
+        .invisible()
+        .group_hover("hunk-bar", |style| style.visible())
+        .absolute()
+        .right(px(8.0))
+        .top(px((HUNK - HUD) / 2.0))
+        .h(px(HUD))
+        .flex()
+        .items_center()
+        .gap(px(2.0))
+        .px(px(4.0))
+        .rounded(px(8.0))
+        .bg(theme.ui.pop)
+        .border_1()
+        .border_color(theme.chrome.glass_border)
+        .shadow(theme.menu_shadow())
+        .font(self.fonts.ui.clone())
+        .child(button("hunk-stage", Glyph::Check, "Stage Hunk").disabled(true))
+        .child(button("hunk-revert", Glyph::Undo2, "Revert\u{2026}").disabled(true))
+        .child(separator())
+        .child(
+            button("hunk-open", Glyph::ExternalLink, "Open in Editor")
+                .disabled(file_diff.status == FileStatus::Deleted)
+                .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                    cx.emit(DiffPaneEvent::OpenInEditor {
+                        path: open_path.clone(),
+                        line: open_line,
+                    })
+                })),
+        )
+        .child(tag(
+            button("hunk-copy", Glyph::Copy, "Copy").on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(patch.clone()))
+            })),
+            || format!("pane:hunk-copy:{}:{hunk}", file_diff.path),
+        ))
+        .child(separator())
+        .child(
+            Button::new(("hunk-ask", key))
+                .label("Ask Claude")
+                .look(Look::Ghost)
+                .icon_color(Glyph::Sparkles, 12.0, theme.ui.claude)
+                .h(px(26.0))
+                .disabled(true),
+        );
+        let bar = tag(div(), || format!("pane:hunk:{}:{hunk}", file_diff.path))
             .group("hunk-bar")
+            .relative()
             .flex()
             .items_center()
             .h(px(HUNK))
             .w_full()
             .pl(px(12.0))
             .pr(px(8.0))
-            .overflow_hidden()
             .whitespace_nowrap()
             .font(self.fonts.mono.clone())
             .text_size(px(11.5))
             .text_color(theme.diff.muted)
-            .child(header)
-            .child(div().flex_1())
-            .child(
-                div()
-                    .invisible()
-                    .group_hover("hunk-bar", |style| style.visible())
-                    .font(self.fonts.ui.clone())
-                    .flex()
-                    .gap(px(4.0))
-                    .child(action("hunk-stage", "Stage Hunk"))
-                    .child(action("hunk-revert", "Revert\u{2026}"))
-                    .child(open)
-                    .child(copy)
-                    .child(action("hunk-ask", "Ask Claude")),
-            );
+            .child(div().min_w_0().overflow_hidden().child(header))
+            .child(hud);
         match glass {
             Some(glass) => bar.border_b_1().border_color(theme.diff.line).bg(glass),
             None => bar.border_y_1().border_color(theme.diff.line).bg(theme.diff.hunk),

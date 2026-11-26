@@ -36,6 +36,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - An app icon.
 - Releases: pushing a `vX.Y.Z` tag publishes a universal (Apple Silicon and Intel) app to GitHub Releases, and `install.sh` installs the latest release.
 
+### Changed
+
+- Hunk actions (Stage Hunk, Revert, Open in Editor, Copy, Ask Claude) appear in a floating bar when you hover a hunk header, like the selection bar.
+
 ### Fixed
 
 - New files that git does not track yet now show in the sidebar and the diff when the comparison includes uncommitted changes. Claude's diff tools return them too.

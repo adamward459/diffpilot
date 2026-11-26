@@ -276,6 +276,12 @@ pub fn click(cx: &mut VisualTestContext, selector: &str) {
     draw(cx);
 }
 
+pub fn hover(cx: &mut VisualTestContext, selector: &str) {
+    let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
+    cx.simulate_mouse_move(bounds.center(), None, Modifiers::default());
+    draw(cx);
+}
+
 pub fn press(cx: &mut VisualTestContext, keys: &str) {
     cx.simulate_keystrokes(keys);
     draw(cx);

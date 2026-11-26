@@ -8,6 +8,7 @@ mod flows {
     mod filter;
     mod fix;
     mod folders;
+    mod hunk_hud;
     mod remote;
     mod review;
     mod sidebar_keys;
