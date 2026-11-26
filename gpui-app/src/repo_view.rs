@@ -30,7 +30,7 @@ use diffpilot_core::viewed::{ViewedFiles, ViewedKey, ViewedStore};
 use diffpilot_core::watcher::{self, WatchGuard};
 use diffpilot_ui_kit::components::{
     BAR_HEIGHT, Button, CAPSULE_HEIGHT, Crumb, IconSegment, Look, OnSelect, SwitchItem, bar_button, capsule, crumbs,
-    glyph_icon, icon_switch, jump_bar, status_bar, switch_bar, tag,
+    glyph_icon, icon_switch, jump_bar, popover, status_bar, switch_bar, tag,
 };
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
@@ -38,7 +38,6 @@ use gpui::{
     App, Context, Corner, Entity, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
     Render, SharedString, Styled, Subscription, Task, Window, WindowControlArea, div, px,
 };
-use gpui_component::popover::Popover;
 use gpui_component::{ActiveTheme, Icon, InteractiveElementExt as _, StyledExt, h_flex, v_flex};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
@@ -1282,7 +1281,7 @@ impl RepoView {
         if !enabled {
             return trigger.into_any_element();
         }
-        Popover::new("commit-popover")
+        popover("commit-popover")
             .anchor(Corner::BottomRight)
             .open(self.commit_open)
             .on_open_change(cx.listener(|this, open: &bool, window, cx| {
