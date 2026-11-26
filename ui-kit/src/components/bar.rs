@@ -225,6 +225,10 @@ pub fn activity_capsule(theme: &Theme, counts: Option<(u32, u32)>) -> Div {
     }
 }
 
+pub fn status_dot(color: Hsla) -> Div {
+    div().size(px(8.)).flex_none().rounded_full().bg(color)
+}
+
 pub fn label_segment(theme: &Theme, id: &'static str, items: &[(&'static str, bool)], selected: usize) -> Div {
     let thumb = theme.chrome.segment;
     glass_surface(h_flex().h(px(28.)).p(px(3.)).gap(px(2.)).rounded_full(), theme).children(
