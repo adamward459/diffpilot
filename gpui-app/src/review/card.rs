@@ -3,7 +3,7 @@ use crate::review::session::{ReviewEvent, ReviewSession, ThreadChange};
 use diffpilot_core::threads::{
     CLAUDE_NAME, ReviewThread, ThreadAnchor, ThreadComment, ThreadId, ThreadStatus, mentions_claude,
 };
-use diffpilot_ui_kit::components::{Button, Look, avatar, card_shell, icon_button, severity_badge};
+use diffpilot_ui_kit::components::{Button, Look, avatar, card_shell, icon_button, severity_badge, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -100,6 +100,7 @@ pub struct ThreadCard {
     collapsed: bool,
     replying: bool,
     composer: Option<Composer>,
+    key: String,
     markup: RefCell<HashMap<u32, CachedMarkup>>,
     _session: Subscription,
 }
@@ -207,6 +208,7 @@ impl ThreadCard {
             collapsed: nit,
             replying: false,
             composer: None,
+            key: String::new(),
             markup: RefCell::default(),
             _session: subscription,
         }
@@ -456,7 +458,10 @@ impl ThreadCard {
     }
 
     fn button(&self, label: &'static str, key: &'static str) -> Button {
-        Button::new((key, self.id.0 as usize)).label(label)
+        tag(
+            Button::new((key, self.id.0 as usize)).label(label),
+            format!("thread:{key}:{}", self.key),
+        )
     }
 
     fn ask_button(&self, busy: bool) -> Button {
@@ -530,7 +535,7 @@ impl ThreadCard {
 
     fn comment(&self, comment: &ThreadComment, first: bool, fonts: &Fonts) -> AnyElement {
         let theme = fonts.theme;
-        h_flex()
+        tag(h_flex(), comment_tag(comment))
             .items_start()
             .gap(px(m::AVATAR_GAP))
             .px(px(m::SIDE))
@@ -579,25 +584,27 @@ impl ThreadCard {
                         .py(px(4.)),
                 )
                 .into_any_element(),
-            None => div()
-                .id(("composer", self.id.0 as usize))
-                .h(px(m::INPUT_ROW + m::INPUT_PAD))
-                .px(px(9.))
-                .flex()
-                .items_center()
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(theme.ui.line)
-                .bg(theme.background)
-                .text_size(px(12.5))
-                .text_color(theme.ui.muted)
-                .cursor_text()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, window, cx| this.focus_composer(window, cx)),
-                )
-                .child(self.placeholder(cx))
-                .into_any_element(),
+            None => tag(
+                div().id(("composer", self.id.0 as usize)),
+                format!("thread:composer:{}", self.key),
+            )
+            .h(px(m::INPUT_ROW + m::INPUT_PAD))
+            .px(px(9.))
+            .flex()
+            .items_center()
+            .rounded(cx.theme().radius)
+            .border_1()
+            .border_color(theme.ui.line)
+            .bg(theme.background)
+            .text_size(px(12.5))
+            .text_color(theme.ui.muted)
+            .cursor_text()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| this.focus_composer(window, cx)),
+            )
+            .child(self.placeholder(cx))
+            .into_any_element(),
         };
         let id = self.id.0 as usize;
         v_flex()
@@ -691,7 +698,7 @@ impl ThreadCard {
             .text_size(px(m::TEXT_SIZE))
             .child(severity_badge(finding.severity, &theme, 15.))
             .child(
-                div()
+                tag(div(), format!("finding:{}", finding.title))
                     .min_w_0()
                     .overflow_hidden()
                     .text_ellipsis()
@@ -738,10 +745,15 @@ impl ThreadCard {
         let body = (!collapsed).then(|| {
             let first = thread.comments.first();
             v_flex()
-                .child(div().pl(px(m::FINDING_INDENT)).pr(px(m::SIDE)).child(first.map_or_else(
-                    || div().h(px(m::LINE)).into_any_element(),
-                    |c| fonts.text(&self.markup_of(c)),
-                )))
+                .child(
+                    tag_comment(div(), first)
+                        .pl(px(m::FINDING_INDENT))
+                        .pr(px(m::SIDE))
+                        .child(first.map_or_else(
+                            || div().h(px(m::LINE)).into_any_element(),
+                            |c| fonts.text(&self.markup_of(c)),
+                        )),
+                )
                 .child(
                     h_flex()
                         .h(px(m::FINDING_FOOTER))
@@ -815,10 +827,15 @@ impl ThreadCard {
                 );
         card_shell(&theme, theme.ui.claude_border)
             .child(header)
-            .child(div().px(px(m::SIDE)).pb(px(m::SUMMARY_BOTTOM)).child(first.map_or_else(
-                || div().h(px(m::LINE)).into_any_element(),
-                |c| fonts.text(&self.markup_of(c)),
-            )))
+            .child(
+                tag_comment(div(), first)
+                    .px(px(m::SIDE))
+                    .pb(px(m::SUMMARY_BOTTOM))
+                    .child(first.map_or_else(
+                        || div().h(px(m::LINE)).into_any_element(),
+                        |c| fonts.text(&self.markup_of(c)),
+                    )),
+            )
             .children(thread.comments.iter().skip(1).map(|c| self.comment(c, false, fonts)))
             .children(self.status_band(thread, theme, cx))
             .when(self.replying, |col| {
@@ -898,6 +915,25 @@ impl ThreadCard {
     }
 }
 
+fn comment_tag(comment: &ThreadComment) -> String {
+    format!("comment:{}:{}", comment.author, comment.body)
+}
+
+fn tag_comment(element: gpui::Div, comment: Option<&ThreadComment>) -> gpui::Div {
+    match comment {
+        Some(comment) => tag(element, comment_tag(comment)),
+        None => element,
+    }
+}
+
+fn card_key(thread: &ReviewThread) -> String {
+    match (&thread.finding, &thread.anchor) {
+        (Some(finding), _) => finding.title.clone(),
+        (None, ThreadAnchor::Line { path, line, .. }) => format!("{path}:{line}"),
+        (None, anchor) => anchor.path().to_string(),
+    }
+}
+
 fn kind_of_thread(card: &ThreadCard, cx: &App) -> Option<Kind> {
     card.session.read(cx).thread(card.id).map(kind_of)
 }
@@ -937,6 +973,7 @@ impl Render for ThreadCard {
         let Some(thread) = session.thread(self.id) else {
             return div().into_any_element();
         };
+        self.key = card_key(thread);
         let fonts = Fonts::new(cx);
         let card = match kind_of(thread) {
             Kind::Finding => self.finding_card(thread, &fonts, window, cx),

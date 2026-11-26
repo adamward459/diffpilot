@@ -1,7 +1,7 @@
 use crate::review::session::ReviewSession;
 use diffpilot_core::review::{Effort, ModelName, ReviewModel, ReviewRun, ReviewScope, focus};
 use diffpilot_ui_kit::components::menu::{MenuItem, MenuSection, menu_button};
-use diffpilot_ui_kit::components::{Button, Look, chip};
+use diffpilot_ui_kit::components::{Button, Look, chip, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -262,12 +262,15 @@ impl Render for ReviewPopover {
                             .on_click(cx.listener(|_, _, _, cx| cx.emit(PopoverEvent::Dismiss))),
                     )
                     .child(
-                        Button::new("start-review")
-                            .label(start_title)
-                            .hint("⌘↩")
-                            .regular()
-                            .look(Look::Primary)
-                            .on_click(cx.listener(|this, _, _, cx| this.start(cx))),
+                        tag(
+                            Button::new("start-review")
+                                .label(start_title)
+                                .hint("⌘↩")
+                                .regular()
+                                .look(Look::Primary),
+                            "review:start",
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.start(cx))),
                     ),
             )
     }

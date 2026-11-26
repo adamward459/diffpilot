@@ -23,7 +23,7 @@ use diffpilot_core::viewed::{ViewedFiles, ViewedKey, ViewedStore};
 use diffpilot_core::watcher::{self, WatchGuard};
 use diffpilot_ui_kit::components::{
     BAR_HEIGHT, Button, Crumb, IconSegment, Look, OnSelect, SwitchItem, activity_capsule, bar_button, capsule, crumbs,
-    glyph_icon, icon_switch, jump_bar, status_bar, switch_bar,
+    glyph_icon, icon_switch, jump_bar, status_bar, switch_bar, tag,
 };
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
@@ -795,6 +795,7 @@ impl RepoView {
         let items = DIFF_MODES
             .iter()
             .map(|(mode, title)| IconSegment {
+                name: title,
                 glyph: if *mode == DiffMode::Unified {
                     Glyph::Rows2
                 } else {
@@ -884,9 +885,17 @@ impl RepoView {
                 false,
                 nothing,
             ))
-            .child(div().flex_1().min_w_0().child(self.path_crumbs(&tokens)))
             .child(
-                h_flex()
+                tag(
+                    div(),
+                    format!("jump-bar:path:{}", self.visible_file.as_deref().unwrap_or_default()),
+                )
+                .flex_1()
+                .min_w_0()
+                .child(self.path_crumbs(&tokens)),
+            )
+            .child(
+                tag(h_flex(), format!("jump-bar:threads:{threads}"))
                     .gap(px(3.))
                     .flex_none()
                     .text_size(px(13.))
@@ -988,7 +997,7 @@ impl RepoView {
             |_, _, _| {},
         );
         let drag = drag_region(&self.should_move);
-        let leading = (!self.sidebar_open).then(|| sidebar_toggle(cx));
+        let leading = (!self.sidebar_open).then(|| tag(sidebar_toggle(cx), "toolbar:sidebar-toggle"));
         drag(
             h_flex()
                 .id("toolbar")
@@ -1047,7 +1056,7 @@ impl Render for RepoView {
         let tokens = Theme::of(cx);
         let width = self.sidebar_width;
         let drag = drag_region(&self.should_move);
-        let toggle = sidebar_toggle(cx);
+        let toggle = tag(sidebar_toggle(cx), "sidebar:toggle");
         let toolbar = self.toolbar(cx);
         let jump_bar = self.jump_bar(cx);
         let bottom_bar = self.bottom_bar(cx);
@@ -1160,26 +1169,7 @@ impl Render for RepoView {
     }
 }
 
-#[cfg(feature = "testing")]
-impl RepoView {
-    pub fn sidebar(&self) -> Entity<Sidebar> {
-        self.current().sidebar.clone()
-    }
-
-    pub fn pane(&self) -> Entity<DiffPane> {
-        self.current().pane.clone()
-    }
-
-    pub fn pill(&self) -> Entity<ReviewPill> {
-        self.current().pill.clone()
-    }
-
-    pub fn settings(&self) -> &Arc<Settings> {
-        &self.settings
-    }
-}
-
-#[cfg(any(test, feature = "testing"))]
+#[cfg(test)]
 impl RepoView {
     fn current(&self) -> &Session {
         self.session.as_ref().expect("a session")

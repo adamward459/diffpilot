@@ -1,14 +1,19 @@
 use crate::repo_view::{Claude, RepoView};
-use crate::sidebar::SidebarEvent;
+use crate::runs::Runs;
+use crate::settings::{self, Services, Tab};
+use crate::workspace::{self, Workspace};
 use diffpilot_core::cancel::CancelToken;
 use diffpilot_core::claude::{ReviewError, Reviewer, ScriptedReplier};
-use diffpilot_core::comparison::Comparison;
+use diffpilot_core::github::auth::{Credentials, GhCli, MemoryStore};
+use diffpilot_core::github::http::{Http, HttpError, Request, Response};
+use diffpilot_core::mcp::McpBridge;
 use diffpilot_core::review::{Finding, ReviewRequest, ReviewResult, Severity};
+use diffpilot_core::runner::{EngineConfig, McpLaunch, RunEngine};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::Store;
 use diffpilot_core::viewed::ViewedStore;
-use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext};
-use std::path::Path;
+use gpui::{AppContext as _, Bounds, Entity, Global, Modifiers, Pixels, TestAppContext, VisualTestContext};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
@@ -69,7 +74,19 @@ pub fn write(dir: &Path, path: &str, text: &str) {
 
 pub fn fixture() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = dir.path();
+    build_fixture(dir.path());
+    dir
+}
+
+pub fn fixture_named(name: &str) -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repo = dir.path().join(name);
+    std::fs::create_dir(&repo).expect("mkdir");
+    build_fixture(&repo);
+    (dir, repo)
+}
+
+fn build_fixture(repo: &Path) {
     git(repo, &["init", "-q", "-b", "main"]);
     write(repo, "base.txt", "base\n");
     git(repo, &["add", "."]);
@@ -81,7 +98,6 @@ pub fn fixture() -> tempfile::TempDir {
     write(repo, "base.txt", "base\nedited\n");
     write(repo, "src/staged.rs", &"let value = 1;\n".repeat(300));
     git(repo, &["add", "src/staged.rs"]);
-    dir
 }
 
 pub struct Opened {
@@ -118,7 +134,7 @@ pub fn open_repo(
     store: Arc<ViewedStore>,
     claude: Claude,
 ) -> (Entity<RepoView>, &'static mut VisualTestContext) {
-    cx.update(diffpilot_ui_kit::init);
+    ready(cx);
     let repo = repo.to_path_buf();
     let mut view = None;
     let handle = cx.add_window(|window, cx| {
@@ -134,40 +150,193 @@ pub fn open_repo(
     (view, vcx)
 }
 
-pub fn pick_comparison(view: &Entity<RepoView>, comparison: Comparison, cx: &mut VisualTestContext) {
-    view.update_in(cx, |view, window, cx| view.select_comparison(comparison, window, cx));
+struct AppReady;
+
+impl Global for AppReady {}
+
+fn ready(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        if cx.has_global::<AppReady>() {
+            return;
+        }
+        cx.set_global(AppReady);
+        diffpilot_ui_kit::init(cx);
+        workspace::init(cx);
+    });
+}
+
+struct NoGh;
+
+impl GhCli for NoGh {
+    fn token(&self, _: &str) -> Option<String> {
+        None
+    }
+}
+
+struct Offline;
+
+impl Http for Offline {
+    fn send(&self, _: &Request) -> Result<Response, HttpError> {
+        Err(HttpError("offline".into()))
+    }
+}
+
+pub fn open_settings(cx: &mut TestAppContext, settings: Arc<Settings>, tab: Tab) -> &'static mut VisualTestContext {
+    ready(cx);
+    let services = Services {
+        credentials: Credentials::new(Arc::new(MemoryStore::default()), Arc::new(NoGh)),
+        http: Arc::new(Offline),
+        host: "github.com".into(),
+        mcp_server: None,
+    };
+    let window = cx.update(|cx| {
+        settings::init(settings, services, cx);
+        settings::open(Some(tab), cx).expect("the settings window opens")
+    });
+    let vcx = VisualTestContext::from_window(window.into(), cx).into_mut();
+    draw(vcx);
+    vcx
+}
+
+pub fn open_workspace(
+    cx: &mut TestAppContext,
+    folder: &Path,
+    settings: Arc<Settings>,
+) -> &'static mut VisualTestContext {
+    ready(cx);
+    let folder = folder.to_path_buf();
+    let handle = cx.add_window(|window, cx| {
+        let review_store = Arc::new(Store::open_in_memory().expect("an in-memory store opens"));
+        let workspace = cx.new(|cx| {
+            Workspace::new(
+                settings,
+                Arc::new(ViewedStore::in_memory()),
+                review_store,
+                Some(folder),
+                false,
+                window,
+                cx,
+            )
+        });
+        gpui_component::Root::new(workspace, window, cx)
+    });
+    let vcx = VisualTestContext::from_window(handle.into(), cx).into_mut();
+    vcx.executor().allow_parking();
+    draw(vcx);
+    vcx
+}
+
+pub fn draw(cx: &mut VisualTestContext) {
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        // refresh() skips gpui's cached views, so every tag is painted in every frame.
+        window.refresh();
+        window.draw(cx).clear();
+    });
     cx.run_until_parked();
 }
 
-pub fn sidebar_paths(view: &Entity<RepoView>, cx: &mut VisualTestContext) -> Vec<String> {
-    let sidebar = view.read_with(cx, |view, _| view.sidebar());
-    sidebar.read_with(cx, |sidebar, _| sidebar.paths())
+fn bounds_of(cx: &mut VisualTestContext, selector: &str) -> Option<Bounds<Pixels>> {
+    draw(cx);
+    cx.debug_bounds(Box::leak(selector.to_owned().into_boxed_str()))
 }
 
-pub fn viewed_count(view: &Entity<RepoView>, cx: &mut VisualTestContext) -> usize {
-    let sidebar = view.read_with(cx, |view, _| view.sidebar());
-    sidebar.read_with(cx, |sidebar, _| sidebar.summary().viewed)
+// gpui never clears debug bounds, so a tag that rendered once stays true in that window.
+// Assert on a state tag that is new to the window.
+pub fn shows(cx: &mut VisualTestContext, selector: &str) -> bool {
+    bounds_of(cx, selector).is_some()
 }
 
-pub fn select_file(view: &Entity<RepoView>, path: &str, cx: &mut VisualTestContext) {
-    let sidebar = view.read_with(cx, |view, _| view.sidebar());
-    let index = sidebar
-        .read_with(cx, |sidebar, _| sidebar.paths())
-        .iter()
-        .position(|row| row == path)
-        .unwrap_or_else(|| panic!("{path} is not in the sidebar"));
-    sidebar.update_in(cx, |sidebar, window, cx| sidebar.select_index(index, window, cx));
-    cx.run_until_parked();
+pub fn click(cx: &mut VisualTestContext, selector: &str) {
+    let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
+    cx.simulate_click(bounds.center(), Modifiers::default());
+    draw(cx);
 }
 
-pub fn visible_file(view: &Entity<RepoView>, cx: &mut VisualTestContext) -> Option<String> {
-    let pane = view.read_with(cx, |view, _| view.pane());
-    pane.read_with(cx, |pane, _| pane.state().visible_path().map(str::to_owned))
+pub fn press(cx: &mut VisualTestContext, keys: &str) {
+    cx.simulate_keystrokes(keys);
+    draw(cx);
 }
 
-pub fn toggle_viewed(view: &Entity<RepoView>, path: &str, cx: &mut VisualTestContext) {
-    let sidebar = view.read_with(cx, |view, _| view.sidebar());
-    let path = path.to_owned();
-    sidebar.update(cx, |_, cx| cx.emit(SidebarEvent::ToggleViewed(path)));
-    cx.run_until_parked();
+pub fn type_text(cx: &mut VisualTestContext, text: &str) {
+    cx.simulate_input(text);
+    draw(cx);
+}
+
+pub fn wait_until_shows(cx: &mut VisualTestContext, selector: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !shows(cx, selector) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "`{selector}` did not appear on screen"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// A `claude` script that starts, then ends only after `finish`. Each start adds a line to `launches`.
+pub struct FakeClaude {
+    work: tempfile::TempDir,
+    _bridge: Arc<McpBridge>,
+}
+
+impl FakeClaude {
+    fn launches(&self) -> usize {
+        std::fs::read_to_string(self.work.path().join("launches")).map_or(0, |text| text.lines().count())
+    }
+
+    pub fn wait_for_launches(&self, cx: &mut VisualTestContext, count: usize) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while self.launches() < count {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "claude started fewer than {count} times"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            draw(cx);
+        }
+    }
+
+    pub fn finish(&self) {
+        std::fs::write(self.work.path().join("go"), "").expect("write go");
+    }
+}
+
+fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let path = dir.join(name);
+    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write script");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    path
+}
+
+pub fn fake_claude(cx: &mut TestAppContext) -> FakeClaude {
+    let work = tempfile::tempdir().expect("tempdir");
+    let dir = work.path();
+    let claude = script(
+        dir,
+        "claude",
+        &format!(
+            r#"echo $$ >> '{dir}/launches'
+echo '{{"type":"system","subtype":"init","session_id":"s-1","model":"m","tools":[],"mcp_servers":[]}}'
+while [ ! -f '{dir}/go' ]; do sleep 0.05; done
+echo '{{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"Done."}}'"#,
+            dir = dir.display()
+        ),
+    );
+    let guard = script(
+        dir,
+        "guard",
+        "cat > /dev/null\necho '[diffpilot guard] blocked' >&2\nexit 2",
+    );
+    let store = Arc::new(Store::open_in_memory().expect("an in-memory store opens"));
+    let bridge = McpBridge::start(dir.join("mcp.sock"), store.clone()).expect("the MCP bridge starts");
+    let mut config = EngineConfig::new(store);
+    config.claude_binary = Some(claude);
+    config.guard_binary = guard;
+    config.run_dir = dir.join("runs");
+    config.keep_snapshots = 0;
+    config.mcp = Some(McpLaunch::new(bridge.clone()));
+    cx.update(|cx| cx.set_global(Runs::with_engine(RunEngine::new(config))));
+    FakeClaude { work, _bridge: bridge }
 }

@@ -16,7 +16,7 @@ use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use diffpilot_ui_kit::Glyph;
 use diffpilot_ui_kit::components::menu::{MenuAt, MenuItem, MenuSection, menu_at};
 use diffpilot_ui_kit::components::{
-    BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, label_segment, status_badge, viewed_toggle,
+    BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, label_segment, status_badge, tag, viewed_toggle,
 };
 use diffpilot_ui_kit::{Theme, painted};
 use gpui::{
@@ -776,19 +776,22 @@ impl DiffPane {
                 false,
                 nothing,
             ))
-            .child(bar_button(
-                theme,
-                "file-open",
-                Glyph::ExternalLink,
-                "Open in Editor",
-                can_open,
-                false,
-                cx.listener(move |_, _: &ClickEvent, _, cx| {
-                    cx.emit(DiffPaneEvent::OpenInEditor {
-                        path: open_path.clone(),
-                        line: open_line,
-                    })
-                }),
+            .child(tag(
+                bar_button(
+                    theme,
+                    "file-open",
+                    Glyph::ExternalLink,
+                    "Open in Editor",
+                    can_open,
+                    false,
+                    cx.listener(move |_, _: &ClickEvent, _, cx| {
+                        cx.emit(DiffPaneEvent::OpenInEditor {
+                            path: open_path.clone(),
+                            line: open_line,
+                        })
+                    }),
+                ),
+                format!("pane:open-in-editor:{}", diff.path),
             ))
             .child(bar_button(
                 theme,

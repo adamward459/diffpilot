@@ -1,7 +1,7 @@
 use crate::common::{StubReplier, StubReviewer, finding, result};
 use diffpilot::repo_view::Claude;
-use diffpilot::testing::{fixture, open_repo};
-use diffpilot_core::review::{ReviewRun, Severity};
+use diffpilot::testing::{click, fixture, open_repo, press, shows, type_text};
+use diffpilot_core::review::Severity;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::threads::{CLAUDE_NAME, USER_NAME};
 use diffpilot_core::viewed::ViewedStore;
@@ -23,62 +23,60 @@ fn a_comment_a_review_and_a_reply_end_up_as_threads_in_the_pane(app: &mut TestAp
         reviewer: reviewer.clone(),
         replier: replier.clone(),
     };
-    let (view, cx) = open_repo(
+    let (_, cx) = open_repo(
         app,
         dir.path(),
         Arc::new(Settings::in_memory()),
         Arc::new(ViewedStore::in_memory()),
         claude,
     );
-    let (sidebar, pane, pill) = view.read_with(cx, |view, _| (view.sidebar(), view.pane(), view.pill()));
-    let review = pane.read_with(cx, |pane, _| pane.review().cloned().expect("a review session"));
 
-    pill.update(cx, |pill, cx| pill.comment_on_file(cx));
-    cx.run_until_parked();
-    let mine = review.read_with(cx, |review, _| review.threads().next().map(|thread| thread.id));
-    let mine = mine.expect("the comment opens a thread");
+    click(cx, "sidebar:row:docs/committed.md");
+    click(cx, "pill:comment-on-file");
+    type_text(cx, "Why this file?");
+    press(cx, "cmd-enter");
     assert!(
-        pane.read_with(cx, |pane, _| pane.card(mine).is_some()),
-        "the pane shows the thread"
+        shows(cx, &format!("comment:{USER_NAME}:Why this file?")),
+        "the pane shows the comment"
     );
-    review.update(cx, |review, cx| review.post(mine, "Why this file?", cx));
-    let note = review.read_with(cx, |review, _| review.thread(mine).cloned().expect("thread"));
-    assert_eq!(note.comments.len(), 1);
-    assert_eq!(note.comments[0].author, USER_NAME);
-    assert_eq!(note.comments[0].body, "Why this file?");
+    assert!(shows(cx, "jump-bar:threads:1"));
+    assert!(shows(cx, "sidebar:comments:docs/committed.md:1"));
 
-    review.update(cx, |review, cx| review.start_review(cx));
-    cx.run_until_parked();
+    click(cx, "review:open");
+    click(cx, "review:start");
+    assert!(shows(cx, "review:done"), "the pill reports the finished review");
     assert_eq!(reviewer.calls(), 1);
-    assert!(review.read_with(cx, |review, _| matches!(review.run(), ReviewRun::Done { .. })));
-    let counts = sidebar.read_with(cx, |sidebar, _| sidebar.comments().clone());
-    assert_eq!(counts.get("base.txt"), Some(&1));
-    assert_eq!(counts.get("src/staged.rs"), Some(&1));
     assert!(
-        review.read_with(cx, |review, _| review.thread(mine).is_some()),
-        "the review keeps the user's thread"
+        shows(cx, "jump-bar:threads:4"),
+        "the review added a summary and two findings"
+    );
+    assert!(shows(cx, "sidebar:comments:base.txt:1"));
+    assert!(shows(cx, "sidebar:comments:src/staged.rs:1"));
+    assert!(
+        shows(cx, "sidebar:comments:docs/committed.md:1"),
+        "the review keeps the comment"
     );
 
-    let finding_thread = review.read_with(cx, |review, _| {
-        review
-            .threads()
-            .find(|thread| thread.finding.as_ref().is_some_and(|f| f.title == "Edited"))
-            .map(|thread| thread.id)
-    });
-    let finding_thread = finding_thread.expect("a thread for the finding");
-    review.update(cx, |review, cx| {
-        review.post(finding_thread, "@claude is this really needed?", cx)
-    });
+    click(cx, "sidebar:row:src/staged.rs");
+    assert!(shows(cx, "finding:Name"), "the pane shows the finding on the file");
+    click(cx, "sidebar:row:base.txt");
+    assert!(shows(cx, "finding:Edited"), "the pane shows the finding on the line");
+
+    click(cx, "thread:reply:Edited");
+    type_text(cx, "@claude is this really needed?");
+    press(cx, "cmd-enter");
+    assert!(shows(
+        cx,
+        &format!("comment:{USER_NAME}:@claude is this really needed?")
+    ));
     assert_eq!(replier.asked(), 1);
+
     replier.send("Yes, ");
-    cx.run_until_parked();
+    assert!(
+        shows(cx, &format!("comment:{CLAUDE_NAME}:Yes, ")),
+        "the reply streams in"
+    );
     replier.send("the line changed.");
     replier.finish();
-    cx.run_until_parked();
-
-    let thread = review.read_with(cx, |review, _| review.thread(finding_thread).cloned().expect("thread"));
-    let last = thread.comments.last().expect("a reply");
-    assert_eq!(last.author, CLAUDE_NAME);
-    assert_eq!(last.body, "Yes, the line changed.");
-    assert!(!last.is_streaming);
+    assert!(shows(cx, &format!("comment:{CLAUDE_NAME}:Yes, the line changed.")));
 }

@@ -3,7 +3,7 @@ use crate::review::session::{ReviewEvent, ReviewSession};
 use diffpilot_core::review::{ReviewRun, Severity};
 use diffpilot_core::run::{Progress, RunState};
 use diffpilot_core::threads::ThreadId;
-use diffpilot_ui_kit::components::{Button, Look, filled_check, severity_badge};
+use diffpilot_ui_kit::components::{Button, Look, filled_check, severity_badge, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -219,16 +219,19 @@ impl ReviewPill {
     }
 
     fn trigger(&self, run: &ReviewRun, visible: bool, theme: Theme) -> Button {
-        let button = Button::new("claude-pill")
-            .look(Look::Ghost)
-            .regular()
-            .rounded_full()
-            .h(px(24.))
-            .gap(px(6.));
+        let button = tag(
+            Button::new("claude-pill")
+                .look(Look::Ghost)
+                .regular()
+                .rounded_full()
+                .h(px(24.))
+                .gap(px(6.)),
+            "review:open",
+        );
         match run {
             ReviewRun::Done { counts } if self.shows_result => button
                 .child(filled_check(theme.ui.green, 16.))
-                .child(div().child("Review done"))
+                .child(tag(div(), "review:done").child("Review done"))
                 .children(Severity::ALL.iter().filter_map(|severity| {
                     let count = counts.get(severity).copied().unwrap_or(0);
                     (count > 0).then(|| {
@@ -325,7 +328,7 @@ impl ReviewPill {
                 format!("Fixed {fixed} · {open} open")
             };
             return Some(
-                button("fix-result")
+                tag(button("fix-result"), "pill:fix-result")
                     .child(filled_check(theme.ui.green, 16.))
                     .child(div().child(text))
                     .into_any_element(),
@@ -340,17 +343,23 @@ impl ReviewPill {
             .clone()
             .unwrap_or_else(|| "Ask Claude to fix the open comments".into());
         Some(
-            Button::new("fix-threads")
-                .look(Look::Claude)
-                .regular()
-                .rounded_full()
-                .h(px(24.))
-                .gap(px(6.))
-                .icon(Glyph::Pencil, 14.)
-                .label(format!("Fix {count}"))
-                .tooltip(tooltip)
-                .disabled(blocker.is_some())
-                .on_click(cx.listener(|this, _, _, cx| this.fix(cx)))
+            tag(div(), format!("pill:fix-ready:{count}"))
+                .child(
+                    tag(
+                        Button::new("fix-threads")
+                            .look(Look::Claude)
+                            .regular()
+                            .rounded_full()
+                            .h(px(24.))
+                            .gap(px(6.))
+                            .icon(Glyph::Pencil, 14.)
+                            .label(format!("Fix {count}"))
+                            .tooltip(tooltip)
+                            .disabled(blocker.is_some()),
+                        "pill:fix-threads",
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.fix(cx))),
+                )
                 .into_any_element(),
         )
     }
@@ -402,17 +411,20 @@ impl Render for ReviewPill {
             .children(fix)
             .child(div().w(px(1.)).h(px(16.)).mx_0p5().bg(theme.ui.line))
             .child(
-                Button::new("comment-on-file")
-                    .look(Look::Ghost)
-                    .regular()
-                    .rounded_full()
-                    .h(px(24.))
-                    .gap(px(6.))
-                    .icon(Glyph::MessageSquare, 16.)
-                    .label(count.to_string())
-                    .tooltip("Comment on file")
-                    .disabled(!visible)
-                    .on_click(cx.listener(|this, _, _, cx| this.comment_on_file(cx))),
+                tag(
+                    Button::new("comment-on-file")
+                        .look(Look::Ghost)
+                        .regular()
+                        .rounded_full()
+                        .h(px(24.))
+                        .gap(px(6.))
+                        .icon(Glyph::MessageSquare, 16.)
+                        .label(count.to_string())
+                        .tooltip("Comment on file")
+                        .disabled(!visible),
+                    "pill:comment-on-file",
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.comment_on_file(cx))),
             )
     }
 }
@@ -448,7 +460,11 @@ fn working(run: Working, theme: Theme, cx: &Context<ReviewPill>) -> impl IntoEle
             h_flex()
                 .id((stop_id, 0usize))
                 .gap_1()
-                .child(div().font_weight(FontWeight::SEMIBOLD).child(label))
+                .child(
+                    tag(div(), format!("pill:{stop_id}:working"))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(label),
+                )
                 .child(
                     div()
                         .text_color(theme.ui.muted)
@@ -459,13 +475,16 @@ fn working(run: Working, theme: Theme, cx: &Context<ReviewPill>) -> impl IntoEle
                 }),
         )
         .child(
-            Button::new(stop_id)
-                .look(Look::Ghost)
-                .rounded_full()
-                .w(px(22.))
-                .px(px(0.))
-                .tooltip("Stop Claude (⌘.)")
-                .child(div().size(px(10.)).rounded(px(2.)).bg(theme.danger))
-                .on_click(cx.listener(move |this, _, _, cx| stop(this, cx))),
+            tag(
+                Button::new(stop_id)
+                    .look(Look::Ghost)
+                    .rounded_full()
+                    .w(px(22.))
+                    .px(px(0.))
+                    .tooltip("Stop Claude (⌘.)")
+                    .child(div().size(px(10.)).rounded(px(2.)).bg(theme.danger)),
+                format!("pill:{stop_id}"),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| stop(this, cx))),
         )
 }

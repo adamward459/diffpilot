@@ -6,7 +6,7 @@ use crate::sidebar_rows::{
 use diffpilot_core::changes::{ChangeSummary, FileChange};
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::tree::{FileEntry, FileFilter, Folder, SidebarMode};
-use diffpilot_ui_kit::components::{BadgeTone, State, filter_field, glass_button, status_badge, viewed_check};
+use diffpilot_ui_kit::components::{BadgeTone, State, filter_field, glass_button, status_badge, tag, viewed_check};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::{
     AnyElement, App, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
@@ -286,12 +286,15 @@ impl Sidebar {
             .pt(px(5.))
             .pb(px(10.))
             .child(
-                div()
-                    .text_size(px(12.))
-                    .text_color(muted)
-                    .whitespace_nowrap()
-                    .overflow_hidden()
-                    .child(text),
+                tag(
+                    div(),
+                    format!("sidebar:summary:{}/{} viewed", summary.viewed, summary.file_count),
+                )
+                .text_size(px(12.))
+                .text_color(muted)
+                .whitespace_nowrap()
+                .overflow_hidden()
+                .child(text),
             )
             .child(
                 div().h(px(4.)).w_full().rounded_full().bg(theme.muted).child(
@@ -436,8 +439,7 @@ impl Sidebar {
         let path = row.path.clone();
         let depth = row.depth as f32;
 
-        let base = h_flex()
-            .id(("row", index))
+        let base = tag(h_flex().id(("row", index)), format!("sidebar:row:{path}"))
             .group("row")
             .w_full()
             .h(px(ROW_HEIGHT))
@@ -541,6 +543,7 @@ impl Sidebar {
                             .min_w_0()
                             .truncate()
                             .text_color(name_color)
+                            .when(viewed, |this| tag(this, format!("sidebar:is-viewed:{path}")))
                             .child(SharedString::from(entry.name.clone())),
                     )
                     .when(*show_parent, |this| {
@@ -557,7 +560,7 @@ impl Sidebar {
                     .when(!*show_parent, |this| this.child(div().flex_1()))
                     .when(comments > 0, |this| {
                         this.child(
-                            h_flex()
+                            tag(h_flex(), format!("sidebar:comments:{path}:{comments}"))
                                 .gap(px(2.))
                                 .text_size(px(11.))
                                 .text_color(secondary)
@@ -565,16 +568,19 @@ impl Sidebar {
                                 .child(comments.to_string()),
                         )
                     })
-                    .child(viewed_check(
-                        ("viewed", index),
-                        viewed,
-                        secondary,
-                        hover_border,
-                        "row",
-                        cx.listener(move |_, _: &ClickEvent, _, cx| {
-                            cx.stop_propagation();
-                            cx.emit(SidebarEvent::ToggleViewed(toggle_path.clone()));
-                        }),
+                    .child(tag(
+                        viewed_check(
+                            ("viewed", index),
+                            viewed,
+                            secondary,
+                            hover_border,
+                            "row",
+                            cx.listener(move |_, _: &ClickEvent, _, cx| {
+                                cx.stop_propagation();
+                                cx.emit(SidebarEvent::ToggleViewed(toggle_path.clone()));
+                            }),
+                        ),
+                        format!("sidebar:viewed:{path}"),
                     ))
                     .child(status_badge(
                         change.status.code(),
@@ -584,11 +590,16 @@ impl Sidebar {
                     ))
             }
         };
-        div().w_full().px(px(6.)).child(element).into_any_element()
+        div()
+            .w_full()
+            .px(px(6.))
+            .when(selected, |this| tag(this, format!("sidebar:selected:{path}")))
+            .child(element)
+            .into_any_element()
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(test)]
 impl Sidebar {
     pub fn comments(&self) -> &HashMap<String, usize> {
         &self.comments

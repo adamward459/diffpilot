@@ -43,7 +43,9 @@ Run only what `cargo xtask related` prints. `cargo xtask unit` with no names fai
 
 ## Flows
 
-`cargo xtask flows` runs the end-to-end user flows in `gpui-app/tests/flows/`. Each flow opens a fixture repo in a headless `TestAppContext` through `diffpilot::testing` and drives the whole `RepoView` the way a user does: pick a comparison, mark a file viewed, comment, run a scripted review, change settings. They open no window, so you can run them at any time. The test helpers build only with the `testing` Cargo feature, so the app binary has no test code.
+`cargo xtask flows` runs the end-to-end user flows in `gpui-app/tests/flows/`. Each flow opens a fixture repo in a headless `TestAppContext` and acts like a user through `diffpilot::testing`: `click(cx, selector)`, `press(cx, "cmd-.")`, `type_text(cx, ...)`, and `shows(cx, selector)` to read the window. Views tag what a user touches or sees with `tag(element, name)`, for example `sidebar:row:<path>`, `sidebar:summary:1/3 viewed`, or `comment:<author>:<body>`, and a helper panics when the tag is not on screen. gpui never clears a tag once it has painted, so assert on a state tag that is new to the window. `cargo xtask precommit` fails when a flow calls `.update(`, `.update_in(`, or `.emit(`: add a helper to `testing.rs` for setup instead.
+
+The flows open no window, so you can run them at any time. A flow cannot hold a review in flight, because a blocking `Reviewer` stops the single-threaded test executor. The test helpers build only with the `testing` Cargo feature, so the app binary has no test code.
 
 ## Workflow
 

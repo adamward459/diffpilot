@@ -1,4 +1,4 @@
-use super::form::glyph_icon;
+use super::form::{glyph_icon, tag};
 use super::glass::{OnSelect, glass_surface};
 use super::interaction::DISABLED_OPACITY;
 use crate::icons::Glyph;
@@ -167,6 +167,7 @@ pub fn bar_button(
 }
 
 pub struct IconSegment {
+    pub name: &'static str,
     pub glyph: Glyph,
     pub tooltip: SharedString,
 }
@@ -184,8 +185,8 @@ pub fn icon_switch(
             let on_select = on_select.clone();
             let tooltip = item.tooltip;
             let hover = theme.hover;
-            h_flex()
-                .id((id, index))
+            let marked = index == selected;
+            tag(h_flex().id((id, index)), format!("{id}:{}", item.name))
                 .w(px(34.))
                 .h_full()
                 .justify_center()
@@ -195,7 +196,11 @@ pub fn icon_switch(
                 .when(index != selected, |this| this.hover(move |style| style.bg(hover)))
                 .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
                 .on_click(move |_, window, cx| on_select(index, window, cx))
-                .child(Icon::new(item.glyph).size(px(16.)).text_color(theme.ui.text2))
+                .child(
+                    div()
+                        .when(marked, |this| tag(this, format!("{id}:{}:selected", item.name)))
+                        .child(Icon::new(item.glyph).size(px(16.)).text_color(theme.ui.text2)),
+                )
         }),
     )
 }

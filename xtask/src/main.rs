@@ -3,6 +3,7 @@ mod changelog;
 mod checks;
 mod features;
 mod fixture;
+mod flow_input;
 mod perf;
 mod pixels;
 mod pr;
@@ -117,6 +118,7 @@ fn precommit() -> Result {
         git(&add)?;
     }
     check_bin_paths()?;
+    flow_input::check()?;
     changelog::check()
 }
 

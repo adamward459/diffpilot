@@ -2,7 +2,7 @@ use diffpilot_core::comparison;
 use diffpilot_core::folder_status::{FolderStatus, folder_status};
 use diffpilot_core::settings::Settings;
 use diffpilot_ui_kit::components::menu::{MenuItem, MenuSection, menu_button};
-use diffpilot_ui_kit::components::{BadgeTone, Button, Look, status_badge};
+use diffpilot_ui_kit::components::{BadgeTone, Button, Look, status_badge, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{
@@ -213,16 +213,19 @@ impl Render for FolderMenu {
         let rows = self.rows.clone();
         let active = self.active.clone();
 
-        let trigger = Button::new("folder-title")
-            .look(Look::Ghost)
-            .regular()
-            .rounded_full()
-            .h(px(24.))
-            .gap(px(6.))
-            .text_size(px(15.))
-            .font_weight(FontWeight::SEMIBOLD)
-            .label(name)
-            .caret(true);
+        let trigger = tag(
+            Button::new("folder-title")
+                .look(Look::Ghost)
+                .regular()
+                .rounded_full()
+                .h(px(24.))
+                .gap(px(6.))
+                .text_size(px(15.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .label(name.clone())
+                .caret(true),
+            "folder-title",
+        );
 
         let refresh = menu.clone();
         let popover = menu_button("folder", trigger, move |_, _| {
@@ -250,7 +253,7 @@ impl Render for FolderMenu {
             }
         });
 
-        h_flex()
+        tag(h_flex(), format!("folder-active:{name}"))
             .gap(px(8.))
             .items_center()
             .child(popover)

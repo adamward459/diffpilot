@@ -6,7 +6,7 @@ use diffpilot_core::comparison::Comparison;
 use diffpilot_core::refs::Refs;
 use diffpilot_ui_kit::Theme;
 use diffpilot_ui_kit::components::menu::{MenuItem, MenuRow, MenuSection, menu_button};
-use diffpilot_ui_kit::components::{Button, Look, capsule};
+use diffpilot_ui_kit::components::{Button, Look, capsule, tag};
 use gpui::prelude::*;
 use gpui::{App, IntoElement, ParentElement, Styled, Window, div, px};
 use std::rc::Rc;
@@ -30,10 +30,13 @@ pub fn comparison_control(
         .child(
             menu_button(
                 "comparison-branch",
-                segment("comparison-branch", tokens)
-                    .icon(branch_glyph(comparison), 16.)
-                    .label(branch_title(refs, comparison))
-                    .tooltip(branch_tooltip(comparison)),
+                tag(
+                    segment("comparison-branch", tokens)
+                        .icon(branch_glyph(comparison), 16.)
+                        .label(branch_title(refs, comparison))
+                        .tooltip(branch_tooltip(comparison)),
+                    "comparison-branch",
+                ),
                 move |_, _| menu_sections(&branch_sections, &branch_select),
             )
             .min_width(230.),
@@ -49,10 +52,13 @@ pub fn comparison_control(
         .child(
             menu_button(
                 "comparison-base",
-                segment("comparison-base", tokens)
-                    .icon(base_glyph(comparison), 16.)
-                    .label(base_title(comparison))
-                    .tooltip("Compared to"),
+                tag(
+                    segment("comparison-base", tokens)
+                        .icon(base_glyph(comparison), 16.)
+                        .label(base_title(comparison))
+                        .tooltip("Compared to"),
+                    "comparison-base",
+                ),
                 move |_, _| menu_sections(&base_sections, &base_select),
             )
             .min_width(230.),
