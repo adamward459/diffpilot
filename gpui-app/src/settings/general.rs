@@ -1,60 +1,48 @@
-use super::window::SettingsWindow;
+use super::page::SettingsPage;
 use diffpilot_core::diff::DiffMode;
 use diffpilot_core::editor::Editor;
 use diffpilot_core::settings::AppearanceChoice;
 use diffpilot_ui_kit::Theme;
 use diffpilot_ui_kit::components::menu::{MenuItem, MenuRow, MenuSection, menu_button};
-use diffpilot_ui_kit::components::{Row, caption, grouped, picker, section, segmented_control, switch, tag};
+use diffpilot_ui_kit::components::{Row, caption, grouped, picker, segmented_control, switch, tag};
 use gpui::prelude::*;
-use gpui::{App, Context, Corner, Div, IntoElement, Keystroke, SharedString, div, px};
+use gpui::{AnyElement, App, Context, Corner, Div, IntoElement, Keystroke, SharedString, div, px};
 use gpui_component::input::Input;
 use gpui_component::{ActiveTheme, Sizable};
 
-pub fn general(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(16.))
-        .child(launch(window, t, cx))
-        .child(editor(window, t, cx))
-}
-
-fn launch(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
-    let open = window.settings.open_last_repository();
-    section(
+pub(super) fn open_last(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) -> AnyElement {
+    let open = page.settings.open_last_repository();
+    grouped(
         t,
-        "Launch",
-        grouped(
-            t,
-            vec![
-                Row::new(t, "Open the last repository on launch")
-                    .subtitle(caption(
-                        t,
-                        "Without it, Diffpilot starts with no folder until you press ⌘O.",
-                    ))
-                    .control(
-                        tag(switch(t, "open-last", open, true), || "open-last").on_click(cx.listener(
-                            move |this, _, _, cx| {
-                                this.settings.set_open_last_repository(!open);
-                                cx.notify();
-                            },
-                        )),
-                    )
-                    .into_any_element(),
-            ],
-        ),
+        vec![
+            Row::new(t, "Open the last repository on launch")
+                .subtitle(caption(
+                    t,
+                    "Without it, Diffpilot starts with no folder until you press ⌘O.",
+                ))
+                .control(
+                    tag(switch(t, "open-last", open, true), || "open-last").on_click(cx.listener(
+                        move |this, _, _, cx| {
+                            this.settings.set_open_last_repository(!open);
+                            cx.notify();
+                        },
+                    )),
+                )
+                .into_any_element(),
+        ],
     )
+    .into_any_element()
 }
 
-fn editor(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
-    let saved = window.settings.editor();
-    let detected = window.detected_editor.clone();
+pub(super) fn editor(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) -> AnyElement {
+    let saved = page.settings.editor();
+    let detected = page.detected_editor.clone();
     let label = match &saved {
         None => format!("Automatic ({})", detected.title()),
         Some(editor) => editor.title().to_string(),
     };
     let this = cx.entity();
-    let template = window.custom_editor.clone();
+    let template = page.custom_editor.clone();
     let automatic = format!("Automatic ({})", detected.title());
     let current = saved.clone();
     let control = menu_button(
@@ -110,7 +98,7 @@ fn editor(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) 
             .bg(t.ui.cap)
             .overflow_hidden()
             .child(
-                Input::new(&window.custom_editor)
+                Input::new(&page.custom_editor)
                     .small()
                     .appearance(false)
                     .bordered(false),
@@ -122,11 +110,11 @@ fn editor(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) 
                 .into_any_element(),
         );
     }
-    section(t, "Editor", grouped(t, rows))
+    grouped(t, rows).into_any_element()
 }
 
-pub fn appearance(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
-    let current = window.settings.appearance();
+pub(super) fn appearance(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) -> AnyElement {
+    let current = page.settings.appearance();
     let selected = AppearanceChoice::ALL
         .iter()
         .position(|choice| *choice == current)
@@ -147,78 +135,87 @@ pub fn appearance(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsW
             super::appearance::set_choice(choice, window, cx);
         },
     );
-    section(
+    grouped(
         t,
-        "Theme",
-        grouped(
-            t,
-            vec![
-                Row::new(t, "Appearance")
-                    .subtitle(caption(t, "System follows macOS. Every open window changes at once."))
-                    .control(control)
-                    .into_any_element(),
-            ],
-        ),
+        vec![
+            Row::new(t, "Appearance")
+                .subtitle(caption(t, "System follows macOS. Every open window changes at once."))
+                .control(control)
+                .into_any_element(),
+        ],
     )
+    .into_any_element()
 }
 
-pub fn diff(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
-    let wrap = window.settings.wrap_lines();
-    let mode = window.settings.diff_mode();
-    let this = cx.entity();
-    section(
+pub(super) fn wrap_lines(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) -> AnyElement {
+    let wrap = page.settings.wrap_lines();
+    grouped(
         t,
-        "Diff",
-        grouped(
-            t,
-            vec![
-                Row::new(t, "Wrap lines")
-                    .subtitle(caption(t, "Same as the wrap button in the toolbar."))
-                    .control(
-                        tag(switch(t, "wrap-lines", wrap, true), || "wrap-lines").on_click(cx.listener(
-                            move |this, _, _, cx| {
-                                this.settings.set_wrap_lines(!wrap);
-                                cx.notify();
-                            },
-                        )),
-                    )
-                    .into_any_element(),
-                Row::new(t, "Layout")
-                    .subtitle(caption(t, "Same as the Unified and Split switch in the toolbar."))
-                    .control(segmented_control(
-                        t,
-                        "layout",
-                        &["Unified", "Split"],
-                        usize::from(mode == DiffMode::Split),
-                        true,
-                        move |ix, _, cx| {
-                            let mode = if ix == 1 { DiffMode::Split } else { DiffMode::Unified };
-                            this.update(cx, |this, cx| {
-                                this.settings.set_diff_mode(mode);
-                                cx.notify();
-                            });
+        vec![
+            Row::new(t, "Wrap lines")
+                .subtitle(caption(t, "Same as the wrap button in the toolbar."))
+                .control(
+                    tag(switch(t, "wrap-lines", wrap, true), || "wrap-lines").on_click(cx.listener(
+                        move |this, _, _, cx| {
+                            this.settings.set_wrap_lines(!wrap);
+                            cx.notify();
                         },
-                    ))
-                    .into_any_element(),
-            ],
-        ),
+                    )),
+                )
+                .into_any_element(),
+        ],
     )
+    .into_any_element()
 }
 
-pub fn key_bindings(t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
-    let rows = bindings(cx)
-        .into_iter()
-        .map(|(title, keys)| Row::new(t, title).control(keycaps(t, cx, &keys)).into_any_element())
+pub(super) fn layout(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) -> AnyElement {
+    let mode = page.settings.diff_mode();
+    let this = cx.entity();
+    grouped(
+        t,
+        vec![
+            Row::new(t, "Layout")
+                .subtitle(caption(t, "Same as the Unified and Split switch in the toolbar."))
+                .control(segmented_control(
+                    t,
+                    "layout",
+                    &["Unified", "Split"],
+                    usize::from(mode == DiffMode::Split),
+                    true,
+                    move |ix, _, cx| {
+                        let mode = if ix == 1 { DiffMode::Split } else { DiffMode::Unified };
+                        this.update(cx, |this, cx| {
+                            this.settings.set_diff_mode(mode);
+                            cx.notify();
+                        });
+                    },
+                ))
+                .into_any_element(),
+        ],
+    )
+    .into_any_element()
+}
+
+pub(super) fn key_bindings(t: &Theme, shortcuts: &[(SharedString, String)], show_note: bool, cx: &App) -> Div {
+    let rows = shortcuts
+        .iter()
+        .map(|(title, keys)| {
+            Row::new(t, title.clone())
+                .control(keycaps(t, cx, keys))
+                .into_any_element()
+        })
         .collect();
     div()
         .flex()
         .flex_col()
         .gap(px(8.))
-        .child(section(t, "Shortcuts", grouped(t, rows)))
-        .child(caption(
-            t,
-            "These shortcuts are fixed. Changing them is not supported yet.",
-        ))
+        .child(grouped(t, rows))
+        .when(show_note, |this| {
+            this.child(caption(
+                t,
+                "These shortcuts are fixed. Changing them is not supported yet.",
+            ))
+        })
 }
 
 fn keycaps(t: &Theme, cx: &App, keys: &str) -> Div {

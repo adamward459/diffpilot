@@ -1,4 +1,4 @@
-use super::window::{Load, SettingsWindow};
+use super::page::{Load, SettingsPage};
 use diffpilot_core::connection::{ClaudeStatus, Login, McpState};
 use diffpilot_core::policy::EditPermission;
 use diffpilot_core::review::{Effort, ModelName, ReviewModel};
@@ -11,16 +11,16 @@ use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, Corner, Div, HighlightStyle, Hsla, IntoElement, SharedString, StyledText, div, px};
 
-pub fn render(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
+pub fn render(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) -> impl IntoElement {
     div()
         .flex()
         .flex_col()
         .gap(px(16.))
         .child(intro(t))
-        .child(section(t, "Connection", connection(window, t, cx)))
-        .child(section(t, "Models", models(window, t, cx)))
-        .child(section(t, "Editing", editing(window, t, cx)))
-        .child(section(t, "Terminal agents", terminal_agents(window, t, cx)))
+        .child(section(t, "Connection", connection(page, t, cx)))
+        .child(section(t, "Models", models(page, t, cx)))
+        .child(section(t, "Editing", editing(page, t, cx)))
+        .child(section(t, "Terminal agents", terminal_agents(page, t, cx)))
 }
 
 fn intro(t: &Theme) -> impl IntoElement {
@@ -61,9 +61,9 @@ fn checking(t: &Theme, id: &'static str, text: &'static str) -> Div {
         .child(text)
 }
 
-fn connection(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> Div {
-    let busy = window.path_op.running();
-    let status = match &window.claude {
+fn connection(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) -> Div {
+    let busy = page.path_op.running();
+    let status = match &page.claude {
         Load::Idle | Load::Loading => checking(t, "claude-check", "Checking…").into_any_element(),
         Load::Ready(ClaudeStatus::NotFound) => {
             status_chip(Glyph::CircleAlert, t.danger, "Not found").into_any_element()
@@ -74,7 +74,7 @@ fn connection(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
             Login::Unknown(_) => status_chip(Glyph::CircleAlert, t.amber, "Login unknown").into_any_element(),
         },
     };
-    let sub: AnyElement = match &window.claude {
+    let sub: AnyElement = match &page.claude {
         Load::Ready(ClaudeStatus::Found { path, .. }) => div()
             .flex()
             .items_center()
@@ -90,13 +90,13 @@ fn connection(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
         _ => caption(t, "Looking for Claude Code…").into_any_element(),
     };
     let needs_login = matches!(
-        &window.claude,
+        &page.claude,
         Load::Ready(ClaudeStatus::Found {
             login: Login::LoggedOut | Login::Unknown(_),
             ..
         })
     );
-    let custom = window.settings.claude_path().is_some();
+    let custom = page.settings.claude_path().is_some();
     let control = div()
         .flex()
         .items_center()
@@ -140,7 +140,7 @@ fn connection(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
             .control(control)
             .into_any_element(),
     ];
-    match &window.claude {
+    match &page.claude {
         Load::Ready(ClaudeStatus::Found {
             login: Login::LoggedOut,
             ..
@@ -158,7 +158,7 @@ fn connection(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
         }) => rows.push(note(t, t.amber, message.clone()).into_any_element()),
         _ => {}
     }
-    if let Some(message) = window.path_op.failure() {
+    if let Some(message) = page.path_op.failure() {
         rows.push(note(t, t.danger, message.to_string()).into_any_element());
     }
     grouped(t, rows)
@@ -166,7 +166,7 @@ fn connection(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
 
 fn model_picker(
     t: &Theme,
-    cx: &mut Context<SettingsWindow>,
+    cx: &mut Context<SettingsPage>,
     id: &'static str,
     model: ReviewModel,
     save: fn(&Settings, ReviewModel),
@@ -205,9 +205,9 @@ fn model_picker(
     .min_width(150.)
 }
 
-fn models(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> Div {
-    let reviews = window.settings.reviews_model();
-    let fixes = window.settings.fixes_model();
+fn models(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) -> Div {
+    let reviews = page.settings.reviews_model();
+    let fixes = page.settings.fixes_model();
     grouped(
         t,
         vec![
@@ -232,8 +232,8 @@ fn models(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) 
     )
 }
 
-fn editing(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> Div {
-    let current = window.settings.edit_permission();
+fn editing(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) -> Div {
+    let current = page.settings.edit_permission();
     let this = cx.entity();
     let picker = menu_button(
         "edit-permission",
@@ -274,11 +274,11 @@ fn editing(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>)
     )
 }
 
-fn terminal_agents(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> Div {
-    let allowed = window.settings.allow_terminal_agents();
-    let found = window.claude_found().is_some();
-    let installing = window.install_op.running();
-    let state = match (&window.claude, &window.mcp) {
+fn terminal_agents(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) -> Div {
+    let allowed = page.settings.allow_terminal_agents();
+    let found = page.claude_found().is_some();
+    let installing = page.install_op.running();
+    let state = match (&page.claude, &page.mcp) {
         (Load::Ready(ClaudeStatus::NotFound), _) => status_chip(Glyph::CircleAlert, t.ui.muted, "Needs Claude Code"),
         (_, Load::Ready(McpState::Connected)) => status_chip(Glyph::CircleCheck, t.success, "Connected"),
         (_, Load::Ready(McpState::InstalledNotConnected(_))) => {
@@ -289,10 +289,10 @@ fn terminal_agents(window: &SettingsWindow, t: &Theme, cx: &mut Context<Settings
         _ => checking(t, "mcp-check", "Checking…"),
     };
     let installed = matches!(
-        window.mcp,
+        page.mcp,
         Load::Ready(McpState::Connected | McpState::InstalledNotConnected(_))
     );
-    let can_install = allowed && found && !installing && matches!(window.mcp, Load::Ready(_));
+    let can_install = allowed && found && !installing && matches!(page.mcp, Load::Ready(_));
     let action = if installed { "Reinstall" } else { "Install" };
     let control = div()
         .flex()
@@ -337,10 +337,10 @@ fn terminal_agents(window: &SettingsWindow, t: &Theme, cx: &mut Context<Settings
             .dim(!allowed)
             .into_any_element(),
     ];
-    if let Load::Ready(McpState::InstalledNotConnected(detail) | McpState::Unknown(detail)) = &window.mcp {
+    if let Load::Ready(McpState::InstalledNotConnected(detail) | McpState::Unknown(detail)) = &page.mcp {
         rows.push(note(t, t.amber, detail.clone()).into_any_element());
     }
-    if let Some(message) = window.install_op.failure() {
+    if let Some(message) = page.install_op.failure() {
         rows.push(note(t, t.danger, message.to_string()).into_any_element());
     }
     grouped(t, rows)

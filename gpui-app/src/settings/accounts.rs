@@ -1,4 +1,4 @@
-use super::window::{Load, SettingsWindow};
+use super::page::{Load, SettingsPage};
 use diffpilot_core::github::auth::TokenSource;
 use diffpilot_ui_kit::components::{Button, Row, caption, grouped, note, section, spinner, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
@@ -7,15 +7,15 @@ use gpui::{Context, Div, IntoElement, div, px};
 use gpui_component::Sizable;
 use gpui_component::input::Input;
 
-pub fn render(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
-    let working = window.github_op.running();
-    let status = match &window.github {
+pub fn render(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) -> impl IntoElement {
+    let working = page.github_op.running();
+    let status = match &page.github {
         Load::Ready(status) => Some(status.clone()),
         _ => None,
     };
-    let sub = match &window.github {
+    let sub = match &page.github {
         Load::Ready(status) => match (&status.login, status.source) {
-            (Some(login), source) => format!("Signed in as {login} · {}", SettingsWindow::github_source_text(source)),
+            (Some(login), source) => format!("Signed in as {login} · {}", SettingsPage::github_source_text(source)),
             _ => "Not signed in".to_string(),
         },
         _ => "Checking…".to_string(),
@@ -27,7 +27,7 @@ pub fn render(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
         .flex()
         .items_center()
         .gap(px(8.))
-        .when(working || window.github == Load::Loading, |this| {
+        .when(working || page.github == Load::Loading, |this| {
             this.child(
                 div()
                     .flex()
@@ -74,7 +74,7 @@ pub fn render(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
                 .border_color(t.ui.cap_border)
                 .bg(t.ui.cap)
                 .overflow_hidden()
-                .child(Input::new(&window.token).small().appearance(false).bordered(false)),
+                .child(Input::new(&page.token).small().appearance(false).bordered(false)),
         )
         .child(
             tag(
@@ -99,7 +99,7 @@ pub fn render(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
             .control(token_field)
             .into_any_element(),
     ];
-    if let Some(message) = window.github_op.failure() {
+    if let Some(message) = page.github_op.failure() {
         rows.push(note(t, t.danger, message.to_string()).into_any_element());
     }
     let hint: Div = caption(

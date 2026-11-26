@@ -1,4 +1,4 @@
-//! What the Settings window needs to know about the Claude Code CLI on this Mac: whether it is there,
+//! What the Settings page needs to know about the Claude Code CLI on this Mac: whether it is there,
 //! whether it is logged in, and whether the diffpilot MCP server is installed for terminal agents.
 //!
 //! The login check follows diffity's `agents/detect.rs` (MIT, see THIRD_PARTY_NOTICES): `claude auth status

@@ -15,6 +15,7 @@ mod flows {
     mod remote;
     mod review;
     mod selection;
+    mod settings;
     mod sidebar_keys;
     mod viewed;
 }

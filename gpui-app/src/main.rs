@@ -68,45 +68,46 @@ fn main() {
             None => settings.launch_folder(),
         };
 
-        let settings_tab = std::env::var("DIFFPILOT_SETTINGS")
+        let settings_section = std::env::var("DIFFPILOT_SETTINGS")
             .ok()
             .as_deref()
-            .and_then(settings::Tab::parse);
-        if let Some(tab) = settings_tab {
-            settings::open(Some(tab), cx);
-        } else {
-            let bounds = Bounds::centered(None, size(px(1388.), px(923.)), cx);
-            let options = WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                kind: if bench.is_some() {
-                    WindowKind::PopUp
-                } else {
-                    WindowKind::Normal
-                },
-                titlebar: Some(TitlebarOptions {
-                    traffic_light_position: Some(point(px(20.), px(19.))),
-                    ..TitleBar::title_bar_options()
-                }),
-                window_min_size: Some(size(px(720.), px(420.))),
-                ..Default::default()
-            };
-            cx.open_window(options, move |window, cx| {
-                settings::install_theme(window, cx);
-                let workspace = cx.new(|cx| {
-                    Workspace::new(
-                        settings,
-                        viewed_store,
-                        review_store,
-                        folder,
-                        bench.is_some(),
-                        window,
-                        cx,
-                    )
+            .and_then(settings::Section::parse);
+        let bounds = Bounds::centered(None, size(px(1388.), px(923.)), cx);
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            kind: if bench.is_some() {
+                WindowKind::PopUp
+            } else {
+                WindowKind::Normal
+            },
+            titlebar: Some(TitlebarOptions {
+                traffic_light_position: Some(point(px(20.), px(19.))),
+                ..TitleBar::title_bar_options()
+            }),
+            window_min_size: Some(size(px(720.), px(420.))),
+            ..Default::default()
+        };
+        cx.open_window(options, move |window, cx| {
+            settings::install_theme(window, cx);
+            let workspace = cx.new(|cx| {
+                Workspace::new(
+                    settings,
+                    viewed_store,
+                    review_store,
+                    folder,
+                    bench.is_some(),
+                    window,
+                    cx,
+                )
+            });
+            if settings_section.is_some() {
+                workspace.update(cx, |workspace, cx| {
+                    workspace.open_settings(settings_section, window, cx)
                 });
-                cx.new(|cx| Root::new(workspace, window, cx))
-            })
-            .expect("open the main window");
-        }
+            }
+            cx.new(|cx| Root::new(workspace, window, cx))
+        })
+        .expect("open the main window");
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
                 cx.quit();

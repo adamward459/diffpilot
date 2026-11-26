@@ -1,6 +1,6 @@
 use crate::repo_view::{Claude, RepoView};
 use crate::runs::Runs;
-use crate::settings::{self, Services, Tab};
+use crate::settings::{self, Section, Services};
 use crate::workspace::{self, Workspace};
 use diffpilot_core::claude::ScriptedReplier;
 use diffpilot_core::diff::FileDiff;
@@ -246,7 +246,13 @@ impl Http for Offline {
     }
 }
 
-pub fn open_settings(cx: &mut TestAppContext, settings: Arc<Settings>, tab: Tab) -> &'static mut VisualTestContext {
+/// Opens a workspace window and presses ⌘, then clicks the section in the list. `folder` of `None` shows the empty state.
+pub fn open_settings(
+    cx: &mut TestAppContext,
+    folder: Option<&Path>,
+    settings: Arc<Settings>,
+    section: Section,
+) -> &'static mut VisualTestContext {
     ready(cx);
     let services = Services {
         credentials: Credentials::new(Arc::new(MemoryStore::default()), Arc::new(NoGh)),
@@ -254,12 +260,10 @@ pub fn open_settings(cx: &mut TestAppContext, settings: Arc<Settings>, tab: Tab)
         host: "github.com".into(),
         mcp_server: None,
     };
-    let window = cx.update(|cx| {
-        settings::init(settings, services, cx);
-        settings::open(Some(tab), cx).expect("the settings window opens")
-    });
-    let vcx = VisualTestContext::from_window(window.into(), cx).into_mut();
-    draw(vcx);
+    cx.update(|cx| settings::init(settings.clone(), services, cx));
+    let vcx = open_window(cx, folder, settings);
+    press(vcx, "cmd-,");
+    click(vcx, &format!("toc:{}", section.title()));
     vcx
 }
 
@@ -269,7 +273,15 @@ pub fn open_workspace(
     settings: Arc<Settings>,
 ) -> &'static mut VisualTestContext {
     ready(cx);
-    let folder = folder.to_path_buf();
+    open_window(cx, Some(folder), settings)
+}
+
+fn open_window(
+    cx: &mut TestAppContext,
+    folder: Option<&Path>,
+    settings: Arc<Settings>,
+) -> &'static mut VisualTestContext {
+    let folder = folder.map(Path::to_path_buf);
     let handle = cx.add_window(|window, cx| {
         let review_store = cx.try_global::<Runs>().map_or_else(
             || Arc::new(Store::open_in_memory().expect("an in-memory store opens")),
@@ -280,7 +292,7 @@ pub fn open_workspace(
                 settings,
                 Arc::new(ViewedStore::in_memory()),
                 review_store,
-                Some(folder),
+                folder,
                 false,
                 window,
                 cx,

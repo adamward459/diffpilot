@@ -1,4 +1,5 @@
-use super::{accounts, claude_tab, general};
+use super::entries::{self, ENTRIES};
+use super::{CloseSettings, KEY_CONTEXT, general};
 use diffpilot_core::connection::{self, ClaudeStatus, McpState};
 use diffpilot_core::editor::{self, Editor};
 use diffpilot_core::github::auth::{Credentials, TokenSource};
@@ -6,19 +7,20 @@ use diffpilot_core::github::client::AuthStatus;
 use diffpilot_core::github::http::{Http, UreqHttp};
 use diffpilot_core::github::{Github, GithubError};
 use diffpilot_core::settings::Settings;
-use diffpilot_ui_kit::components::{glyph_icon, tag};
+use diffpilot_ui_kit::components::{filter_field, glyph_icon, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{
-    App, Context, Entity, IntoElement, PathPromptOptions, Render, Subscription, Window, WindowControlArea, div, px,
+    Context, Entity, EventEmitter, IntoElement, PathPromptOptions, Render, ScrollHandle, Subscription, Window,
+    WindowControlArea, div, point, px,
 };
-use gpui_component::ActiveTheme;
-use gpui_component::input::{InputEvent, InputState};
+use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::{ActiveTheme, Sizable};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tab {
+pub enum Section {
     General,
     Appearance,
     Diff,
@@ -27,14 +29,14 @@ pub enum Tab {
     KeyBindings,
 }
 
-impl Tab {
-    pub const ALL: [Tab; 6] = [
-        Tab::General,
-        Tab::Appearance,
-        Tab::Diff,
-        Tab::Claude,
-        Tab::Accounts,
-        Tab::KeyBindings,
+impl Section {
+    pub const ALL: [Section; 6] = [
+        Section::General,
+        Section::Appearance,
+        Section::Diff,
+        Section::Claude,
+        Section::Accounts,
+        Section::KeyBindings,
     ];
 
     pub fn title(self) -> &'static str {
@@ -48,7 +50,7 @@ impl Tab {
         }
     }
 
-    fn icon(self) -> Glyph {
+    pub fn icon(self) -> Glyph {
         match self {
             Self::General => Glyph::Sun,
             Self::Appearance => Glyph::Contrast,
@@ -60,7 +62,7 @@ impl Tab {
     }
 
     /// The value of `DIFFPILOT_SETTINGS`. Any other non-empty text opens General.
-    pub fn parse(text: &str) -> Option<Tab> {
+    pub fn parse(text: &str) -> Option<Section> {
         let text = text.trim().to_lowercase().replace([' ', '-', '_'], "");
         if text.is_empty() {
             return None;
@@ -68,8 +70,8 @@ impl Tab {
         Some(
             Self::ALL
                 .into_iter()
-                .find(|tab| tab.title().to_lowercase().replace(' ', "") == text)
-                .unwrap_or(Tab::General),
+                .find(|section| section.title().to_lowercase().replace(' ', "") == text)
+                .unwrap_or(Section::General),
         )
     }
 }
@@ -103,7 +105,7 @@ impl Op {
     }
 }
 
-/// What the window talks to outside the settings file. Tests pass fakes.
+/// What the page talks to outside the settings file. Tests pass fakes.
 #[derive(Clone)]
 pub struct Services {
     pub credentials: Credentials,
@@ -127,10 +129,11 @@ impl Services {
     }
 }
 
-pub struct SettingsWindow {
+pub struct SettingsPage {
     pub(super) settings: Arc<Settings>,
     services: Services,
-    pub(super) tab: Tab,
+    pub(super) search: Entity<InputState>,
+    pub(super) scroll: ScrollHandle,
     pub(super) claude: Load<ClaudeStatus>,
     pub(super) mcp: Load<McpState>,
     pub(super) path_op: Op,
@@ -144,11 +147,11 @@ pub struct SettingsWindow {
     _subscriptions: Vec<Subscription>,
 }
 
-impl SettingsWindow {
+impl SettingsPage {
     pub fn new(
         settings: Arc<Settings>,
         services: Services,
-        tab: Tab,
+        section: Section,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -166,7 +169,14 @@ impl SettingsWindow {
             state.set_value(saved_template, window, cx);
             state
         });
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search settings"));
         let subscriptions = vec![
+            cx.subscribe(&search, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.scroll.set_offset(point(px(0.), px(0.)));
+                    cx.notify();
+                }
+            }),
             cx.subscribe(&custom_editor, |this, input, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) && matches!(this.settings.editor(), Some(Editor::Custom(_))) {
                     let template = input.read(cx).value().to_string();
@@ -183,7 +193,8 @@ impl SettingsWindow {
         let mut this = Self {
             settings,
             services,
-            tab,
+            search,
+            scroll: ScrollHandle::new(),
             claude: Load::Idle,
             mcp: Load::Idle,
             path_op: Op::Idle,
@@ -198,26 +209,42 @@ impl SettingsWindow {
         };
         cx.observe_global::<super::SettingsChanged>(|_, cx| cx.notify())
             .detach();
-        window.set_window_title(tab.title());
         this.refresh_claude(cx);
-        this.load_for_tab(cx);
+        this.refresh_github(cx);
+        this.scroll_to_section(section, cx);
+        this.focus_search(window, cx);
         this
     }
 
-    pub fn select_tab(&mut self, tab: Tab, window: &mut Window, cx: &mut Context<Self>) {
-        if self.tab == tab {
-            return;
-        }
-        self.tab = tab;
-        window.set_window_title(tab.title());
-        self.load_for_tab(cx);
-        cx.notify();
+    pub fn focus_search(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search.update(cx, |input, cx| input.focus(window, cx));
     }
 
-    fn load_for_tab(&mut self, cx: &mut Context<Self>) {
-        if self.tab == Tab::Accounts && self.github == Load::Idle {
-            self.refresh_github(cx);
+    pub fn scroll_to_section(&mut self, section: Section, cx: &mut Context<Self>) {
+        if let Some(ix) = self.visible_sections(cx).iter().position(|shown| *shown == section) {
+            self.scroll.scroll_to_top_of_item(ix);
+            cx.notify();
         }
+    }
+
+    pub fn query(&self, cx: &gpui::App) -> String {
+        self.search.read(cx).value().trim().to_string()
+    }
+
+    pub fn visible_sections(&self, cx: &gpui::App) -> Vec<Section> {
+        let query = self.query(cx);
+        let shortcuts = general::bindings(cx);
+        Section::ALL
+            .into_iter()
+            .filter(|section| {
+                let listed = entries::in_section(*section, &query).next().is_some();
+                let shortcut = *section == Section::KeyBindings
+                    && shortcuts
+                        .iter()
+                        .any(|(title, _)| entries::matches(&query, &[section.title(), title]));
+                listed || shortcut
+            })
+            .collect()
     }
 
     pub(super) fn refresh_claude(&mut self, cx: &mut Context<Self>) {
@@ -417,19 +444,88 @@ impl SettingsWindow {
     }
 }
 
-impl Render for SettingsWindow {
+pub enum PageEvent {
+    Close,
+}
+
+impl EventEmitter<PageEvent> for SettingsPage {}
+
+const TOC_WIDTH: f32 = 200.;
+
+impl Render for SettingsPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = Theme::of(cx);
-        let body = match self.tab {
-            Tab::General => general::general(self, &t, cx).into_any_element(),
-            Tab::Appearance => general::appearance(self, &t, cx).into_any_element(),
-            Tab::Diff => general::diff(self, &t, cx).into_any_element(),
-            Tab::Claude => claude_tab::render(self, &t, cx).into_any_element(),
-            Tab::Accounts => accounts::render(self, &t, cx).into_any_element(),
-            Tab::KeyBindings => general::key_bindings(&t, cx).into_any_element(),
-        };
+        let query = self.query(cx);
+        let sections = self.visible_sections(cx);
+        let current = sections.get(self.scroll.top_item()).copied();
+        let viewport = self.scroll.bounds().size.height;
+        let last = sections.len().saturating_sub(1);
+        let shortcuts = general::bindings(cx);
+        let body = sections
+            .iter()
+            .enumerate()
+            .map(|(ix, section)| {
+                let content = self.section_content(*section, &query, &shortcuts, &t, cx);
+                tag(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.))
+                        .pb(px(32.))
+                        .when(ix == last, |this| this.min_h(viewport))
+                        .child(
+                            div()
+                                .text_size(px(20.))
+                                .line_height(px(28.))
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .child(section.title()),
+                        )
+                        .children(content),
+                    || format!("section:{}", section.title()),
+                )
+            })
+            .collect::<Vec<_>>();
+        let toc = sections
+            .iter()
+            .enumerate()
+            .map(|(ix, section)| {
+                let section = *section;
+                let selected = current == Some(section);
+                let color = if selected { t.accent_text } else { t.ui.text };
+                let (press, cap) = (t.pressed(t.background), t.ui.cap);
+                tag(
+                    div()
+                        .id(("settings-toc", section as usize))
+                        .flex()
+                        .items_center()
+                        .gap(px(10.))
+                        .h(px(32.))
+                        .px(px(10.))
+                        .rounded(px(8.))
+                        .text_color(color)
+                        .cursor_pointer()
+                        .when(selected, |this| this.bg(press))
+                        .when(!selected, |this| this.hover(move |style| style.bg(cap)))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.scroll.scroll_to_top_of_item(ix);
+                            cx.notify();
+                        }))
+                        .child(glyph_icon(section.icon(), 16., color))
+                        .child(section.title()),
+                    move || format!("toc:{}", section.title()),
+                )
+            })
+            .collect::<Vec<_>>();
+        let header = self.header(&t, cx);
+        let shown = sections
+            .iter()
+            .map(|section| section.title())
+            .collect::<Vec<_>>()
+            .join(",");
         div()
             .id("settings")
+            .key_context(KEY_CONTEXT)
+            .on_action(cx.listener(|_, _: &CloseSettings, _, cx| cx.emit(PageEvent::Close)))
             .relative()
             .flex()
             .flex_col()
@@ -438,87 +534,112 @@ impl Render for SettingsWindow {
             .text_color(t.ui.text)
             .font_family(cx.theme().font_family.clone())
             .text_size(px(13.))
-            .child(self.toolbar(&t, cx))
+            .child(header)
             .child(
-                div().id("settings-body").flex_1().min_h_0().overflow_y_scroll().child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(16.))
-                        .px(px(28.))
-                        .pt(px(18.))
-                        .pb(px(28.))
-                        .child(body),
-                ),
+                div().flex_none().flex().px(px(28.)).pb(px(14.)).child(tag(
+                    filter_field(
+                        &t,
+                        Input::new(&self.search)
+                            .appearance(false)
+                            .bordered(false)
+                            .focus_bordered(false)
+                            .small(),
+                    ),
+                    || "settings:search",
+                )),
+            )
+            .child(tag(div().size_0(), move || format!("settings:shows:{shown}")))
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .child(
+                        div()
+                            .flex_none()
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.))
+                            .w(px(TOC_WIDTH))
+                            .pl(px(20.))
+                            .pr(px(8.))
+                            .pt(px(4.))
+                            .children(toc),
+                    )
+                    .child(tag(
+                        div()
+                            .id("settings-body")
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
+                            .pr(px(28.))
+                            .pt(px(4.))
+                            .children(body)
+                            .when(sections.is_empty(), |this| {
+                                this.child(div().text_color(t.ui.muted).child("No settings found"))
+                            }),
+                        || "settings:body",
+                    )),
             )
     }
 }
 
-impl SettingsWindow {
-    fn toolbar(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
-        let tabs = Tab::ALL.into_iter().map(|tab| {
-            let selected = tab == self.tab;
-            let color = if selected { t.accent_text } else { t.ui.text };
-            let (press, cap) = (t.pressed(t.background), t.ui.cap);
-            tag(
-                div()
-                    .id(("settings-tab", tab as usize))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .flex_none()
-                    .w(px(76.))
-                    .h(px(52.))
-                    .pt(px(8.))
-                    .gap(px(8.))
-                    .rounded(px(8.))
-                    .text_size(px(11.))
-                    .line_height(px(14.))
-                    .text_color(color)
-                    .cursor_pointer()
-                    .when(selected, |this| this.bg(press))
-                    .when(!selected, |this| this.hover(move |style| style.bg(cap)))
-                    .on_click(cx.listener(move |this, _, window, cx| this.select_tab(tab, window, cx)))
-                    .child(glyph_icon(tab.icon(), 16., color))
-                    .child(tab.title()),
-                || format!("tab:{}", tab.title()),
-            )
-        });
+impl SettingsPage {
+    fn section_content(
+        &self,
+        section: Section,
+        query: &str,
+        shortcuts: &[(gpui::SharedString, String)],
+        t: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Vec<gpui::AnyElement> {
+        if section == Section::KeyBindings {
+            let found: Vec<_> = shortcuts
+                .iter()
+                .filter(|(title, _)| entries::matches(query, &[section.title(), title]))
+                .cloned()
+                .collect();
+            return vec![general::key_bindings(t, &found, query.is_empty(), cx).into_any_element()];
+        }
+        ENTRIES
+            .iter()
+            .filter(|entry| entry.section == section && entry.matches(query))
+            .map(|entry| (entry.render)(self, t, cx))
+            .collect()
+    }
+
+    fn header(&self, t: &Theme, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let cap = t.ui.cap;
         div()
             .flex()
-            .flex_col()
+            .items_center()
             .flex_none()
-            .h(px(92.))
-            .bg(t.chrome.glass)
-            .border_b_1()
-            .border_color(t.ui.line)
+            .h(px(52.))
+            .pl(px(88.))
+            .pr(px(14.))
             .window_control_area(WindowControlArea::Drag)
             .child(
                 div()
-                    .h(px(35.))
-                    .pt(px(8.))
-                    .flex()
-                    .justify_center()
-                    .text_size(px(13.))
-                    .line_height(px(24.))
+                    .flex_1()
+                    .text_size(px(15.))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(t.ui.text)
-                    .child(self.tab.title()),
+                    .child("Settings"),
             )
-            .child(div().flex().justify_center().gap(px(4.)).children(tabs))
-    }
-}
-
-pub fn open_window_options(cx: &App) -> gpui::WindowOptions {
-    let bounds = gpui::Bounds::centered(None, gpui::size(px(780.), px(800.)), cx);
-    gpui::WindowOptions {
-        window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
-        titlebar: Some(gpui::TitlebarOptions {
-            title: Some("Settings".into()),
-            appears_transparent: true,
-            traffic_light_position: Some(gpui::point(px(14.), px(14.))),
-        }),
-        window_min_size: Some(gpui::size(px(780.), px(480.))),
-        ..Default::default()
+            .child(tag(
+                div()
+                    .id("settings-close")
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .size(px(28.))
+                    .rounded(px(8.))
+                    .cursor_pointer()
+                    .hover(move |style| style.bg(cap))
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(PageEvent::Close)))
+                    .child(glyph_icon(Glyph::X, 14., t.ui.text2)),
+                || "settings:close",
+            ))
+            .into_any_element()
     }
 }

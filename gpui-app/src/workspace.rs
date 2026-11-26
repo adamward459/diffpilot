@@ -2,6 +2,7 @@ use crate::bench::{self, Bench, Mark};
 use crate::folder_menu::{FolderMenu, FolderMenuEvent, SHORTCUT_SLOTS};
 use crate::remote::SyncKind;
 use crate::repo_view::{Claude, Nav, RepoView};
+use crate::settings::{self, OpenSettings, PageEvent, Section, SettingsPage};
 use diffpilot_core::diff::DiffMode;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::Store;
@@ -9,8 +10,8 @@ use diffpilot_core::viewed::ViewedStore;
 use diffpilot_ui_kit::Glyph;
 use gpui::prelude::*;
 use gpui::{
-    App, Context, Entity, IntoElement, Menu, MenuItem, ParentElement, PathPromptOptions, Render, Styled, Subscription,
-    Window, WindowControlArea, actions, div, px,
+    App, Context, Entity, FocusHandle, IntoElement, Menu, MenuItem, ParentElement, PathPromptOptions, Render, Styled,
+    Subscription, Window, WindowControlArea, actions, div, px,
 };
 use gpui_component::button::Button;
 use gpui_component::{ActiveTheme, Icon, Sizable, StyledExt, h_flex, v_flex};
@@ -81,7 +82,7 @@ pub fn init(cx: &mut App) {
         Menu {
             name: "Diffpilot".into(),
             items: vec![
-                MenuItem::action("Settings…", crate::settings::OpenSettings),
+                MenuItem::action("Settings…", OpenSettings),
                 MenuItem::separator(),
                 MenuItem::action("Quit Diffpilot", Quit),
             ],
@@ -122,6 +123,8 @@ pub struct Workspace {
     views: Vec<(PathBuf, Entity<RepoView>)>,
     review_store: Arc<Store>,
     benching: bool,
+    settings_page: Option<(Entity<SettingsPage>, Subscription)>,
+    focus: FocusHandle,
     _menu_events: Subscription,
 }
 
@@ -147,8 +150,11 @@ impl Workspace {
             views: Vec::new(),
             review_store,
             benching,
+            settings_page: None,
+            focus: cx.focus_handle(),
             _menu_events: menu_events,
         };
+        window.focus(&this.focus);
         if let Some(folder) = folder {
             this.show_folder(folder, window, cx);
         }
@@ -159,6 +165,7 @@ impl Workspace {
     }
 
     fn show_folder(&mut self, folder: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings_page = None;
         let folder = folder.canonicalize().unwrap_or(folder);
         self.settings.remember_folder(&folder);
         match self.views.iter().position(|(path, _)| *path == folder) {
@@ -200,6 +207,10 @@ impl Workspace {
         }
     }
 
+    pub fn settings_page(&self) -> Option<&Entity<SettingsPage>> {
+        self.settings_page.as_ref().map(|(page, _)| page)
+    }
+
     fn active_view(&self) -> Option<&Entity<RepoView>> {
         self.views.first().map(|(_, view)| view)
     }
@@ -227,6 +238,32 @@ impl Workspace {
                 .ok();
         })
         .detach();
+    }
+
+    pub fn open_settings(&mut self, section: Option<Section>, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((page, _)) = &self.settings_page {
+            page.update(cx, |page, cx| page.focus_search(window, cx));
+            return;
+        }
+        let Some(services) = settings::services(cx) else { return };
+        let settings = self.settings.clone();
+        let page = cx.new(|cx| SettingsPage::new(settings, services, section.unwrap_or(Section::General), window, cx));
+        let closing = cx.subscribe_in(&page, window, |this, _, event: &PageEvent, window, cx| match event {
+            PageEvent::Close => this.close_settings(window, cx),
+        });
+        self.settings_page = Some((page, closing));
+        cx.notify();
+    }
+
+    fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.settings_page.take().is_none() {
+            return;
+        }
+        window.focus(&self.focus);
+        if let Some(repo) = self.active_view() {
+            repo.read(cx).focus_sidebar(window, cx);
+        }
+        cx.notify();
     }
 
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
@@ -326,14 +363,16 @@ fn wait_for_bench(workspace: Entity<Workspace>, settle: usize, window: &mut Wind
 
 impl Render for Workspace {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let content = match self.active_view() {
-            Some(repo) => repo.clone().into_any_element(),
-            None => self.empty_state(cx).into_any_element(),
+        let content = match (&self.settings_page, self.active_view()) {
+            (Some((page, _)), _) => page.clone().into_any_element(),
+            (None, Some(repo)) => repo.clone().into_any_element(),
+            (None, None) => self.empty_state(cx).into_any_element(),
         };
         div()
             .id("workspace")
             .size_full()
             .on_action(cx.listener(|this, _: &OpenFolder, window, cx| this.open_folder(window, cx)))
+            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(None, window, cx)))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &UnifiedDiff, _, cx| this.set_diff_mode(DiffMode::Unified, cx)))
             .on_action(cx.listener(|this, _: &SplitDiff, _, cx| this.set_diff_mode(DiffMode::Split, cx)))
@@ -376,6 +415,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &Folder7, window, cx| this.switch_to_index(6, window, cx)))
             .on_action(cx.listener(|this, _: &Folder8, window, cx| this.switch_to_index(7, window, cx)))
             .on_action(cx.listener(|this, _: &Folder9, window, cx| this.switch_to_index(8, window, cx)))
+            .child(div().size_0().track_focus(&self.focus))
             .child(content)
             .when(self.benching, |this| this.child(bench::probe()))
     }

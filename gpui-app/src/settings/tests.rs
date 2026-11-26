@@ -1,5 +1,6 @@
-use super::window::{Load, Op};
+use super::page::{Load, Op};
 use super::*;
+use crate::workspace::{self, Workspace};
 use diffpilot_core::connection::{ClaudeStatus, Login, McpState};
 use diffpilot_core::diff::DiffMode;
 use diffpilot_core::github::auth::{Credentials, GhCli, MemoryStore, TokenSource, TokenStore};
@@ -7,8 +8,11 @@ use diffpilot_core::github::http::{Http, HttpError, Request, Response};
 use diffpilot_core::policy::EditPermission;
 use diffpilot_core::review::{Effort, ModelName};
 use diffpilot_core::settings::{AppearanceChoice, appearance_override};
-use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px, size};
+use diffpilot_core::store::Store;
+use diffpilot_core::viewed::ViewedStore;
+use gpui::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext, point, px};
 use gpui_component::ActiveTheme;
+use gpui_component::Root;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -86,13 +90,11 @@ struct Rig {
     claude: PathBuf,
     settings: Arc<Settings>,
     store: Arc<MemoryStore>,
-    root: Entity<Root>,
-    view: Entity<SettingsWindow>,
-    handle: WindowHandle<Root>,
+    workspace: Entity<Workspace>,
 }
 
 struct Options {
-    tab: Tab,
+    section: Section,
     auth: &'static str,
     gh: Option<&'static str>,
     claude_missing: bool,
@@ -101,7 +103,7 @@ struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
-            tab: Tab::Claude,
+            section: Section::Claude,
             auth: LOGGED_IN,
             gh: None,
             claude_missing: false,
@@ -110,6 +112,19 @@ impl Default for Options {
 }
 
 fn rig(cx: &mut TestAppContext, options: Options) -> (Rig, &mut VisualTestContext) {
+    let (rig, vcx) = closed_rig(cx, &options);
+    vcx.simulate_keystrokes("cmd-,");
+    rig.settle(vcx);
+    rig.wait_until_loaded(vcx);
+    rig.click(vcx, section_selector(options.section));
+    (rig, vcx)
+}
+
+fn section_selector(section: Section) -> &'static str {
+    Box::leak(format!("toc:{}", section.title()).into_boxed_str())
+}
+
+fn closed_rig<'a>(cx: &'a mut TestAppContext, options: &Options) -> (Rig, &'a mut VisualTestContext) {
     let dir = tempfile::tempdir().unwrap();
     let claude = fake_claude(dir.path(), "claude", options.auth);
     let settings = Arc::new(Settings::at(dir.path().join("settings.json")));
@@ -125,22 +140,37 @@ fn rig(cx: &mut TestAppContext, options: Options) -> (Rig, &mut VisualTestContex
         host: "github.com".into(),
         mcp_server: Some(PathBuf::from(MCP_SERVER)),
     };
-    let handle = cx.update(|cx| {
+    cx.update(|cx| {
         gpui_component::init(cx);
+        diffpilot_ui_kit::init(cx);
+        workspace::init(cx);
         init(settings.clone(), services, cx);
-        open(Some(options.tab), cx).expect("the window opens")
     });
-    let root = handle.root(cx).unwrap();
-    let view = cx.update(|cx| cx.global::<Registry>().open.clone().unwrap().1);
-    let vcx = VisualTestContext::from_window(handle.into(), cx).into_mut();
+    let mut workspace = None;
+    let window = cx.add_window(|window, cx| {
+        appearance::install(window, cx);
+        let host = cx.new(|cx| {
+            Workspace::new(
+                settings.clone(),
+                Arc::new(ViewedStore::in_memory()),
+                Arc::new(Store::open_in_memory().unwrap()),
+                None,
+                false,
+                window,
+                cx,
+            )
+        });
+        workspace = Some(host.clone());
+        Root::new(host, window, cx)
+    });
+    let vcx = VisualTestContext::from_window(window.into(), cx).into_mut();
+    vcx.executor().allow_parking();
     let rig = Rig {
         dir,
         claude,
         settings,
         store,
-        root,
-        view,
-        handle,
+        workspace: workspace.unwrap(),
     };
     rig.settle(vcx);
     (rig, vcx)
@@ -148,10 +178,32 @@ fn rig(cx: &mut TestAppContext, options: Options) -> (Rig, &mut VisualTestContex
 
 impl Rig {
     fn settle(&self, cx: &mut VisualTestContext) {
-        let root = self.root.clone();
+        for _ in 0..3 {
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                window.refresh();
+                window.draw(cx).clear();
+            });
+        }
         cx.run_until_parked();
-        cx.draw(point(px(0.), px(0.)), size(px(780.), px(800.)), move |_, _| root);
-        cx.run_until_parked();
+    }
+
+    fn wait_until_loaded(&self, cx: &mut VisualTestContext) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let loaded = self.state(cx, |page| {
+                !matches!(page.claude, Load::Idle | Load::Loading)
+                    && !matches!(page.mcp, Load::Loading)
+                    && !matches!(page.github, Load::Idle | Load::Loading)
+            });
+            if loaded {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "the page did not finish loading");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            self.settle(cx);
+        }
+        self.settle(cx);
     }
 
     fn click(&self, cx: &mut VisualTestContext, selector: &'static str) {
@@ -163,13 +215,40 @@ impl Rig {
         self.settle(cx);
     }
 
-    fn state<T>(&self, cx: &mut VisualTestContext, read: impl FnOnce(&SettingsWindow) -> T) -> T {
-        self.view.read_with(cx, |view, _| read(view))
+    fn page(&self, cx: &mut VisualTestContext) -> Option<Entity<SettingsPage>> {
+        self.workspace
+            .read_with(cx, |workspace, _| workspace.settings_page().cloned())
+    }
+
+    fn state<T>(&self, cx: &mut VisualTestContext, read: impl FnOnce(&SettingsPage) -> T) -> T {
+        let page = self.page(cx).expect("the settings page is open");
+        page.read_with(cx, |page, _| read(page))
+    }
+
+    fn sections(&self, cx: &mut VisualTestContext) -> Vec<Section> {
+        let page = self.page(cx).expect("the settings page is open");
+        page.read_with(cx, |page, cx| page.visible_sections(cx))
+    }
+
+    fn top_section(&self, cx: &mut VisualTestContext) -> Option<Section> {
+        let page = self.page(cx).expect("the settings page is open");
+        page.read_with(cx, |page, cx| {
+            page.visible_sections(cx).get(page.scroll.top_item()).copied()
+        })
+    }
+
+    fn type_query(&self, cx: &mut VisualTestContext, text: &str) {
+        self.click(cx, "settings:search");
+        cx.simulate_keystrokes("cmd-a backspace");
+        if !text.is_empty() {
+            cx.simulate_input(text);
+        }
+        self.settle(cx);
     }
 }
 
 #[gpui::test]
-async fn the_claude_tab_finds_the_cli_reads_the_login_and_the_mcp_install(cx: &mut TestAppContext) {
+async fn the_claude_section_finds_the_cli_reads_the_login_and_the_mcp_install(cx: &mut TestAppContext) {
     let (rig, cx) = rig(cx, Options::default());
     let (claude, mcp) = rig.state(cx, |view| (view.claude.clone(), view.mcp.clone()));
     assert_eq!(
@@ -213,7 +292,7 @@ async fn a_logged_out_cli_and_a_missing_cli_each_show_their_state(cx: &mut TestA
 }
 
 #[gpui::test]
-async fn without_the_cli_the_tab_says_so_and_never_runs_mcp_commands(cx: &mut TestAppContext) {
+async fn without_the_cli_the_section_says_so_and_never_runs_mcp_commands(cx: &mut TestAppContext) {
     let (rig, cx) = rig(
         cx,
         Options {
@@ -230,13 +309,90 @@ async fn without_the_cli_the_tab_says_so_and_never_runs_mcp_commands(cx: &mut Te
 }
 
 #[gpui::test]
-async fn clicking_a_tab_switches_the_page(cx: &mut TestAppContext) {
+async fn clicking_a_toc_item_scrolls_the_list_to_that_section(cx: &mut TestAppContext) {
     let (rig, cx) = rig(cx, Options::default());
-    for tab in Tab::ALL {
-        let selector: &'static str = Box::leak(format!("tab:{}", tab.title()).into_boxed_str());
-        rig.click(cx, selector);
-        assert_eq!(rig.state(cx, |view| view.tab), tab);
+    for section in Section::ALL {
+        rig.click(cx, section_selector(section));
+        let heading = cx
+            .debug_bounds(Box::leak(format!("section:{}", section.title()).into_boxed_str()))
+            .expect("the section is tagged");
+        let body = cx.debug_bounds("settings:body").expect("the list is tagged");
+        let gap = (heading.top() - body.top()).abs();
+        assert!(gap < px(8.), "{section:?} starts {gap:?} below the top of the list");
+        assert_eq!(
+            rig.top_section(cx),
+            Some(section),
+            "the highlighted item follows the scroll"
+        );
     }
+}
+
+#[gpui::test]
+async fn typing_in_the_search_box_filters_the_rows_and_the_section_list(cx: &mut TestAppContext) {
+    let (rig, cx) = rig(cx, Options::default());
+    assert_eq!(rig.sections(cx), Section::ALL.to_vec());
+
+    rig.type_query(cx, "WRAP");
+    assert_eq!(rig.sections(cx), vec![Section::Diff]);
+    assert!(testing_shows(cx, "settings:shows:Diff"));
+
+    rig.type_query(cx, "mcp install");
+    assert_eq!(rig.sections(cx), vec![Section::Claude]);
+
+    rig.type_query(cx, "gh keychain");
+    assert_eq!(rig.sections(cx), vec![Section::Accounts]);
+
+    rig.type_query(cx, "toggle sidebar");
+    assert_eq!(rig.sections(cx), vec![Section::KeyBindings]);
+
+    rig.type_query(cx, "nothing like this");
+    assert_eq!(rig.sections(cx), vec![]);
+    assert!(testing_shows(cx, "settings:shows:"), "the list says nothing was found");
+
+    rig.type_query(cx, "");
+    assert_eq!(rig.sections(cx), Section::ALL.to_vec());
+}
+
+#[gpui::test]
+async fn the_search_box_finds_a_setting_by_its_section_name(cx: &mut TestAppContext) {
+    let (rig, cx) = rig(cx, Options::default());
+    rig.type_query(cx, "diff layout");
+    assert_eq!(rig.sections(cx), vec![Section::Diff]);
+    rig.type_query(cx, "appearance");
+    assert_eq!(rig.sections(cx), vec![Section::Appearance]);
+}
+
+#[gpui::test]
+async fn escape_closes_the_page_and_the_close_button_does_too(cx: &mut TestAppContext) {
+    let (rig, cx) = rig(cx, Options::default());
+    assert!(rig.page(cx).is_some());
+    cx.simulate_keystrokes("escape");
+    rig.settle(cx);
+    assert!(rig.page(cx).is_none(), "escape leaves the page");
+
+    cx.simulate_keystrokes("cmd-,");
+    rig.settle(cx);
+    assert!(rig.page(cx).is_some());
+    rig.click(cx, "settings:close");
+    assert!(rig.page(cx).is_none(), "the close button leaves the page");
+}
+
+#[gpui::test]
+async fn opening_twice_keeps_one_page_and_keeps_the_search_text(cx: &mut TestAppContext) {
+    let (rig, cx) = rig(cx, Options::default());
+    let first = rig.page(cx).unwrap();
+    rig.type_query(cx, "wrap");
+    cx.simulate_keystrokes("cmd-,");
+    rig.settle(cx);
+    assert_eq!(rig.page(cx).unwrap().entity_id(), first.entity_id());
+    assert_eq!(rig.sections(cx), vec![Section::Diff]);
+    cx.simulate_input(" lines");
+    rig.settle(cx);
+    assert_eq!(
+        rig.state(cx, |page| page.search.entity_id()),
+        first.read_with(cx, |p, _| p.search.entity_id())
+    );
+    assert_eq!(first.read_with(cx, |page, cx| page.query(cx)), "wrap lines");
 }
 
 #[gpui::test]
@@ -343,7 +499,9 @@ async fn a_chosen_path_is_validated_by_running_it_before_it_is_saved(cx: &mut Te
     rig.settle(cx);
     let check = |rig: &Rig, cx: &mut VisualTestContext, path: &Path| {
         let path = path.to_path_buf();
-        rig.view.update(cx, |view, cx| view.check_claude_path(path, cx));
+        rig.page(cx)
+            .unwrap()
+            .update(cx, |page, cx| page.check_claude_path(path, cx));
         rig.settle(cx);
     };
     check(&rig, cx, &not_claude);
@@ -370,7 +528,7 @@ async fn the_appearance_choice_is_saved_and_applied_to_the_theme(cx: &mut TestAp
     let (rig, cx) = rig(
         cx,
         Options {
-            tab: Tab::Appearance,
+            section: Section::Appearance,
             ..Options::default()
         },
     );
@@ -390,7 +548,7 @@ async fn the_general_and_diff_switches_write_their_settings(cx: &mut TestAppCont
     let (rig, cx) = rig(
         cx,
         Options {
-            tab: Tab::General,
+            section: Section::General,
             ..Options::default()
         },
     );
@@ -398,7 +556,7 @@ async fn the_general_and_diff_switches_write_their_settings(cx: &mut TestAppCont
     rig.click(cx, "open-last");
     assert!(!rig.settings.open_last_repository());
 
-    rig.click(cx, "tab:Diff");
+    rig.click(cx, "toc:Diff");
     assert!(!rig.settings.wrap_lines());
     rig.click(cx, "wrap-lines");
     assert!(rig.settings.wrap_lines());
@@ -413,21 +571,11 @@ async fn the_general_and_diff_switches_write_their_settings(cx: &mut TestAppCont
 }
 
 #[gpui::test]
-async fn opening_twice_reuses_the_window_and_selects_the_tab(cx: &mut TestAppContext) {
-    let (rig, cx) = rig(cx, Options::default());
-    let second = cx.update(|_, cx| open(Some(Tab::Accounts), cx)).unwrap();
-    assert_eq!(second.window_id(), rig.handle.window_id());
-    assert_eq!(cx.update(|_, cx| cx.windows().len()), 1);
-    rig.settle(cx);
-    assert_eq!(rig.state(cx, |view| view.tab), Tab::Accounts);
-}
-
-#[gpui::test]
 async fn accounts_reads_the_github_state_and_imports_and_signs_out(cx: &mut TestAppContext) {
     let (rig, cx) = rig(
         cx,
         Options {
-            tab: Tab::Accounts,
+            section: Section::Accounts,
             gh: Some("gho_good"),
             ..Options::default()
         },
@@ -453,14 +601,14 @@ async fn a_pasted_token_is_checked_with_github_before_it_is_saved(cx: &mut TestA
     let (rig, cx) = rig(
         cx,
         Options {
-            tab: Tab::Accounts,
+            section: Section::Accounts,
             ..Options::default()
         },
     );
     let paste = |rig: &Rig, cx: &mut VisualTestContext, text: &'static str| {
-        let view = rig.view.clone();
+        let page = rig.page(cx).unwrap();
         cx.update(|window, cx| {
-            view.read(cx)
+            page.read(cx)
                 .token
                 .clone()
                 .update(cx, |input, cx| input.set_value(text, window, cx))
@@ -489,11 +637,10 @@ async fn key_bindings_lists_the_shortcuts_the_app_registers(cx: &mut TestAppCont
     let (_rig, cx) = rig(
         cx,
         Options {
-            tab: Tab::KeyBindings,
+            section: Section::KeyBindings,
             ..Options::default()
         },
     );
-    cx.update(|_, cx| crate::workspace::init(cx));
     let list = cx.update(|_, cx| general::bindings(cx));
     let has = |title: &str, keys: &str| list.iter().any(|(t, k)| t.as_ref() == title && k == keys);
     assert!(has("Open Folder…", "⌘O"), "{list:?}");
@@ -503,10 +650,15 @@ async fn key_bindings_lists_the_shortcuts_the_app_registers(cx: &mut TestAppCont
 }
 
 #[test]
-fn the_environment_flag_names_a_tab() {
-    assert_eq!(Tab::parse("claude"), Some(Tab::Claude));
-    assert_eq!(Tab::parse("Key Bindings"), Some(Tab::KeyBindings));
-    assert_eq!(Tab::parse("key-bindings"), Some(Tab::KeyBindings));
-    assert_eq!(Tab::parse("1"), Some(Tab::General));
-    assert_eq!(Tab::parse(" "), None);
+fn the_environment_flag_names_a_section() {
+    assert_eq!(Section::parse("claude"), Some(Section::Claude));
+    assert_eq!(Section::parse("Key Bindings"), Some(Section::KeyBindings));
+    assert_eq!(Section::parse("key-bindings"), Some(Section::KeyBindings));
+    assert_eq!(Section::parse("1"), Some(Section::General));
+    assert_eq!(Section::parse(" "), None);
+}
+
+fn testing_shows(cx: &mut VisualTestContext, selector: &str) -> bool {
+    cx.debug_bounds(Box::leak(selector.to_owned().into_boxed_str()))
+        .is_some()
 }

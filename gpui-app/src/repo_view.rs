@@ -35,8 +35,8 @@ use diffpilot_ui_kit::components::{
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{
-    App, Context, Corner, Entity, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
-    Render, SharedString, Styled, Subscription, Task, Window, WindowControlArea, div, px,
+    App, Context, Corner, Entity, Focusable, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement,
+    Pixels, Render, SharedString, Styled, Subscription, Task, Window, WindowControlArea, div, px,
 };
 use gpui_component::{ActiveTheme, Icon, InteractiveElementExt as _, StyledExt, h_flex, v_flex};
 use std::cell::Cell;
@@ -399,6 +399,12 @@ impl RepoView {
 
     pub fn run_remote(&mut self, kind: SyncKind, cx: &mut Context<Self>) {
         self.remote.update(cx, |remote, cx| remote.run(kind, cx));
+    }
+
+    pub fn focus_sidebar(&self, window: &mut Window, cx: &App) {
+        if let Some(session) = &self.session {
+            window.focus(&session.sidebar.focus_handle(cx));
+        }
     }
 
     pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {

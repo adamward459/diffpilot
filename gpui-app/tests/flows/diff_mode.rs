@@ -1,4 +1,4 @@
-use diffpilot::settings::Tab;
+use diffpilot::settings::Section;
 use diffpilot::testing::{canned_claude, click, fixture, open_repo, open_settings, shows};
 use diffpilot_core::diff::DiffMode;
 use diffpilot_core::settings::Settings;
@@ -9,7 +9,7 @@ use std::sync::Arc;
 #[gpui::test]
 fn the_diff_mode_chosen_in_settings_applies_to_every_session_of_a_repo_opened_after(app: &mut TestAppContext) {
     let settings = Arc::new(Settings::in_memory());
-    let settings_cx = open_settings(app, settings.clone(), Tab::Diff);
+    let settings_cx = open_settings(app, None, settings.clone(), Section::Diff);
 
     assert_eq!(settings.diff_mode(), DiffMode::Unified);
     click(settings_cx, "layout:Split");
