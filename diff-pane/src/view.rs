@@ -9,7 +9,9 @@ use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use diffpilot_review_ui::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange};
 use diffpilot_ui_kit::Glyph;
-use diffpilot_ui_kit::components::{BadgeTone, Button, ChipTone, Look, State, chip_label, status_badge, viewed_toggle};
+use diffpilot_ui_kit::components::{
+    BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, label_segment, status_badge, viewed_toggle,
+};
 use diffpilot_ui_kit::{Theme, painted};
 use gpui::ClipboardItem;
 use gpui::{
@@ -617,6 +619,7 @@ impl DiffPane {
             .cursor_pointer()
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle_collapsed(&collapse_path, cx)))
             .child(painted::chevron(!collapsed, 12.0, theme.diff.muted));
+        let nothing = |_: &ClickEvent, _: &mut Window, _: &mut gpui::App| {};
         let id = if pinned { "pinned-header" } else { "file-header" };
         let left = div()
             .flex()
@@ -649,6 +652,41 @@ impl DiffPane {
                     .contains(&diff.path)
                     .then(|| chip_label(theme, "Uncommitted", ChipTone::Amber).mr(px(10.0))),
             )
+            .child(label_segment(
+                theme,
+                if pinned { "pinned-edit-mode" } else { "edit-mode" },
+                &[("Diff", true), ("Edit", false)],
+                0,
+            ))
+            .child(div().w(px(6.0)))
+            .child(bar_button(
+                theme,
+                "file-comment",
+                Glyph::MessageSquarePlus,
+                "Comment on file",
+                false,
+                false,
+                nothing,
+            ))
+            .child(bar_button(
+                theme,
+                "file-open",
+                Glyph::ExternalLink,
+                "Open in editor",
+                false,
+                false,
+                nothing,
+            ))
+            .child(bar_button(
+                theme,
+                "file-more",
+                Glyph::Ellipsis,
+                "More",
+                false,
+                false,
+                nothing,
+            ))
+            .child(div().w(px(8.0)))
             .child(
                 viewed_toggle(
                     theme,
@@ -688,6 +726,8 @@ impl DiffPane {
             .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(patch.clone()))
             }));
+        let action =
+            |id: &'static str, label: &'static str| Button::new(id).label(label).look(Look::Plain).disabled(true);
         let bar = div()
             .group("hunk-bar")
             .flex()
@@ -708,7 +748,12 @@ impl DiffPane {
                     .invisible()
                     .group_hover("hunk-bar", |style| style.visible())
                     .font(self.fonts.ui.clone())
-                    .child(copy),
+                    .flex()
+                    .gap(px(4.0))
+                    .child(action("hunk-stage", "Stage Hunk"))
+                    .child(action("hunk-revert", "Revert\u{2026}"))
+                    .child(copy)
+                    .child(action("hunk-ask", "Ask Claude")),
             );
         match glass {
             Some(glass) => bar.border_b_1().border_color(theme.diff.line).bg(glass),

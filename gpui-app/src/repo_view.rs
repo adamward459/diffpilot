@@ -153,7 +153,18 @@ impl Claude {
 }
 
 fn home_relative(path: &std::path::Path) -> String {
-    relative_to(path, std::env::var_os("HOME").as_deref().map(std::path::Path::new))
+    shorten(&relative_to(
+        path,
+        std::env::var_os("HOME").as_deref().map(std::path::Path::new),
+    ))
+}
+
+fn shorten(path: &str) -> String {
+    let parts: Vec<&str> = path.split('/').collect();
+    match parts.as_slice() {
+        [first, .., prev, last] if parts.len() > 4 => format!("{first}/\u{2026}/{prev}/{last}"),
+        _ => path.to_string(),
+    }
 }
 
 fn relative_to(path: &std::path::Path, home: Option<&std::path::Path>) -> String {
@@ -824,6 +835,24 @@ impl RepoView {
                     )
                     .child(threads.to_string()),
             )
+            .child(bar_button(
+                &tokens,
+                "thread-previous",
+                Glyph::ChevronUp,
+                "Previous thread",
+                false,
+                false,
+                nothing,
+            ))
+            .child(bar_button(
+                &tokens,
+                "thread-next",
+                Glyph::ChevronDown,
+                "Next thread",
+                false,
+                false,
+                nothing,
+            ))
             .child(div().w(px(4.)))
             .child(self.diff_mode_switch(cx))
             .child(self.wrap_button(cx))
@@ -882,11 +911,19 @@ impl RepoView {
                 .px(px(6.))
                 .child(session.pill.clone())
         });
-        let activity = self
-            .branch_status
-            .as_ref()
-            .filter(|status| status.upstream.is_some())
-            .map(|status| activity_capsule(&tokens, status.ahead, status.behind));
+        let activity = self.branch_status.as_ref().map(|status| {
+            let counts = status.upstream.is_some().then_some((status.ahead, status.behind));
+            activity_capsule(&tokens, counts)
+        });
+        let inspector = bar_button(
+            &tokens,
+            "toggle-inspector",
+            Glyph::PanelRight,
+            "Inspector",
+            false,
+            false,
+            |_, _, _| {},
+        );
         let drag = drag_region(&self.should_move);
         let leading = (!self.sidebar_open).then(|| sidebar_toggle(cx));
         drag(
@@ -933,6 +970,7 @@ impl RepoView {
         .children(control)
         .child(div().flex_1())
         .children(activity)
+        .child(inspector)
         .into_any_element()
     }
 }
@@ -1072,6 +1110,8 @@ mod tests {
         let home = Some(Path::new("/Users/me"));
         assert_eq!(relative_to(Path::new("/Users/me/code/app"), home), "~/code/app");
         assert_eq!(relative_to(Path::new("/Users/me"), home), "~");
+        assert_eq!(shorten("~/a/b/c/d/e"), "~/\u{2026}/d/e");
+        assert_eq!(shorten("~/a/b/c"), "~/a/b/c");
         assert_eq!(relative_to(Path::new("/srv/app"), home), "/srv/app");
         assert_eq!(relative_to(Path::new("/Users/me/app"), None), "/Users/me/app");
     }

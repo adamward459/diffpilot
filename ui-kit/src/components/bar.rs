@@ -200,18 +200,40 @@ pub fn icon_switch(
     )
 }
 
-pub fn activity_capsule(theme: &Theme, ahead: u32, behind: u32) -> Div {
+pub fn activity_capsule(theme: &Theme, counts: Option<(u32, u32)>) -> Div {
     let count = |glyph: Glyph, value: u32| {
         h_flex()
             .gap(px(2.))
             .child(glyph_icon(glyph, 11., theme.ui.muted))
             .child(value.to_string())
     };
-    super::glass::capsule(theme, 28.)
+    let capsule = super::glass::capsule(theme, 28.)
         .px(px(10.))
         .gap(px(8.))
         .text_size(px(12.))
-        .text_color(theme.ui.text2)
-        .child(count(Glyph::ArrowUp, ahead))
-        .child(count(Glyph::ArrowDown, behind))
+        .text_color(theme.ui.text2);
+    match counts {
+        Some((ahead, behind)) => capsule
+            .child(count(Glyph::ArrowUp, ahead))
+            .child(count(Glyph::ArrowDown, behind)),
+        None => capsule.text_color(theme.ui.muted).child("No upstream"),
+    }
+}
+
+pub fn label_segment(theme: &Theme, id: &'static str, items: &[(&'static str, bool)], selected: usize) -> Div {
+    let thumb = theme.chrome.segment;
+    glass_surface(h_flex().h(px(22.)).p(px(2.)).gap(px(2.)).rounded_full(), theme).children(
+        items.iter().enumerate().map(|(index, (label, enabled))| {
+            h_flex()
+                .id((id, index))
+                .h_full()
+                .px(px(8.))
+                .rounded_full()
+                .text_size(px(11.5))
+                .text_color(theme.chrome.label)
+                .when(index == selected, |this| this.bg(thumb))
+                .when(!enabled, |this| this.opacity(DISABLED_OPACITY))
+                .child(*label)
+        }),
+    )
 }

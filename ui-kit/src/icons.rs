@@ -48,7 +48,9 @@ glyphs! {
     Columns2 => "columns-2",
     Contrast => "contrast",
     Copy => "copy",
+    Ellipsis => "ellipsis",
     Eye => "eye",
+    ExternalLink => "external-link",
     File => "file",
     FileCode => "file-code",
     FileText => "file-text",
@@ -64,7 +66,9 @@ glyphs! {
     ListTree => "list-tree",
     LoaderCircle => "loader-circle",
     MessageSquare => "message-square",
+    MessageSquarePlus => "message-square-plus",
     PanelLeft => "panel-left",
+    PanelRight => "panel-right",
     Pencil => "pencil",
     Rows2 => "rows-2",
     SlidersHorizontal => "sliders-horizontal",
@@ -75,6 +79,7 @@ glyphs! {
     TextWrap => "text-wrap",
     Triangle => "triangle",
     TriangleAlert => "triangle-alert",
+    Undo2 => "undo-2",
     Users => "users",
 }
 
