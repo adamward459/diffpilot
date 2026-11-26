@@ -49,7 +49,6 @@ pub enum DiffPaneEvent {
     OpenRef(CodeRef),
 }
 
-/// A guide note to show under a line (or under the file header when `line` is `None`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PaneNote {
     pub path: String,
@@ -130,6 +129,7 @@ pub struct DiffPane {
     state: PaneState,
     review: Option<Review>,
     notes: Vec<Note>,
+    note_data: Vec<PaneNote>,
     pending_focus: Option<ThreadId>,
     mouse: Option<(Pixels, Pixels)>,
     origin: (Pixels, Pixels),
@@ -188,6 +188,7 @@ impl DiffPane {
             state: PaneState::new(geometry),
             review: None,
             notes: Vec::new(),
+            note_data: Vec::new(),
             pending_focus: None,
             mouse: None,
             origin: (px(0.0), px(0.0)),
@@ -241,8 +242,11 @@ impl DiffPane {
     }
 
     pub fn set_notes(&mut self, notes: Vec<PaneNote>, window: &mut Window, cx: &mut Context<Self>) {
+        if notes == self.note_data {
+            return;
+        }
         self.notes = notes
-            .into_iter()
+            .iter()
             .map(|note| {
                 let view = cx.new(|_| NoteCard::new(&note.text, note.critical));
                 let opened = cx.subscribe_in(&view, window, |_, _, NoteEvent::Open(code): &NoteEvent, _, cx| {
@@ -259,6 +263,7 @@ impl DiffPane {
                 }
             })
             .collect();
+        self.note_data = notes;
         self.rebuild_blocks(window, cx);
     }
 

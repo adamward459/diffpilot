@@ -28,7 +28,6 @@ pub enum NoteEvent {
     Open(CodeRef),
 }
 
-/// A guide note under a diff line. Normal notes use the Claude color and critical ones the amber.
 pub struct NoteCard {
     inline: Inline,
     critical: bool,

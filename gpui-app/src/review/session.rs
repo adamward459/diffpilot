@@ -10,7 +10,7 @@ use diffpilot_core::review::{ReviewModel, ReviewRun, ReviewSetup, plan_threads, 
 use diffpilot_core::run::{Run, RunId, RunKind, RunState};
 use diffpilot_core::runner::{RunEngine, RunEvent};
 use diffpilot_core::settings::Settings;
-use diffpilot_core::store::{SessionKey, Store};
+use diffpilot_core::store::{SessionId, SessionKey, Store};
 use diffpilot_core::threads::{
     CLAUDE_NAME, ReviewThread, ThreadAnchor, ThreadId, ThreadStatus, ThreadStore, mentions_claude,
 };
@@ -164,6 +164,14 @@ impl ReviewSession {
 
     pub fn host(&self) -> &ReviewHost {
         &self.host
+    }
+
+    pub fn session_key(&self) -> SessionKey {
+        Self::thread_key(&self.host)
+    }
+
+    pub fn session_id(&self) -> SessionId {
+        self.store.session()
     }
 
     pub fn thread(&self, id: ThreadId) -> Option<&ReviewThread> {
