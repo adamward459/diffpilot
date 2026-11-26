@@ -5,7 +5,7 @@ use crate::workspace::{self, Workspace};
 use diffpilot_core::cancel::CancelToken;
 use diffpilot_core::claude::{ReviewError, Reviewer, ScriptedReplier};
 use diffpilot_core::github::auth::{Credentials, GhCli, MemoryStore};
-use diffpilot_core::github::http::{Http, HttpError, Request, Response};
+use diffpilot_core::github::http::{Http, HttpError, Method, Request, Response};
 use diffpilot_core::mcp::McpBridge;
 use diffpilot_core::review::{Finding, ReviewRequest, ReviewResult, Severity};
 use diffpilot_core::runner::{EngineConfig, McpLaunch, RunEngine};
@@ -15,7 +15,7 @@ use diffpilot_core::viewed::ViewedStore;
 use gpui::{AppContext as _, Bounds, Entity, Global, Modifiers, Pixels, TestAppContext, VisualTestContext};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 struct Canned;
 
@@ -170,6 +170,14 @@ struct NoGh;
 impl GhCli for NoGh {
     fn token(&self, _: &str) -> Option<String> {
         None
+    }
+}
+
+struct SignedIn;
+
+impl GhCli for SignedIn {
+    fn token(&self, _: &str) -> Option<String> {
+        Some("test-token".into())
     }
 }
 
@@ -339,4 +347,161 @@ echo '{{"type":"result","subtype":"success","is_error":false,"num_turns":1,"resu
     config.mcp = Some(McpLaunch::new(bridge.clone()));
     cx.update(|cx| cx.set_global(Runs::with_engine(RunEngine::new(config))));
     FakeClaude { work, _bridge: bridge }
+}
+
+const GITHUB_URL: &str = "github.com:o/r.git";
+
+/// A repository on `feature` with an `origin` that looks like GitHub (`github.com:o/r.git`). A script stands in
+/// for ssh and runs git against a bare repository on disk, so fetch, pull and push never touch the network.
+pub struct RemoteFixture {
+    pub dir: tempfile::TempDir,
+    pub repo: PathBuf,
+    pub bare: PathBuf,
+}
+
+pub fn remote_fixture() -> RemoteFixture {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let server = dir.path().join("server");
+    let (bare, repo) = (server.join("o/r.git"), dir.path().join("repo"));
+    for path in [&bare, &repo] {
+        std::fs::create_dir_all(path).expect("mkdir");
+    }
+    let ssh = script(
+        dir.path(),
+        "fakessh",
+        &format!(
+            "for last; do :; done\ncmd=${{last#git-}}\ncd '{}' && eval \"git $cmd\"",
+            server.display()
+        ),
+    );
+    git(&bare, &["init", "-q", "--bare", "-b", "main"]);
+    git(&repo, &["init", "-q", "-b", "main"]);
+    git(&repo, &["config", "core.sshCommand", &ssh.display().to_string()]);
+    write(&repo, "base.txt", "base\n");
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "base"]);
+    git(&repo, &["remote", "add", "origin", GITHUB_URL]);
+    git(&repo, &["push", "-q", "-u", "origin", "main"]);
+    git(&repo, &["checkout", "-q", "-b", "feature"]);
+    write(&repo, "docs/committed.md", "committed\n");
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "committed"]);
+    git(&repo, &["push", "-q", "-u", "origin", "feature"]);
+    RemoteFixture { dir, repo, bare }
+}
+
+impl RemoteFixture {
+    pub fn commit_here(&self, name: &str) {
+        write(&self.repo, name, "local\n");
+        git(&self.repo, &["add", "."]);
+        git(&self.repo, &["commit", "-q", "-m", name]);
+    }
+
+    /// Another clone pushes a commit to `feature`, then this repository fetches it, so it is behind.
+    pub fn commit_on_remote(&self, name: &str) {
+        let other = self.dir.path().join("other");
+        if !other.exists() {
+            git(
+                self.dir.path(),
+                &[
+                    "clone",
+                    "-q",
+                    "-b",
+                    "feature",
+                    &self.bare.display().to_string(),
+                    "other",
+                ],
+            );
+        }
+        write(&other, name, "remote\n");
+        git(&other, &["add", "."]);
+        git(&other, &["commit", "-q", "-m", name]);
+        git(&other, &["push", "-q", "origin", "feature"]);
+        git(&self.repo, &["fetch", "-q", "origin"]);
+    }
+
+    /// Makes `refs/pull/<number>/head` on the remote point at a commit that adds `file` to `main`.
+    pub fn add_pull_request(&self, number: u64, file: &str) {
+        git(&self.repo, &["checkout", "-q", "-b", "pr-scratch", "main"]);
+        write(&self.repo, file, "from the pull request\n");
+        git(&self.repo, &["add", "."]);
+        git(&self.repo, &["commit", "-q", "-m", file]);
+        git(
+            &self.repo,
+            &["push", "-q", "origin", &format!("HEAD:refs/pull/{number}/head")],
+        );
+        git(&self.repo, &["checkout", "-q", "feature"]);
+        git(&self.repo, &["branch", "-q", "-D", "pr-scratch"]);
+    }
+}
+
+const OPEN_PRS: &str = r#"{"data":{"repository":{"pullRequests":{"nodes":[
+ {"id":"PR_479","number":479,"title":"Bulk select in the inbox","url":"https://github.com/o/r/pull/479","state":"OPEN",
+  "isDraft":false,"author":{"login":"jordan-lee"},"baseRefName":"main","headRefName":"feature/bulk-select",
+  "headRefOid":"1111111111111111111111111111111111111111","reviewDecision":"REVIEW_REQUIRED","body":"",
+  "headRepository":{"nameWithOwner":"o/r"},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}},
+ {"id":"PR_482","number":482,"title":"Undo keeps a timer per message","url":"https://github.com/o/r/pull/482","state":"OPEN",
+  "isDraft":false,"author":{"login":"mira"},"baseRefName":"main","headRefName":"feature",
+  "headRefOid":"3f2a91c0d4e5b6a7988776655443322110ffeedd","reviewDecision":"CHANGES_REQUESTED","body":"",
+  "headRepository":{"nameWithOwner":"o/r"},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING"}}}]}}
+]}}}}"#;
+
+/// Answers GitHub's GraphQL and REST calls with canned JSON: two open pull requests (#482 is the head of
+/// `feature`) and the check runs and statuses from core's fixtures.
+pub struct FakeGithub {
+    seen: Mutex<Vec<Request>>,
+}
+
+impl FakeGithub {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self { seen: Mutex::default() })
+    }
+
+    /// The URLs of the POST requests so far, such as a re-run.
+    pub fn posts(&self) -> Vec<String> {
+        let seen = self.seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        seen.iter()
+            .filter(|request| request.method == Method::Post && !request.url.ends_with("/graphql"))
+            .map(|request| request.url.clone())
+            .collect()
+    }
+}
+
+impl Http for FakeGithub {
+    fn send(&self, request: &Request) -> Result<Response, HttpError> {
+        self.seen
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(request.clone());
+        let body = request.body.as_deref().unwrap_or_default();
+        let reply = |status, body: &str| {
+            Ok(Response {
+                status,
+                body: body.to_string(),
+            })
+        };
+        if body.contains("pullRequests(states:OPEN") {
+            reply(200, OPEN_PRS)
+        } else if request.url.contains("/check-runs") {
+            reply(200, include_str!("../../core/tests/fixtures/github/check_runs.json"))
+        } else if request.url.contains("/status") {
+            reply(200, include_str!("../../core/tests/fixtures/github/commit_status.json"))
+        } else if request.method == Method::Post {
+            reply(201, "{}")
+        } else {
+            reply(404, "{}")
+        }
+    }
+}
+
+/// Signs in and installs `http` as the way the app reaches GitHub. Call it before opening a repository.
+pub fn install_github(cx: &mut TestAppContext, http: Arc<dyn Http>) {
+    ready(cx);
+    let services = Services {
+        credentials: Credentials::new(Arc::new(MemoryStore::default()), Arc::new(SignedIn)),
+        http,
+        host: "github.com".into(),
+        mcp_server: None,
+    };
+    cx.update(|cx| settings::init(Arc::new(Settings::in_memory()), services, cx));
 }
