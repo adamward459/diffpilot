@@ -1411,20 +1411,8 @@ impl Render for RepoView {
 
 #[cfg(feature = "testing")]
 impl RepoView {
-    pub fn sidebar(&self) -> Entity<Sidebar> {
-        self.current().sidebar.clone()
-    }
-
     pub fn pane(&self) -> Entity<DiffPane> {
         self.current().pane.clone()
-    }
-
-    pub fn pill(&self) -> Entity<ReviewPill> {
-        self.current().pill.clone()
-    }
-
-    pub fn settings(&self) -> &Arc<Settings> {
-        &self.settings
     }
 
     pub fn guide(&self) -> Entity<GuideSession> {
@@ -1433,10 +1421,6 @@ impl RepoView {
 
     pub fn review(&self) -> Entity<ReviewSession> {
         self.current().review.clone()
-    }
-
-    pub fn viewed_paths(&self, cx: &App) -> HashSet<String> {
-        self.current().guide.read(cx).viewed().clone()
     }
 }
 

@@ -105,7 +105,7 @@ fn legend(theme: &Theme, layout: &Layout) -> Vec<AnyElement> {
 }
 
 fn source_block(theme: &Theme, diagram: &Diagram) -> impl IntoElement {
-    tag(div().id("guide-diagram-source"), "guide-diagram-source")
+    tag(div().id("guide-diagram-source"), || "guide-diagram-source")
         .rounded(px(8.))
         .bg(theme.ui.raised)
         .p(px(10.))
@@ -213,7 +213,7 @@ pub fn diagram_card(id: &str, diagram: &Diagram, window: &mut Window, cx: &mut A
                     .w_full()
                     .max_h(px(MAX_HEIGHT))
                     .overflow_y_scroll()
-                    .child(tag(surface, "guide-diagram-canvas")),
+                    .child(tag(surface, || "guide-diagram-canvas")),
             );
             if matches!(diagram.kind, DiagramKind::Flowchart) && !steps.is_empty() {
                 card = card.child(stepper(id, &theme, diagram, step, &state));
@@ -222,7 +222,7 @@ pub fn diagram_card(id: &str, diagram: &Diagram, window: &mut Window, cx: &mut A
         (parsed, _) => {
             if let Err(note) = parsed {
                 card = card.child(
-                    tag(div().id("guide-diagram-note"), "guide-diagram-note")
+                    tag(div().id("guide-diagram-note"), || "guide-diagram-note")
                         .text_size(px(12.))
                         .text_color(theme.ui.muted)
                         .child(note),
@@ -264,7 +264,7 @@ fn stepper(
                     cx.notify();
                 })
             }),
-            "guide-diagram-previous",
+            || "guide-diagram-previous",
         ))
         .child(
             div()
@@ -287,14 +287,14 @@ fn stepper(
                     cx.notify();
                 })
             }),
-            "guide-diagram-next",
+            || "guide-diagram-next",
         ));
     v_flex()
         .gap(px(6.))
         .child(controls)
         .when_some(step.and_then(|at| diagram.flow.get(at)), |column, current| {
             column.child(
-                tag(div().id("guide-diagram-step-text"), "guide-diagram-step-text")
+                tag(div().id("guide-diagram-step-text"), || "guide-diagram-step-text")
                     .text_size(px(12.5))
                     .text_color(theme.ui.text2)
                     .child(SharedString::from(current.text.clone())),

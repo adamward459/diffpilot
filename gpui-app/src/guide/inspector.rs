@@ -253,7 +253,7 @@ impl Render for GuideInspector {
                     .regular()
                     .label(format!("Next: {title}"))
                     .on_click(move |_, _, cx| forward.update(cx, |guide, cx| guide.next(cx))),
-                "guide-next-chapter",
+                || "guide-next-chapter",
             ));
         }
         actions = actions.child(tag(
@@ -265,7 +265,7 @@ impl Render for GuideInspector {
                     "Mark Viewed and Continue"
                 })
                 .on_click(move |_, _, cx| mark.update(cx, |_, cx| cx.emit(InspectorEvent::MarkViewedAndContinue))),
-            "guide-mark-continue",
+            || "guide-mark-continue",
         ));
         column = column.child(actions);
         div()

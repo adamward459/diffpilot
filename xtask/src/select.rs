@@ -166,7 +166,10 @@ mod tests {
 
     #[test]
     fn a_listed_file_selects_users_of_its_module_not_of_its_whole_feature() {
-        assert_eq!(names("core/src/viewed.rs"), BTreeSet::from(["sidebar", "app-shell"]));
+        assert_eq!(
+            names("core/src/viewed.rs"),
+            BTreeSet::from(["sidebar", "guide", "app-shell"])
+        );
     }
 
     #[test]

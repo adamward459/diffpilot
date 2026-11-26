@@ -100,7 +100,7 @@ impl GuideStage {
                                 .icon(Glyph::Sparkles, 14.)
                                 .label(if retry { "Try Again" } else { "Write Guide" })
                                 .on_click(self.write()),
-                            "guide-write",
+                            || "guide-write",
                         ))
                         .child(
                             div()
@@ -147,7 +147,7 @@ impl GuideStage {
                         .regular()
                         .label("Stop")
                         .on_click(move |_, _, cx| guide.update(cx, |guide, cx| guide.stop(cx))),
-                    "guide-stop",
+                    || "guide-stop",
                 )),
         )
     }
@@ -419,7 +419,7 @@ pub fn banner(guide: &Entity<GuideSession>, tokens: &Theme, cx: &App) -> Option<
     }
     let (keep, rewrite) = (guide.clone(), guide.clone());
     Some(
-        tag(h_flex().id("guide-out-of-date"), "guide-out-of-date")
+        tag(h_flex().id("guide-out-of-date"), || "guide-out-of-date")
             .w_full()
             .gap(px(8.))
             .px(px(12.))
@@ -442,7 +442,7 @@ pub fn banner(guide: &Entity<GuideSession>, tokens: &Theme, cx: &App) -> Option<
                 Button::new("guide-keep-reading")
                     .label("Keep Reading")
                     .on_click(move |_, _, cx| keep.update(cx, |guide, cx| guide.keep_reading(cx))),
-                "guide-keep-reading",
+                || "guide-keep-reading",
             ))
             .child(tag(
                 Button::new("guide-banner-rewrite")
@@ -450,7 +450,7 @@ pub fn banner(guide: &Entity<GuideSession>, tokens: &Theme, cx: &App) -> Option<
                     .icon(Glyph::Sparkles, 12.)
                     .label("Rewrite")
                     .on_click(move |_, _, cx| rewrite.update(cx, |guide, cx| guide.write(cx))),
-                "guide-banner-rewrite",
+                || "guide-banner-rewrite",
             ))
             .into_any_element(),
     )

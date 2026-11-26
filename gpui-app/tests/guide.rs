@@ -2,7 +2,7 @@ use diffpilot::diff_pane::rows::{BlockId, RowKind};
 use diffpilot::guide::session::{GuideRun, Step};
 use diffpilot::repo_view::{Nav, RepoView};
 use diffpilot::runs::Runs;
-use diffpilot::testing::{canned_claude, demo_guide, fixture, open_repo_in, pick_comparison};
+use diffpilot::testing::{canned_claude, demo_guide, fixture, open_repo_in};
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::FileDiff;
 use diffpilot_core::guide::{Diagram, DiagramKind, FlowStep, Guide};
@@ -400,8 +400,12 @@ fn a_rebuilt_session_adopts_the_run_that_is_still_writing(app: &mut TestAppConte
 
     let review = world.view.read_with(cx, |view, _| view.review());
     let original = review.read_with(cx, |review, _| review.host().comparison.clone());
-    pick_comparison(&world.view, Comparison::Staged, cx);
-    pick_comparison(&world.view, original, cx);
+    for comparison in [Comparison::Staged, original] {
+        world
+            .view
+            .update_in(cx, |view, window, cx| view.select_comparison(comparison, window, cx));
+        cx.run_until_parked();
+    }
 
     let guide = world.view.read_with(cx, |view, _| view.guide());
     assert_ne!(guide.entity_id(), first.entity_id(), "the session was rebuilt");

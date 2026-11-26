@@ -62,7 +62,7 @@ pub fn overview_bar(guide: &Entity<GuideSession>, tokens: &Theme, cx: &App) -> S
                 .icon(Glyph::Sparkles, 12.)
                 .label("Rewrite")
                 .on_click(move |_, _, cx| rewrite.update(cx, |guide, cx| guide.write(cx))),
-            "guide-rewrite",
+            || "guide-rewrite",
         ));
     if !empty {
         bar = bar.child(tag(
@@ -71,7 +71,7 @@ pub fn overview_bar(guide: &Entity<GuideSession>, tokens: &Theme, cx: &App) -> S
                 .icon(Glyph::ChevronRight, 11.)
                 .label(if started { "Continue" } else { "Start Reading" })
                 .on_click(move |_, _, cx| start.update(cx, |guide, cx| guide.start_reading(cx))),
-            "guide-start-reading",
+            || "guide-start-reading",
         ));
     }
     bar

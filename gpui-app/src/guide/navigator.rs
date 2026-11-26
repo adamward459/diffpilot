@@ -137,22 +137,25 @@ impl Render for GuideNavigator {
                 .when(!selected, |this| this.hover(|style| style.bg(tokens.hover)))
         };
         list = list.child(
-            tag(row("guide-overview-row", 0, step == Step::Overview), "guide-overview")
-                .on_click(cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(NavigatorEvent::Go(Step::Overview))))
-                .child(
-                    div()
-                        .mt(px(5.))
-                        .child(
-                            Icon::new(Glyph::FileText)
-                                .size(px(15.))
-                                .text_color(if step == Step::Overview {
-                                    tokens.on_accent
-                                } else {
-                                    tokens.chrome.secondary
-                                }),
-                        ),
-                )
-                .child(div().flex_1().child("Overview")),
+            tag(
+                row("guide-overview-row", 0, step == Step::Overview),
+                || "guide-overview",
+            )
+            .on_click(cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(NavigatorEvent::Go(Step::Overview))))
+            .child(
+                div()
+                    .mt(px(5.))
+                    .child(
+                        Icon::new(Glyph::FileText)
+                            .size(px(15.))
+                            .text_color(if step == Step::Overview {
+                                tokens.on_accent
+                            } else {
+                                tokens.chrome.secondary
+                            }),
+                    ),
+            )
+            .child(div().flex_1().child("Overview")),
         );
         for (phase, range) in phase_groups(&guide.reading().chapters) {
             if let Some(phase) = phase {
@@ -204,7 +207,7 @@ impl Render for GuideNavigator {
                     });
                 let mut item = tag(
                     row("guide-chapter-row", index, current).when(dim, |this| this.opacity(0.6)),
-                    format!("guide-chapter-{}", index + 1),
+                    move || format!("guide-chapter-{}", index + 1),
                 )
                 .on_click(
                     cx.listener(move |_, _: &ClickEvent, _, cx| cx.emit(NavigatorEvent::Go(Step::Chapter(index)))),
