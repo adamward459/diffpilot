@@ -893,6 +893,9 @@ impl RepoView {
 
     fn mark_chapter_viewed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = &self.session else { return };
+        if session.viewed.is_none() {
+            return;
+        }
         let guide = session.guide.clone();
         let Some(chapter) = guide.read(cx).chapter() else {
             return;
