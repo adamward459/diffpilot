@@ -20,4 +20,4 @@ pub use form::{
     Row, caption, glyph_icon, grouped, mono_text, note, picker, section, segmented_control, spinner, switch, tag,
 };
 pub use glass::{OnSelect, capsule, filter_field, glass_button, glass_surface, segmented, toggle_capsule};
-pub use interaction::{Fills, State, interactive};
+pub use interaction::{DISABLED_OPACITY, Fills, State, interactive};

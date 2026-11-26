@@ -1,5 +1,6 @@
 use crate::bench::{self, Bench, Mark};
 use crate::folder_menu::{FolderMenu, FolderMenuEvent, SHORTCUT_SLOTS};
+use crate::remote::SyncKind;
 use crate::repo_view::{Claude, RepoView};
 use diffpilot_core::diff::DiffMode;
 use diffpilot_core::settings::Settings;
@@ -25,6 +26,9 @@ actions!(
         ToggleSidebar,
         UnifiedDiff,
         SplitDiff,
+        Fetch,
+        Pull,
+        Push,
         Quit,
         Folder1,
         Folder2,
@@ -52,6 +56,9 @@ pub fn init(cx: &mut App) {
         gpui::KeyBinding::new("ctrl-cmd-8", Folder8, None),
         gpui::KeyBinding::new("ctrl-cmd-9", Folder9, None),
         gpui::KeyBinding::new("ctrl-cmd-s", ToggleSidebar, None),
+        gpui::KeyBinding::new("shift-cmd-f", Fetch, None),
+        gpui::KeyBinding::new("shift-cmd-l", Pull, None),
+        gpui::KeyBinding::new("shift-cmd-u", Push, None),
     ]);
     crate::sidebar::bind_keys(cx);
     crate::review::init(cx);
@@ -68,6 +75,14 @@ pub fn init(cx: &mut App) {
         Menu {
             name: "File".into(),
             items: vec![MenuItem::action("Open Folder…", OpenFolder)],
+        },
+        Menu {
+            name: "Branch".into(),
+            items: vec![
+                MenuItem::action("Fetch", Fetch),
+                MenuItem::action("Pull", Pull),
+                MenuItem::action("Push", Push),
+            ],
         },
         Menu {
             name: "View".into(),
@@ -201,6 +216,12 @@ impl Workspace {
         }
     }
 
+    fn run_remote(&mut self, kind: SyncKind, cx: &mut Context<Self>) {
+        if let Some(repo) = self.active_view() {
+            repo.update(cx, |repo, cx| repo.run_remote(kind, cx));
+        }
+    }
+
     fn set_diff_mode(&mut self, mode: DiffMode, cx: &mut Context<Self>) {
         if let Some(repo) = self.active_view() {
             repo.update(cx, |repo, cx| repo.set_diff_mode(mode, cx));
@@ -291,6 +312,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &UnifiedDiff, _, cx| this.set_diff_mode(DiffMode::Unified, cx)))
             .on_action(cx.listener(|this, _: &SplitDiff, _, cx| this.set_diff_mode(DiffMode::Split, cx)))
+            .on_action(cx.listener(|this, _: &Fetch, _, cx| this.run_remote(SyncKind::Fetch, cx)))
+            .on_action(cx.listener(|this, _: &Pull, _, cx| this.run_remote(SyncKind::Pull, cx)))
+            .on_action(cx.listener(|this, _: &Push, _, cx| this.run_remote(SyncKind::Push, cx)))
             .on_action(cx.listener(|this, _: &Folder1, window, cx| this.switch_to_index(0, window, cx)))
             .on_action(cx.listener(|this, _: &Folder2, window, cx| this.switch_to_index(1, window, cx)))
             .on_action(cx.listener(|this, _: &Folder3, window, cx| this.switch_to_index(2, window, cx)))

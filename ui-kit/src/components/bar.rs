@@ -205,24 +205,12 @@ pub fn icon_switch(
     )
 }
 
-pub fn activity_capsule(theme: &Theme, counts: Option<(u32, u32)>) -> Div {
-    let count = |glyph: Glyph, value: u32| {
-        h_flex()
-            .gap(px(2.))
-            .child(glyph_icon(glyph, 12., theme.ui.muted))
-            .child(value.to_string())
-    };
-    let capsule = super::glass::capsule(theme, 35.)
-        .px(px(12.))
-        .gap(px(8.))
+pub fn activity_capsule(theme: &Theme) -> Div {
+    super::glass::capsule(theme, 35.)
+        .px(px(4.))
+        .gap(px(2.))
         .text_size(px(13.))
-        .text_color(theme.ui.text2);
-    match counts {
-        Some((ahead, behind)) => capsule
-            .child(count(Glyph::ArrowUp, ahead))
-            .child(count(Glyph::ArrowDown, behind)),
-        None => capsule.text_color(theme.ui.muted).child("No upstream"),
-    }
+        .text_color(theme.ui.text2)
 }
 
 pub fn status_dot(color: Hsla) -> Div {

@@ -2,6 +2,7 @@ use crate::comparison_menu::{
     Entry, MenuItem as ComparisonItem, Section, base_glyph, base_sections, base_title, branch_glyph, branch_sections,
     branch_title, branch_tooltip,
 };
+use crate::remote::RemoteMenu;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::refs::Refs;
 use diffpilot_ui_kit::Theme;
@@ -18,12 +19,14 @@ pub fn comparison_control(
     comparison: &Comparison,
     compact: bool,
     select: Select,
+    remote: RemoteMenu,
     tokens: &Theme,
 ) -> impl IntoElement {
     let branch_sections = branch_sections(refs, comparison);
     let base_sections = base_sections(refs, comparison);
     let branch_select = select.clone();
     let base_select = select;
+    let chip = remote.chip_element(tokens);
     capsule(tokens, 35.)
         .px(px(4.))
         .gap(px(4.))
@@ -34,10 +37,15 @@ pub fn comparison_control(
                     segment("comparison-branch", tokens)
                         .icon(branch_glyph(comparison), 16.)
                         .label(branch_title(refs, comparison))
-                        .tooltip(branch_tooltip(comparison)),
+                        .tooltip(branch_tooltip(comparison))
+                        .children(chip),
                     || "comparison-branch",
                 ),
-                move |_, _| menu_sections(&branch_sections, &branch_select),
+                move |_, _| {
+                    let mut sections = menu_sections(&branch_sections, &branch_select);
+                    sections.extend(remote.sections());
+                    sections
+                },
             )
             .min_width(230.),
         )

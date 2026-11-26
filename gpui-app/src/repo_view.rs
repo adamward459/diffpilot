@@ -3,6 +3,7 @@ use crate::comparison_control::{Select, comparison_control};
 use crate::diff_pane::layout::SPLIT_MIN_WIDTH;
 use crate::folder_menu::FolderMenu;
 use crate::pane::{DiffPane, DiffPaneEvent};
+use crate::remote::{RemoteCapsule, RemoteEvent, RemoteMenu, RemoteStatus, SyncKind};
 use crate::review::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
 use crate::sidebar::{LoadedChanges, Sidebar, SidebarEvent};
 use diffpilot_core::changes;
@@ -17,13 +18,12 @@ use diffpilot_core::refs::Refs;
 use diffpilot_core::run::RunKind;
 use diffpilot_core::settings::{self, Settings};
 use diffpilot_core::store::Store;
-use diffpilot_core::sync::{self, BranchStatus};
 use diffpilot_core::tree;
 use diffpilot_core::viewed::{ViewedFiles, ViewedKey, ViewedStore};
 use diffpilot_core::watcher::{self, WatchGuard};
 use diffpilot_ui_kit::components::{
-    BAR_HEIGHT, Button, Crumb, IconSegment, Look, OnSelect, SwitchItem, activity_capsule, bar_button, capsule, crumbs,
-    glyph_icon, icon_switch, jump_bar, status_bar, switch_bar, tag,
+    BAR_HEIGHT, Button, Crumb, IconSegment, Look, OnSelect, SwitchItem, bar_button, capsule, crumbs, glyph_icon,
+    icon_switch, jump_bar, status_bar, switch_bar, tag,
 };
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
@@ -211,7 +211,8 @@ pub struct RepoView {
     claude: Claude,
     viewed_states: HashMap<ViewedKey, Arc<ViewedState>>,
     refs: Option<Refs>,
-    branch_status: Option<BranchStatus>,
+    remote: Entity<RemoteStatus>,
+    remote_capsule: Entity<RemoteCapsule>,
     uncommitted: usize,
     comparison: Option<Comparison>,
     session: Option<Session>,
@@ -226,8 +227,8 @@ pub struct RepoView {
     visible_file: Option<String>,
     watch: Option<WatchGuard>,
     refs_task: Option<Task<()>>,
-    status_task: Option<Task<()>>,
     _watch_task: Option<Task<()>>,
+    _remote_events: Subscription,
 }
 
 impl RepoView {
@@ -247,6 +248,16 @@ impl RepoView {
         window.set_window_title(&folder_name);
         let mode = settings::diff_mode_override().unwrap_or_else(|| settings.diff_mode());
         let wrap = settings.wrap_lines();
+        let remote = cx.new(|cx| RemoteStatus::new(repo.clone(), cx));
+        let remote_capsule = cx.new(|cx| RemoteCapsule::new(remote.clone(), cx));
+        let remote_events = cx.subscribe_in(
+            &remote,
+            window,
+            |this, _, event: &RemoteEvent, window, cx| match event {
+                RemoteEvent::Synced => this.load_refs(window, cx),
+                RemoteEvent::Review(comparison) => this.select_comparison(comparison.clone(), window, cx),
+            },
+        );
         let mut this = Self {
             repo,
             folder_name: folder_name.into(),
@@ -257,7 +268,8 @@ impl RepoView {
             claude,
             viewed_states: HashMap::new(),
             refs: None,
-            branch_status: None,
+            remote,
+            remote_capsule,
             uncommitted: 0,
             comparison: None,
             session: None,
@@ -272,8 +284,8 @@ impl RepoView {
             visible_file: None,
             watch: None,
             refs_task: None,
-            status_task: None,
             _watch_task: None,
+            _remote_events: remote_events,
         };
         cx.observe_global::<crate::settings::SettingsChanged>(|this, cx| this.apply_settings(cx))
             .detach();
@@ -349,6 +361,10 @@ impl RepoView {
         cx.notify();
     }
 
+    pub fn run_remote(&mut self, kind: SyncKind, cx: &mut Context<Self>) {
+        self.remote.update(cx, |remote, cx| remote.run(kind, cx));
+    }
+
     pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_open = !self.sidebar_open;
         cx.notify();
@@ -365,23 +381,10 @@ impl RepoView {
         }));
     }
 
-    fn load_status(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let repo = self.repo.clone();
-        let task = cx.background_spawn(async move { sync::status(&repo).ok() });
-        self.status_task = Some(cx.spawn_in(window, async move |this, cx| {
-            let status = task.await;
-            this.update(cx, |this, cx| {
-                this.branch_status = status;
-                cx.notify();
-            })
-            .ok();
-        }));
-    }
-
     fn apply_refs(&mut self, refs: Refs, comparison: Comparison, window: &mut Window, cx: &mut Context<Self>) {
         self.refs = Some(refs);
         self.comparison = Some(comparison);
-        self.load_status(window, cx);
+        self.remote.update(cx, |remote, cx| remote.refresh(cx));
         if !self.ensure_session(window, cx) {
             self.start_load(window, cx);
         }
@@ -738,7 +741,7 @@ impl RepoView {
             self.load_refs(window, cx);
         } else {
             self.start_load(window, cx);
-            self.load_status(window, cx);
+            self.remote.update(cx, |remote, cx| remote.refresh_status(cx));
         }
     }
 
@@ -970,10 +973,12 @@ impl RepoView {
             view.update(cx, |this, cx| this.select_comparison(next, window, cx))
                 .ok();
         });
+        let remote_menu = RemoteMenu::new(&self.remote, cx);
         let control = match (&self.refs, &self.comparison) {
-            (Some(refs), Some(comparison)) => {
-                Some(comparison_control(refs, comparison, self.compact_toolbar, select, &tokens).into_any_element())
-            }
+            (Some(refs), Some(comparison)) => Some(
+                comparison_control(refs, comparison, self.compact_toolbar, select, remote_menu, &tokens)
+                    .into_any_element(),
+            ),
             _ => None,
         };
         let pill = self.session.as_ref().map(|session| {
@@ -982,10 +987,12 @@ impl RepoView {
                 .px(px(6.))
                 .child(session.pill.clone())
         });
-        let activity = self.branch_status.as_ref().map(|status| {
-            let counts = status.upstream.is_some().then_some((status.ahead, status.behind));
-            activity_capsule(&tokens, counts)
-        });
+        let activity = self
+            .remote
+            .read(cx)
+            .branch()
+            .is_some()
+            .then(|| self.remote_capsule.clone());
         let inspector = bar_button(
             &tokens,
             "toggle-inspector",

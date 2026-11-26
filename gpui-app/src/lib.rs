@@ -5,6 +5,7 @@ pub mod diff_pane;
 mod folder_menu;
 mod format;
 mod pane;
+pub mod remote;
 pub mod repo_view;
 pub mod review;
 pub mod runs;
