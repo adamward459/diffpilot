@@ -183,6 +183,11 @@ mod tests {
     }
 
     #[test]
+    fn a_ui_kit_file_selects_the_feature_that_tests_the_whole_crate() {
+        assert!(names("ui-kit/src/components/form.rs").contains("shared"));
+    }
+
+    #[test]
     fn a_test_file_selects_only_its_owner() {
         assert_eq!(names("gpui-app/tests/flows/viewed.rs"), BTreeSet::from(["app-shell"]));
     }

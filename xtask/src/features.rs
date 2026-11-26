@@ -558,8 +558,9 @@ impl Feature {
         self.tests.iter().any(|t| match t {
             TestSel::Lib { package, module: m } => {
                 *package == home
-                    && m.strip_prefix(module)
-                        .is_some_and(|r| r.is_empty() || r.starts_with("::"))
+                    && (m.is_empty()
+                        || m.strip_prefix(module)
+                            .is_some_and(|r| r.is_empty() || r.starts_with("::")))
             }
             TestSel::Target { .. } => false,
         })
