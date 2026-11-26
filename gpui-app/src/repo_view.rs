@@ -2,6 +2,12 @@ use crate::bench::{Bench, Mark};
 use crate::comparison_control::{Select, comparison_control};
 use crate::diff_pane::layout::SPLIT_MIN_WIDTH;
 use crate::folder_menu::FolderMenu;
+use crate::guide::chrome::{chapter_bar, overview_bar};
+use crate::guide::inspector::{GuideInspector, InspectorEvent};
+use crate::guide::navigator::{GuideNavigator, NavigatorEvent};
+use crate::guide::session::{GuideEvent, GuideRun, GuideSession, Step};
+use crate::guide::stage::{GuideStage, StageEvent, banner};
+use crate::guide::text::CodeRef;
 use crate::pane::{DiffPane, DiffPaneEvent};
 use crate::review::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
 use crate::sidebar::{LoadedChanges, Sidebar, SidebarEvent};
@@ -60,12 +66,18 @@ const NAV_TABS: [SwitchItem; 2] = [
         glyph_color: None,
         label: "Guide",
         hint: "\u{2318}2",
-        enabled: false,
+        enabled: true,
     },
 ];
 const TRAFFIC_LIGHTS: f32 = 96.0;
 
 const DIFF_MODES: [(DiffMode, &str); 2] = [(DiffMode::Unified, "Unified"), (DiffMode::Split, "Split")];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Nav {
+    Files,
+    Guide,
+}
 
 #[derive(Clone, PartialEq)]
 struct SessionKey {
@@ -197,6 +209,10 @@ struct Session {
     pane: Entity<DiffPane>,
     pill: Entity<ReviewPill>,
     review: Entity<ReviewSession>,
+    guide: Entity<GuideSession>,
+    navigator: Entity<GuideNavigator>,
+    stage: Entity<GuideStage>,
+    inspector: Entity<GuideInspector>,
     load_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -216,6 +232,8 @@ pub struct RepoView {
     comparison: Option<Comparison>,
     session: Option<Session>,
     next_session_id: u64,
+    nav: Nav,
+    inspector_open: bool,
     sidebar_open: bool,
     sidebar_width: Pixels,
     resizing: bool,
@@ -262,6 +280,8 @@ impl RepoView {
             comparison: None,
             session: None,
             next_session_id: 0,
+            nav: Nav::Files,
+            inspector_open: true,
             sidebar_open: true,
             sidebar_width: px(IDEAL_SIDEBAR),
             resizing: false,
@@ -434,8 +454,37 @@ impl RepoView {
         };
         pane.update(cx, |pane, cx| pane.set_review(review.clone(), window, cx));
         let pill = cx.new(|cx| ReviewPill::new(review.clone(), window, cx));
+        let guide = {
+            let (settings, store) = (self.settings.clone(), self.review_store.clone());
+            cx.new(|cx| GuideSession::new(review.clone(), settings, store, cx))
+        };
+        let navigator = cx.new(|cx| GuideNavigator::new(guide.clone(), cx));
+        let stage = {
+            let settings = self.settings.clone();
+            cx.new(|cx| GuideStage::new(guide.clone(), settings, cx))
+        };
+        let inspector = cx.new(|cx| GuideInspector::new(guide.clone(), cx));
         self.compact_toolbar = false;
         let subscriptions = vec![
+            cx.subscribe_in(&guide, window, |this, _, _: &GuideEvent, window, cx| {
+                this.sync_guide(window, cx);
+                cx.notify();
+            }),
+            cx.subscribe_in(&navigator, window, |this, _, event: &NavigatorEvent, window, cx| match event {
+                NavigatorEvent::Go(step) => this.go_to(*step, window, cx),
+                NavigatorEvent::Reveal(path) => {
+                    if let Some(session) = &this.session {
+                        session.pane.update(cx, |pane, cx| pane.reveal(path, cx));
+                    }
+                }
+            }),
+            cx.subscribe_in(&stage, window, |this, _, StageEvent::Open(code): &StageEvent, window, cx| {
+                this.open_ref(code, window, cx)
+            }),
+            cx.subscribe_in(&inspector, window, |this, _, event: &InspectorEvent, window, cx| match event {
+                InspectorEvent::Open(code) => this.open_ref(code, window, cx),
+                InspectorEvent::MarkViewedAndContinue => this.mark_chapter_viewed(window, cx),
+            }),
             cx.subscribe_in(&review, window, |this, review, event: &ReviewEvent, _, cx| {
                 if matches!(event, ReviewEvent::ThreadsChanged(change) if !matches!(change, crate::review::ThreadChange::Updated(_))) {
                     this.show_comment_counts(review, cx);
@@ -475,7 +524,7 @@ impl RepoView {
                     DiffPaneEvent::OpenInEditor { path, line } => this.open_in_editor(path, *line, cx),
                     DiffPaneEvent::FirstPaint => Bench::mark_now(cx, Mark::FirstDiffPaint),
                     DiffPaneEvent::ShownMode(_) => cx.notify(),
-                    DiffPaneEvent::OpenRef(_) => {}
+                    DiffPaneEvent::OpenRef(code) => this.open_ref(code, window, cx),
                 },
             ),
         ];
@@ -491,10 +540,15 @@ impl RepoView {
             pane,
             pill,
             review,
+            guide,
+            navigator,
+            stage,
+            inspector,
             load_task: None,
             _subscriptions: subscriptions,
         });
         self.start_load(window, cx);
+        self.sync_guide(window, cx);
         true
     }
 
@@ -630,6 +684,9 @@ impl RepoView {
             session
                 .sidebar
                 .update(cx, |sidebar, cx| sidebar.set_viewed(paths.clone(), cx));
+            session
+                .guide
+                .update(cx, |guide, cx| guide.set_viewed(paths.clone(), cx));
             session.pane.update(cx, |pane, cx| pane.set_viewed(paths, cx));
         }
         state
@@ -681,6 +738,9 @@ impl RepoView {
         session
             .sidebar
             .update(cx, |sidebar, cx| sidebar.set_viewed(paths.clone(), cx));
+        session
+            .guide
+            .update(cx, |guide, cx| guide.set_viewed(paths.clone(), cx));
         session.pane.update(cx, |pane, cx| pane.set_viewed(paths, cx));
     }
 
@@ -713,6 +773,135 @@ impl RepoView {
                 .ok();
         })
         .detach();
+    }
+
+    fn mark_viewed(&mut self, paths: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = &self.session else { return };
+        let Some(state) = session.viewed.clone() else { return };
+        let id = session.id;
+        let fingerprints = session.fingerprints.clone();
+        let task = cx.background_spawn(async move {
+            state.mutate(|files| {
+                let unviewed: Vec<&String> = paths.iter().filter(|path| !files.contains(path)).collect();
+                for path in unviewed {
+                    files.toggle(path, fingerprints.get(path).map(String::as_str));
+                }
+            })
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let (version, paths) = task.await;
+            this.update(cx, |this, cx| this.apply_viewed(id, version, paths, cx))
+                .ok();
+        })
+        .detach();
+    }
+
+    pub fn nav(&self) -> Nav {
+        self.nav
+    }
+
+    pub fn show_nav(&mut self, nav: Nav, window: &mut Window, cx: &mut Context<Self>) {
+        if nav != self.nav {
+            self.nav = nav;
+            self.sync_guide(window, cx);
+            cx.notify();
+        }
+    }
+
+    pub fn toggle_guide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let next = match self.nav {
+            Nav::Files => Nav::Guide,
+            Nav::Guide => Nav::Files,
+        };
+        self.show_nav(next, window, cx);
+    }
+
+    pub fn toggle_inspector(&mut self, cx: &mut Context<Self>) {
+        self.inspector_open = !self.inspector_open;
+        cx.notify();
+    }
+
+    fn chapter_open(&self, cx: &App) -> bool {
+        let Some(session) = &self.session else { return false };
+        let guide = session.guide.read(cx);
+        self.nav == Nav::Guide
+            && guide.chapter().is_some()
+            && guide.stored().is_some()
+            && !matches!(guide.run(), GuideRun::Writing { .. })
+    }
+
+    pub fn step_chapter(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if !self.chapter_open(cx) {
+            return;
+        }
+        if let Some(session) = &self.session {
+            session.guide.update(cx, |guide, cx| match delta {
+                1.. => guide.next(cx),
+                _ => guide.previous(cx),
+            });
+        }
+    }
+
+    fn go_to(&mut self, step: Step, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(session) = &self.session {
+            session.guide.update(cx, |guide, cx| guide.go(step, cx));
+        }
+        self.sync_guide(window, cx);
+    }
+
+    /// Shows the pane the way the guide asks: only the open chapter's files, with its notes under their lines.
+    fn sync_guide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = &self.session else { return };
+        let (filter, notes) = if self.chapter_open(cx) {
+            let guide = session.guide.read(cx);
+            (guide.chapter().map(|chapter| chapter.files.clone()), guide.pane_notes())
+        } else {
+            (None, Vec::new())
+        };
+        session.pane.update(cx, |pane, cx| {
+            pane.set_filter(filter, cx);
+            pane.set_notes(notes, window, cx);
+        });
+    }
+
+    /// Jumps to a `[[path#L12]]` ref: into the chapter that holds the file when the open one does not.
+    fn open_ref(&mut self, code: &CodeRef, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = &self.session else { return };
+        let guide = session.guide.read(cx);
+        let here = guide
+            .chapter()
+            .is_some_and(|chapter| chapter.files.contains(&code.path));
+        let target = guide
+            .reading()
+            .chapters
+            .iter()
+            .position(|chapter| chapter.files.contains(&code.path));
+        let pane = session.pane.clone();
+        if self.nav == Nav::Guide
+            && !here
+            && let Some(index) = target
+        {
+            self.go_to(Step::Chapter(index), window, cx);
+        } else if self.nav == Nav::Guide && target.is_none() {
+            return;
+        }
+        let side = code.side();
+        pane.update(cx, |pane, cx| match code.line {
+            Some(line) => pane.reveal_line(&code.path, side, line, cx),
+            None => pane.reveal(&code.path, cx),
+        });
+    }
+
+    fn mark_chapter_viewed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = &self.session else { return };
+        let guide = session.guide.clone();
+        let Some(chapter) = guide.read(cx).chapter() else {
+            return;
+        };
+        let paths = chapter.files.clone();
+        self.mark_viewed(paths, window, cx);
+        guide.update(cx, |guide, cx| guide.next(cx));
+        self.sync_guide(window, cx);
     }
 
     fn start_watching(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -858,7 +1047,24 @@ impl RepoView {
         crumbs(tokens, items).into_any_element()
     }
 
+    fn guide_jump_bar(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let tokens = Theme::of(cx);
+        let Some(session) = &self.session else {
+            return div().into_any_element();
+        };
+        if !self.chapter_open(cx) {
+            return overview_bar(&session.guide, &tokens, cx).into_any_element();
+        }
+        chapter_bar(&session.guide, self.visible_file.as_deref(), &tokens, cx)
+            .child(self.diff_mode_switch(cx))
+            .child(self.wrap_button(cx))
+            .into_any_element()
+    }
+
     fn jump_bar(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        if self.nav == Nav::Guide {
+            return self.guide_jump_bar(cx);
+        }
         let tokens = Theme::of(cx);
         let threads = self
             .session
@@ -992,9 +1198,9 @@ impl RepoView {
             "toggle-inspector",
             Glyph::PanelRight,
             "Inspector",
-            false,
-            false,
-            |_, _, _| {},
+            self.chapter_open(cx),
+            self.chapter_open(cx) && self.inspector_open,
+            cx.listener(|this, _, _, cx| this.toggle_inspector(cx)),
         );
         let drag = drag_region(&self.should_move);
         let leading = (!self.sidebar_open).then(|| tag(sidebar_toggle(cx), || "toolbar:sidebar-toggle"));
@@ -1061,13 +1267,39 @@ impl Render for RepoView {
         let jump_bar = self.jump_bar(cx);
         let bottom_bar = self.bottom_bar(cx);
 
-        let sidebar_content = match &self.session {
-            Some(session) => session.sidebar.clone().into_any_element(),
-            None => div().flex_1().into_any_element(),
+        let sidebar_content = match (&self.session, self.nav) {
+            (Some(session), Nav::Files) => session.sidebar.clone().into_any_element(),
+            (Some(session), Nav::Guide) => session.navigator.clone().into_any_element(),
+            (None, _) => div().flex_1().into_any_element(),
         };
+        let chapter_open = self.chapter_open(cx);
         let detail_content = match &self.session {
+            Some(session) if self.nav == Nav::Guide && !chapter_open => session.stage.clone().into_any_element(),
+            Some(session) if chapter_open => {
+                let notice = banner(&session.guide, &tokens, cx);
+                v_flex()
+                    .size_full()
+                    .children(notice.map(|notice| div().px(px(16.)).pt(px(12.)).pb(px(4.)).child(notice)))
+                    .child(div().flex_1().min_h_0().child(session.pane.clone()))
+                    .into_any_element()
+            }
             Some(session) => session.pane.clone().into_any_element(),
             None => div().into_any_element(),
+        };
+        let inspector = match &self.session {
+            Some(session) if chapter_open && self.inspector_open => Some(session.inspector.clone()),
+            _ => None,
+        };
+        let selected_nav = match self.nav {
+            Nav::Files => 0,
+            Nav::Guide => 1,
+        };
+        let on_nav: OnSelect = {
+            let view = cx.entity().downgrade();
+            Rc::new(move |index, window, cx| {
+                let nav = if index == 0 { Nav::Files } else { Nav::Guide };
+                view.update(cx, |this, cx| this.show_nav(nav, window, cx)).ok();
+            })
         };
 
         h_flex()
@@ -1137,8 +1369,8 @@ impl Render for RepoView {
                                     &tokens,
                                     "nav-tab",
                                     &NAV_TABS,
-                                    0,
-                                    Rc::new(|_, _, _| {}),
+                                    selected_nav,
+                                    on_nav,
                                 )))
                                 .child(div().flex_1().min_h_0().child(sidebar_content)),
                         )
@@ -1163,13 +1395,50 @@ impl Render for RepoView {
                     .h_full()
                     .child(toolbar)
                     .child(jump_bar)
-                    .child(div().flex_1().min_h_0().child(detail_content))
+                    .child(
+                        h_flex()
+                            .flex_1()
+                            .min_h_0()
+                            .child(div().flex_1().min_w_0().h_full().child(detail_content))
+                            .children(inspector),
+                    )
                     .child(bottom_bar),
             )
     }
 }
 
-#[cfg(test)]
+#[cfg(feature = "testing")]
+impl RepoView {
+    pub fn sidebar(&self) -> Entity<Sidebar> {
+        self.current().sidebar.clone()
+    }
+
+    pub fn pane(&self) -> Entity<DiffPane> {
+        self.current().pane.clone()
+    }
+
+    pub fn pill(&self) -> Entity<ReviewPill> {
+        self.current().pill.clone()
+    }
+
+    pub fn settings(&self) -> &Arc<Settings> {
+        &self.settings
+    }
+
+    pub fn guide(&self) -> Entity<GuideSession> {
+        self.current().guide.clone()
+    }
+
+    pub fn review(&self) -> Entity<ReviewSession> {
+        self.current().review.clone()
+    }
+
+    pub fn viewed_paths(&self, cx: &App) -> HashSet<String> {
+        self.current().guide.read(cx).viewed().clone()
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
 impl RepoView {
     fn current(&self) -> &Session {
         self.session.as_ref().expect("a session")

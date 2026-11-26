@@ -1,6 +1,6 @@
 use crate::bench::{self, Bench, Mark};
 use crate::folder_menu::{FolderMenu, FolderMenuEvent, SHORTCUT_SLOTS};
-use crate::repo_view::{Claude, RepoView};
+use crate::repo_view::{Claude, Nav, RepoView};
 use diffpilot_core::diff::DiffMode;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::Store;
@@ -34,7 +34,13 @@ actions!(
         Folder6,
         Folder7,
         Folder8,
-        Folder9
+        Folder9,
+        ShowFiles,
+        ShowGuide,
+        ToggleGuide,
+        NextChapter,
+        PreviousChapter,
+        ToggleInspector
     ]
 );
 
@@ -52,6 +58,12 @@ pub fn init(cx: &mut App) {
         gpui::KeyBinding::new("ctrl-cmd-8", Folder8, None),
         gpui::KeyBinding::new("ctrl-cmd-9", Folder9, None),
         gpui::KeyBinding::new("ctrl-cmd-s", ToggleSidebar, None),
+        gpui::KeyBinding::new("cmd-1", ShowFiles, None),
+        gpui::KeyBinding::new("cmd-2", ShowGuide, None),
+        gpui::KeyBinding::new("alt-cmd-0", ToggleInspector, None),
+        gpui::KeyBinding::new("g", ToggleGuide, Some("!Input")),
+        gpui::KeyBinding::new("]", NextChapter, Some("!Input")),
+        gpui::KeyBinding::new("[", PreviousChapter, Some("!Input")),
     ]);
     crate::sidebar::bind_keys(cx);
     crate::review::init(cx);
@@ -76,6 +88,10 @@ pub fn init(cx: &mut App) {
                 MenuItem::separator(),
                 MenuItem::action("Unified Diff", UnifiedDiff),
                 MenuItem::action("Split Diff", SplitDiff),
+                MenuItem::separator(),
+                MenuItem::action("Show Files", ShowFiles),
+                MenuItem::action("Show Guide", ShowGuide),
+                MenuItem::action("Toggle Inspector", ToggleInspector),
             ],
         },
     ]);
@@ -201,6 +217,12 @@ impl Workspace {
         }
     }
 
+    fn show_nav(&mut self, nav: Nav, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(repo) = self.active_view() {
+            repo.update(cx, |repo, cx| repo.show_nav(nav, window, cx));
+        }
+    }
+
     fn set_diff_mode(&mut self, mode: DiffMode, cx: &mut Context<Self>) {
         if let Some(repo) = self.active_view() {
             repo.update(cx, |repo, cx| repo.set_diff_mode(mode, cx));
@@ -291,6 +313,28 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &UnifiedDiff, _, cx| this.set_diff_mode(DiffMode::Unified, cx)))
             .on_action(cx.listener(|this, _: &SplitDiff, _, cx| this.set_diff_mode(DiffMode::Split, cx)))
+            .on_action(cx.listener(|this, _: &ShowFiles, window, cx| this.show_nav(Nav::Files, window, cx)))
+            .on_action(cx.listener(|this, _: &ShowGuide, window, cx| this.show_nav(Nav::Guide, window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleGuide, window, cx| {
+                if let Some(repo) = this.active_view() {
+                    repo.update(cx, |repo, cx| repo.toggle_guide(window, cx));
+                }
+            }))
+            .on_action(cx.listener(|this, _: &NextChapter, _, cx| {
+                if let Some(repo) = this.active_view() {
+                    repo.update(cx, |repo, cx| repo.step_chapter(1, cx));
+                }
+            }))
+            .on_action(cx.listener(|this, _: &PreviousChapter, _, cx| {
+                if let Some(repo) = this.active_view() {
+                    repo.update(cx, |repo, cx| repo.step_chapter(-1, cx));
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ToggleInspector, _, cx| {
+                if let Some(repo) = this.active_view() {
+                    repo.update(cx, |repo, cx| repo.toggle_inspector(cx));
+                }
+            }))
             .on_action(cx.listener(|this, _: &Folder1, window, cx| this.switch_to_index(0, window, cx)))
             .on_action(cx.listener(|this, _: &Folder2, window, cx| this.switch_to_index(1, window, cx)))
             .on_action(cx.listener(|this, _: &Folder3, window, cx| this.switch_to_index(2, window, cx)))
