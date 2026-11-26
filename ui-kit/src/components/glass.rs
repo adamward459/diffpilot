@@ -19,13 +19,14 @@ fn glass_fills(theme: &Theme, rest: gpui::Hsla) -> Fills {
 
 pub fn glass_surface(row: Div, theme: &Theme) -> Div {
     row.items_center()
-        .bg(theme.ui.cap)
+        .bg(theme.chrome.glass)
         .border_1()
-        .border_color(theme.ui.cap_border)
+        .border_color(theme.chrome.glass_border)
+        .shadow(theme.glass_shadow())
 }
 
 pub fn capsule(theme: &Theme, height: f32) -> Div {
-    glass_surface(h_flex().h(px(height)).flex_shrink_0().rounded(px(6.)), theme)
+    glass_surface(h_flex().h(px(height)).flex_shrink_0().rounded_full(), theme)
 }
 
 pub fn filter_field(theme: &Theme, input: impl IntoElement) -> Div {
@@ -36,7 +37,7 @@ pub fn filter_field(theme: &Theme, input: impl IntoElement) -> Div {
             .h(px(28.))
             .px(px(10.))
             .gap(px(6.))
-            .rounded(px(6.)),
+            .rounded_full(),
         theme,
     )
     .child(
@@ -63,11 +64,11 @@ pub fn glass_button(
             press: theme.lifted(theme.accent, true),
         }
     } else {
-        glass_fills(theme, theme.ui.cap)
+        glass_fills(theme, theme.chrome.glass)
     };
     interactive(
         glass_surface(
-            h_flex().size(px(28.)).flex_shrink_0().justify_center().rounded(px(6.)),
+            h_flex().size(px(28.)).flex_shrink_0().justify_center().rounded_full(),
             theme,
         )
         .id(id)
@@ -105,11 +106,11 @@ pub fn segmented(
             div()
                 .id(*title)
                 .h(px(height - 8.))
-                .px(px(10.))
+                .px(px(11.))
                 .flex()
                 .items_center()
-                .rounded(px(4.))
-                .text_size(px(12.))
+                .rounded_full()
+                .text_size(px(13.))
                 .text_color(theme.chrome.label)
                 .cursor_pointer(),
             fills,
@@ -118,7 +119,7 @@ pub fn segmented(
         .on_click(move |_, window, cx| on_select(index, window, cx))
         .child(SharedString::from(*title))
     });
-    capsule(theme, height).id(id).px(px(2.)).children(segments)
+    capsule(theme, height).id(id).px(px(4.)).children(segments)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -132,7 +133,7 @@ pub fn toggle_capsule(
     theme: &Theme,
     click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
-    let rest = if on { theme.chrome.segment } else { theme.ui.cap };
+    let rest = if on { theme.chrome.segment } else { theme.chrome.glass };
     interactive(
         capsule(theme, height)
             .id(id)

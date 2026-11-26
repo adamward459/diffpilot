@@ -202,6 +202,7 @@ impl Sidebar {
         self.rebuild_rows(cx);
     }
 
+    #[cfg(test)]
     fn set_mode(&mut self, mode: SidebarMode, cx: &mut Context<Self>) {
         self.mode = mode;
         self.rebuild_rows(cx);
@@ -308,11 +309,12 @@ impl Sidebar {
         let tokens = Theme::of(cx);
         let uncommitted = self.filter.only_uncommitted;
         let hide_viewed = self.filter.hide_viewed;
-        let list_mode = self.mode == SidebarMode::List;
         h_flex()
+            .h(px(44.))
             .gap(px(6.))
             .px(px(10.))
-            .py(px(6.))
+            .border_y_1()
+            .border_color(tokens.ui.line)
             .child(filter_field(
                 &tokens,
                 Input::new(&self.filter_input)
@@ -339,30 +341,12 @@ impl Sidebar {
                 &tokens,
                 cx.listener(|this, _, _, cx| this.toggle_hide_viewed(cx)),
             ))
-            .child(glass_button(
-                "mode-button",
-                if list_mode { Glyph::List } else { Glyph::ListTree },
-                if list_mode { "Switch to tree" } else { "Switch to list" },
-                false,
-                State::Normal,
-                &tokens,
-                cx.listener(move |this, _, _, cx| {
-                    this.set_mode(
-                        if list_mode {
-                            SidebarMode::Tree
-                        } else {
-                            SidebarMode::List
-                        },
-                        cx,
-                    )
-                }),
-            ))
             .into_any_element()
     }
 }
 
 impl Render for Sidebar {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let empty_text: Option<&'static str> = (!self.is_loading && self.rows.is_empty()).then(|| {
             if self.filter.is_active() {
@@ -373,7 +357,6 @@ impl Render for Sidebar {
         });
         let muted = theme.muted_foreground;
         let count = self.rows.len();
-        let focused = self.focus.contains_focused(window, cx);
         let header = self.summary_header(cx);
         let filter_row = self.filter_row(cx);
 
@@ -384,7 +367,7 @@ impl Render for Sidebar {
                 range
                     .filter_map(|index| {
                         let row = this.rows.get(index)?;
-                        Some(this.render_row(index, row, focused, cx))
+                        Some(this.render_row(index, row, cx))
                     })
                     .collect()
             }),
@@ -429,10 +412,10 @@ impl Render for Sidebar {
 }
 
 impl Sidebar {
-    fn render_row(&self, index: usize, row: &Row, focused: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn render_row(&self, index: usize, row: &Row, cx: &mut Context<Self>) -> AnyElement {
         let tokens = Theme::of(cx);
         let selected = self.selected.as_deref() == Some(row.path.as_str());
-        let on_accent = selected && focused;
+        let on_accent = selected;
         let primary = if on_accent {
             tokens.on_accent
         } else {
@@ -448,11 +431,7 @@ impl Sidebar {
         } else {
             tokens.chrome.tertiary
         };
-        let selection_bg = if on_accent {
-            cx.theme().list_active
-        } else {
-            tokens.chrome.segment
-        };
+        let selection_bg = tokens.accent;
         let hover_bg = tokens.hover;
         let path = row.path.clone();
         let depth = row.depth as f32;

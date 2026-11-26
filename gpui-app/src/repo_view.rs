@@ -8,23 +8,27 @@ use diffpilot_core::claude::{
 };
 use diffpilot_core::comparison::{self, Comparison};
 use diffpilot_core::diff::{self, DiffMode, FileDiff};
+use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::refs::Refs;
 use diffpilot_core::run::RunKind;
 use diffpilot_core::settings::{self, Settings};
+use diffpilot_core::sync::{self, BranchStatus};
 use diffpilot_core::tree;
 use diffpilot_core::viewed::{ViewedFiles, ViewedKey, ViewedStore};
 use diffpilot_core::watcher::{self, WatchGuard};
 use diffpilot_diff_pane::layout::SPLIT_MIN_WIDTH;
 use diffpilot_review_ui::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
-use diffpilot_ui_kit::components::{Button, Look, OnSelect, State, capsule, segmented, toggle_capsule};
+use diffpilot_ui_kit::components::{
+    BAR_HEIGHT, Button, Crumb, IconSegment, Look, OnSelect, SwitchItem, activity_capsule, bar_button, capsule, crumbs,
+    glyph_icon, icon_switch, jump_bar, status_bar, switch_bar,
+};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{
     Context, Entity, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render,
     SharedString, Styled, Subscription, Task, Window, WindowControlArea, div, px,
 };
-use gpui_component::tooltip::Tooltip;
-use gpui_component::{ActiveTheme, InteractiveElementExt as _, StyledExt, h_flex, v_flex};
+use gpui_component::{ActiveTheme, Icon, InteractiveElementExt as _, StyledExt, h_flex, v_flex};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -33,11 +37,29 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-const MIN_SIDEBAR: f32 = 240.0;
-const IDEAL_SIDEBAR: f32 = 272.0;
-const MAX_SIDEBAR: f32 = 480.0;
+const PANEL_INSET: f32 = 8.0;
+const PANEL_RADIUS: f32 = 20.0;
+const MIN_SIDEBAR: f32 = 240.0 + PANEL_INSET;
+const IDEAL_SIDEBAR: f32 = 272.0 + PANEL_INSET;
+const MAX_SIDEBAR: f32 = 480.0 + PANEL_INSET;
 const TOOLBAR_HEIGHT: f32 = 52.0;
-const GLASS_HEIGHT: f32 = 28.0;
+const GLASS_HEIGHT: f32 = 35.0;
+const NAV_TABS: [SwitchItem; 2] = [
+    SwitchItem {
+        glyph: Glyph::File,
+        glyph_color: None,
+        label: "Files",
+        hint: "\u{2318}1",
+        enabled: true,
+    },
+    SwitchItem {
+        glyph: Glyph::BookOpen,
+        glyph_color: None,
+        label: "Guide",
+        hint: "\u{2318}2",
+        enabled: false,
+    },
+];
 const TRAFFIC_LIGHTS: f32 = 96.0;
 
 const DIFF_MODES: [(DiffMode, &str); 2] = [(DiffMode::Unified, "Unified"), (DiffMode::Split, "Split")];
@@ -131,7 +153,18 @@ impl Claude {
 }
 
 fn home_relative(path: &std::path::Path) -> String {
-    relative_to(path, std::env::var_os("HOME").as_deref().map(std::path::Path::new))
+    shorten(&relative_to(
+        path,
+        std::env::var_os("HOME").as_deref().map(std::path::Path::new),
+    ))
+}
+
+fn shorten(path: &str) -> String {
+    let parts: Vec<&str> = path.split('/').collect();
+    match parts.as_slice() {
+        [first, .., prev, last] if parts.len() > 4 => format!("{first}/\u{2026}/{prev}/{last}"),
+        _ => path.to_string(),
+    }
 }
 
 fn relative_to(path: &std::path::Path, home: Option<&std::path::Path>) -> String {
@@ -172,6 +205,8 @@ pub struct RepoView {
     claude: Claude,
     viewed_states: HashMap<ViewedKey, Arc<ViewedState>>,
     refs: Option<Refs>,
+    branch_status: Option<BranchStatus>,
+    uncommitted: usize,
     comparison: Option<Comparison>,
     session: Option<Session>,
     next_session_id: u64,
@@ -185,6 +220,7 @@ pub struct RepoView {
     visible_file: Option<String>,
     watch: Option<WatchGuard>,
     refs_task: Option<Task<()>>,
+    status_task: Option<Task<()>>,
     _watch_task: Option<Task<()>>,
 }
 
@@ -212,6 +248,8 @@ impl RepoView {
             claude,
             viewed_states: HashMap::new(),
             refs: None,
+            branch_status: None,
+            uncommitted: 0,
             comparison: None,
             session: None,
             next_session_id: 0,
@@ -225,6 +263,7 @@ impl RepoView {
             visible_file: None,
             watch: None,
             refs_task: None,
+            status_task: None,
             _watch_task: None,
         };
         this.load_refs(window, cx);
@@ -278,9 +317,23 @@ impl RepoView {
         }));
     }
 
+    fn load_status(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let repo = self.repo.clone();
+        let task = cx.background_spawn(async move { sync::status(&repo).ok() });
+        self.status_task = Some(cx.spawn_in(window, async move |this, cx| {
+            let status = task.await;
+            this.update(cx, |this, cx| {
+                this.branch_status = status;
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
     fn apply_refs(&mut self, refs: Refs, comparison: Comparison, window: &mut Window, cx: &mut Context<Self>) {
         self.refs = Some(refs);
         self.comparison = Some(comparison);
+        self.load_status(window, cx);
         if !self.ensure_session(window, cx) {
             self.start_load(window, cx);
         }
@@ -365,7 +418,12 @@ impl RepoView {
                 window,
                 |this, _, event: &DiffPaneEvent, window, cx| match event {
                     DiffPaneEvent::ToggleViewed(path) => this.toggle_viewed(path.clone(), window, cx),
-                    DiffPaneEvent::VisibleFile(path) => this.visible_file = Some(path.clone()),
+                    DiffPaneEvent::VisibleFile(path) => {
+                        if this.visible_file.as_deref() != Some(path.as_str()) {
+                            this.visible_file = Some(path.clone());
+                            cx.notify();
+                        }
+                    }
                     DiffPaneEvent::FirstPaint => Bench::mark_now(cx, Mark::FirstDiffPaint),
                     DiffPaneEvent::ShownMode(_) => cx.notify(),
                 },
@@ -471,6 +529,18 @@ impl RepoView {
 
     fn apply_changes(&mut self, id: u64, loaded: LoadedChanges, cx: &mut Context<Self>) {
         Bench::note_stage(cx, "changes_git_and_tree", loaded.elapsed);
+        let uncommitted: HashSet<String> = loaded
+            .changes
+            .iter()
+            .filter(|change| change.is_uncommitted)
+            .map(|change| change.path.clone())
+            .collect();
+        self.uncommitted = uncommitted.len();
+        if let Some(session) = self.session.as_ref() {
+            session
+                .pane
+                .update(cx, |pane, cx| pane.set_uncommitted(uncommitted, cx));
+        }
         if let Some(session) = self.session_mut(id) {
             session
                 .sidebar
@@ -602,6 +672,7 @@ impl RepoView {
             self.load_refs(window, cx);
         } else {
             self.start_load(window, cx);
+            self.load_status(window, cx);
         }
     }
 
@@ -642,45 +713,44 @@ fn sidebar_toggle(cx: &mut Context<RepoView>) -> Button {
 }
 
 impl RepoView {
-    fn segmented(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn diff_mode_switch(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let view = cx.entity().downgrade();
         let on_select: OnSelect = Rc::new(move |index, _, cx| {
             view.update(cx, |this, cx| this.set_diff_mode(DIFF_MODES[index].0, cx))
                 .ok();
         });
-        let titles = DIFF_MODES.map(|(_, title)| title);
         let shown = self
             .session
             .as_ref()
             .map_or(self.mode, |session| session.pane.read(cx).state().shown_mode());
         let selected = DIFF_MODES.iter().position(|(mode, _)| *mode == shown).unwrap_or(0);
-        let control = segmented(
-            "diff-mode",
-            &titles,
-            selected,
-            GLASS_HEIGHT,
-            State::Normal,
-            &Theme::of(cx),
-            on_select,
-        );
-        if shown == self.mode {
-            return control.into_any_element();
-        }
-        let hint = format!("Split view needs a pane at least {} pt wide", SPLIT_MIN_WIDTH as u32);
-        control
-            .tooltip(move |window, cx| Tooltip::new(hint.clone()).build(window, cx))
-            .into_any_element()
+        let split_note = (shown != self.mode)
+            .then(|| format!("Split view needs a pane at least {} pt wide", SPLIT_MIN_WIDTH as u32));
+        let items = DIFF_MODES
+            .iter()
+            .map(|(mode, title)| IconSegment {
+                glyph: if *mode == DiffMode::Unified {
+                    Glyph::Rows2
+                } else {
+                    Glyph::Columns2
+                },
+                tooltip: match (&split_note, mode) {
+                    (Some(note), DiffMode::Split) => note.clone().into(),
+                    _ => (*title).into(),
+                },
+            })
+            .collect();
+        icon_switch(&Theme::of(cx), "diff-mode", items, selected, on_select).into_any_element()
     }
 
     fn wrap_button(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
-        toggle_capsule(
+        bar_button(
+            &Theme::of(cx),
             "toggle-wrap",
             Glyph::TextWrap,
             "Wrap lines",
+            true,
             self.wrap,
-            GLASS_HEIGHT,
-            State::Normal,
-            &Theme::of(cx),
             cx.listener(|this, _, _, cx| {
                 this.wrap = !this.wrap;
                 let wrap = this.wrap;
@@ -691,6 +761,135 @@ impl RepoView {
             }),
         )
         .into_any_element()
+    }
+
+    fn path_crumbs(&self, tokens: &Theme) -> gpui::AnyElement {
+        let Some(path) = self.visible_file.as_deref() else {
+            return div().into_any_element();
+        };
+        let parts: Vec<&str> = path.split('/').collect();
+        let items = parts
+            .iter()
+            .enumerate()
+            .map(|(index, part)| {
+                let last = index + 1 == parts.len();
+                if last {
+                    Crumb {
+                        glyph: Glyph::for_file(part),
+                        color: Some(tokens.tint(file_kind(part).tint())),
+                        label: (*part).to_string().into(),
+                        last,
+                    }
+                } else {
+                    Crumb {
+                        glyph: Glyph::FolderFilled,
+                        color: Some(tokens.chrome.folder),
+                        label: (*part).to_string().into(),
+                        last,
+                    }
+                }
+            })
+            .collect();
+        crumbs(tokens, items).into_any_element()
+    }
+
+    fn jump_bar(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let tokens = Theme::of(cx);
+        let threads = self
+            .session
+            .as_ref()
+            .and_then(|session| session.pane.read(cx).review().cloned())
+            .map_or(0, |review| review.read(cx).thread_count());
+        let nothing = |_: &gpui::ClickEvent, _: &mut Window, _: &mut gpui::App| {};
+        jump_bar(&tokens)
+            .id("jump-bar")
+            .child(bar_button(
+                &tokens,
+                "jump-back",
+                Glyph::ChevronLeft,
+                "Back",
+                false,
+                false,
+                nothing,
+            ))
+            .child(bar_button(
+                &tokens,
+                "jump-forward",
+                Glyph::ChevronRight,
+                "Forward",
+                false,
+                false,
+                nothing,
+            ))
+            .child(div().flex_1().min_w_0().child(self.path_crumbs(&tokens)))
+            .child(
+                h_flex()
+                    .gap(px(3.))
+                    .flex_none()
+                    .text_size(px(13.))
+                    .text_color(tokens.ui.text2)
+                    .child(
+                        Icon::new(Glyph::MessageSquare)
+                            .size(px(14.))
+                            .text_color(tokens.ui.muted),
+                    )
+                    .child(threads.to_string()),
+            )
+            .child(bar_button(
+                &tokens,
+                "thread-previous",
+                Glyph::ChevronUp,
+                "Previous thread",
+                false,
+                false,
+                nothing,
+            ))
+            .child(bar_button(
+                &tokens,
+                "thread-next",
+                Glyph::ChevronDown,
+                "Next thread",
+                false,
+                false,
+                nothing,
+            ))
+            .child(div().w(px(4.)))
+            .child(self.diff_mode_switch(cx))
+            .child(self.wrap_button(cx))
+            .into_any_element()
+    }
+
+    fn bottom_bar(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let tokens = Theme::of(cx);
+        let uncommitted = self.uncommitted;
+        status_bar(&tokens)
+            .id("bottom-bar")
+            .h(px(BAR_HEIGHT))
+            .child(
+                h_flex()
+                    .gap(px(6.))
+                    .opacity(0.6)
+                    .child(glyph_icon(Glyph::SquareTerminal, 14., tokens.ui.muted))
+                    .child("Claude \u{b7} no review yet"),
+            )
+            .child(div().flex_1())
+            .when(uncommitted > 0, |this| {
+                this.child(
+                    h_flex()
+                        .gap(px(5.))
+                        .text_color(tokens.chrome.uncommitted)
+                        .child(glyph_icon(Glyph::Pencil, 13., tokens.chrome.uncommitted))
+                        .child(format!("{uncommitted} uncommitted")),
+                )
+            })
+            .child(
+                h_flex()
+                    .gap(px(4.))
+                    .opacity(0.45)
+                    .child(glyph_icon(Glyph::GitCommit, 14., tokens.ui.muted))
+                    .child("Commit\u{2026}"),
+            )
+            .into_any_element()
     }
 
     fn toolbar(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
@@ -712,25 +911,37 @@ impl RepoView {
                 .px(px(6.))
                 .child(session.pill.clone())
         });
+        let activity = self.branch_status.as_ref().map(|status| {
+            let counts = status.upstream.is_some().then_some((status.ahead, status.behind));
+            activity_capsule(&tokens, counts)
+        });
+        let inspector = bar_button(
+            &tokens,
+            "toggle-inspector",
+            Glyph::PanelRight,
+            "Inspector",
+            false,
+            false,
+            |_, _, _| {},
+        );
         let drag = drag_region(&self.should_move);
         let leading = (!self.sidebar_open).then(|| sidebar_toggle(cx));
-        let segmented = self.segmented(cx);
-        let wrap = self.wrap_button(cx);
         drag(
             h_flex()
                 .id("toolbar")
                 .h(px(TOOLBAR_HEIGHT))
                 .flex_shrink_0()
-                .gap_2()
-                .bg(tokens.chrome.glass)
+                .gap(px(10.))
+                .pr(px(12.))
                 .border_b_1()
-                .border_color(tokens.ui.line),
+                .border_color(cx.theme().border),
         )
         .child(
             h_flex()
-                .flex_1()
-                .min_w_0()
-                .pl(px(if self.sidebar_open { 16. } else { TRAFFIC_LIGHTS }))
+                .min_w(px(110.))
+                .max_w(px(220.))
+                .flex_shrink()
+                .pl(px(if self.sidebar_open { 20. } else { TRAFFIC_LIGHTS }))
                 .gap_2()
                 .children(leading)
                 .child(
@@ -738,7 +949,7 @@ impl RepoView {
                         .min_w_0()
                         .child(
                             div()
-                                .text_size(px(13.))
+                                .text_size(px(15.))
                                 .font_semibold()
                                 .text_color(tokens.ui.text)
                                 .whitespace_nowrap()
@@ -746,7 +957,7 @@ impl RepoView {
                         )
                         .child(
                             div()
-                                .text_size(px(11.))
+                                .text_size(px(12.))
                                 .text_color(tokens.ui.muted)
                                 .whitespace_nowrap()
                                 .overflow_hidden()
@@ -755,17 +966,11 @@ impl RepoView {
                         ),
                 ),
         )
-        .child(h_flex().flex_shrink_0().gap(px(8.)).children(pill).children(control))
-        .child(
-            h_flex()
-                .flex_1()
-                .min_w_0()
-                .pr(px(8.))
-                .justify_end()
-                .gap(px(8.))
-                .child(wrap)
-                .child(segmented),
-        )
+        .children(pill)
+        .children(control)
+        .child(div().flex_1())
+        .children(activity)
+        .child(inspector)
         .into_any_element()
     }
 }
@@ -779,6 +984,8 @@ impl Render for RepoView {
         let drag = drag_region(&self.should_move);
         let toggle = sidebar_toggle(cx);
         let toolbar = self.toolbar(cx);
+        let jump_bar = self.jump_bar(cx);
+        let bottom_bar = self.bottom_bar(cx);
 
         let sidebar_content = match &self.session {
             Some(session) => session.sidebar.clone().into_any_element(),
@@ -810,27 +1017,57 @@ impl Render for RepoView {
             )
             .when(self.sidebar_open, |this| {
                 this.child(
-                    v_flex()
+                    div()
                         .id("sidebar-column")
                         .relative()
                         .w(width)
                         .flex_shrink_0()
                         .h_full()
-                        .bg(tokens.chrome.panel)
-                        .border_r_1()
-                        .border_color(tokens.chrome.panel_border)
+                        .bg(background)
                         .child(
-                            drag(
-                                h_flex()
-                                    .id("sidebar-top")
-                                    .h(px(TOOLBAR_HEIGHT))
-                                    .flex_shrink_0()
-                                    .pl(px(TRAFFIC_LIGHTS))
-                                    .items_center(),
-                            )
-                            .child(toggle),
+                            div()
+                                .absolute()
+                                .top_0()
+                                .bottom_0()
+                                .left_0()
+                                .w(px(PANEL_INSET))
+                                .bg(tokens.chrome.gutter),
                         )
-                        .child(div().flex_1().min_h_0().child(sidebar_content))
+                        .child(
+                            v_flex()
+                                .absolute()
+                                .top(px(PANEL_INSET))
+                                .bottom(px(PANEL_INSET))
+                                .left(px(PANEL_INSET))
+                                .right_0()
+                                .rounded(px(PANEL_RADIUS))
+                                .overflow_hidden()
+                                .bg(tokens.chrome.panel)
+                                .border_1()
+                                .border_color(tokens.chrome.panel_border)
+                                .shadow(tokens.glass_shadow())
+                                .child(
+                                    drag(
+                                        h_flex()
+                                            .id("sidebar-top")
+                                            .h(px(37.))
+                                            .flex_shrink_0()
+                                            .pr(px(14.))
+                                            .justify_end()
+                                            .items_start()
+                                            .pt(px(PANEL_INSET - 1.)),
+                                    )
+                                    .child(toggle),
+                                )
+                                .child(div().px(px(10.)).pb(px(8.)).child(switch_bar(
+                                    &tokens,
+                                    "nav-tab",
+                                    &NAV_TABS,
+                                    0,
+                                    Rc::new(|_, _, _| {}),
+                                )))
+                                .child(div().flex_1().min_h_0().child(sidebar_content)),
+                        )
                         .child(
                             div()
                                 .id("sidebar-handle")
@@ -851,7 +1088,9 @@ impl Render for RepoView {
                     .min_w_0()
                     .h_full()
                     .child(toolbar)
-                    .child(div().flex_1().min_h_0().child(detail_content)),
+                    .child(jump_bar)
+                    .child(div().flex_1().min_h_0().child(detail_content))
+                    .child(bottom_bar),
             )
     }
 }
@@ -871,6 +1110,8 @@ mod tests {
         let home = Some(Path::new("/Users/me"));
         assert_eq!(relative_to(Path::new("/Users/me/code/app"), home), "~/code/app");
         assert_eq!(relative_to(Path::new("/Users/me"), home), "~");
+        assert_eq!(shorten("~/a/b/c/d/e"), "~/\u{2026}/d/e");
+        assert_eq!(shorten("~/a/b/c"), "~/a/b/c");
         assert_eq!(relative_to(Path::new("/srv/app"), home), "/srv/app");
         assert_eq!(relative_to(Path::new("/Users/me/app"), None), "/Users/me/app");
     }
