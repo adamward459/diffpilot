@@ -1,0 +1,141 @@
+[
+  {
+    "files": [
+      "core/src/threads.rs"
+    ],
+    "touched": [
+      "diffpilot-core",
+      "diffpilot",
+      "diffpilot-ui-kit"
+    ],
+    "built": [
+      "diffpilot-core",
+      "diffpilot",
+      "diffpilot-ui-kit"
+    ]
+  },
+  {
+    "files": [
+      "core/src/diff.rs",
+      "gpui-app/src/diff_pane/state.rs"
+    ],
+    "touched": [
+      "diffpilot-core",
+      "diffpilot",
+      "diffpilot-ui-kit"
+    ],
+    "built": [
+      "diffpilot-core",
+      "diffpilot",
+      "diffpilot-ui-kit"
+    ]
+  },
+  {
+    "files": [
+      "gpui-app/src/review/card.rs"
+    ],
+    "touched": [
+      "diffpilot"
+    ],
+    "built": [
+      "diffpilot"
+    ]
+  },
+  {
+    "files": [
+      "gpui-app/tests/review_card.rs"
+    ],
+    "touched": [
+      "diffpilot"
+    ],
+    "built": []
+  },
+  {
+    "files": [
+      "core/src/git.rs"
+    ],
+    "touched": [
+      "diffpilot-core",
+      "diffpilot",
+      "diffpilot-ui-kit"
+    ],
+    "built": [
+      "diffpilot-core",
+      "diffpilot",
+      "diffpilot-ui-kit"
+    ]
+  },
+  {
+    "files": [
+      "core/src/store/mod.rs",
+      "core/src/watcher.rs",
+      "core/tests/common/mod.rs"
+    ],
+    "touched": [
+      "diffpilot-core",
+      "diffpilot",
+      "diffpilot-ui-kit"
+    ],
+    "built": [
+      "diffpilot-core",
+      "diffpilot",
+      "diffpilot-ui-kit"
+    ]
+  },
+  {
+    "files": [
+      "ui-kit/src/theme.rs",
+      "gpui-app/src/sidebar.rs"
+    ],
+    "touched": [
+      "diffpilot",
+      "diffpilot-ui-kit"
+    ],
+    "built": [
+      "diffpilot",
+      "diffpilot-ui-kit"
+    ]
+  },
+  {
+    "files": [
+      "Cargo.lock"
+    ],
+    "touched": [
+      "diffpilot-core",
+      "diffpilot",
+      "diffpilot-ui-kit",
+      "xtask"
+    ],
+    "built": [
+      "diffpilot-core",
+      "diffpilot",
+      "diffpilot-ui-kit",
+      "xtask"
+    ]
+  },
+  {
+    "files": [
+      "xtask/src/main.rs"
+    ],
+    "touched": [
+      "xtask"
+    ],
+    "built": [
+      "xtask"
+    ]
+  },
+  {
+    "files": [
+      "README.md",
+      "core/tests/mcp.rs",
+      "gpui-app/examples/review.rs"
+    ],
+    "touched": [
+      "diffpilot-core",
+      "diffpilot"
+    ],
+    "built": [
+      "diffpilot"
+    ]
+  }
+]

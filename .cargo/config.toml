@@ -5,3 +5,6 @@ build-dir = "{cargo-cache-home}/build/diffpilot"
 [unstable]
 # A file with the same content in another worktree stays fresh, even though its mtime is newer.
 checksum-freshness = true
+
+[alias]
+xtask = "run -q -p xtask --"

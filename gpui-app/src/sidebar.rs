@@ -588,7 +588,7 @@ impl Sidebar {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 impl Sidebar {
     pub fn comments(&self) -> &HashMap<String, usize> {
         &self.comments

@@ -1,9 +1,9 @@
 use crate::bench::{Bench, Mark};
 use crate::comparison_control::{Select, comparison_control};
+use crate::diff_pane::layout::SPLIT_MIN_WIDTH;
 use crate::pane::{DiffPane, DiffPaneEvent};
+use crate::review::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
 use crate::sidebar::{LoadedChanges, Sidebar, SidebarEvent};
-use diffpilot::diff_pane::layout::SPLIT_MIN_WIDTH;
-use diffpilot::review::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
 use diffpilot_core::changes;
 use diffpilot_core::claude::{
     ClaudeCliReplier, ClaudeCliReviewer, Replier, Reviewer, ScriptedReplier, reviewer_from_env,
@@ -389,7 +389,7 @@ impl RepoView {
         self.compact_toolbar = false;
         let subscriptions = vec![
             cx.subscribe_in(&review, window, |this, review, event: &ReviewEvent, _, cx| {
-                if matches!(event, ReviewEvent::ThreadsChanged(change) if !matches!(change, diffpilot::review::ThreadChange::Updated(_))) {
+                if matches!(event, ReviewEvent::ThreadsChanged(change) if !matches!(change, crate::review::ThreadChange::Updated(_))) {
                     this.show_comment_counts(review, cx);
                 }
             }),
@@ -1095,7 +1095,26 @@ impl Render for RepoView {
     }
 }
 
-#[cfg(test)]
+#[cfg(feature = "testing")]
+impl RepoView {
+    pub fn sidebar(&self) -> Entity<Sidebar> {
+        self.current().sidebar.clone()
+    }
+
+    pub fn pane(&self) -> Entity<DiffPane> {
+        self.current().pane.clone()
+    }
+
+    pub fn pill(&self) -> Entity<ReviewPill> {
+        self.current().pill.clone()
+    }
+
+    pub fn settings(&self) -> &Arc<Settings> {
+        &self.settings
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
 impl RepoView {
     fn current(&self) -> &Session {
         self.session.as_ref().expect("a session")
@@ -1117,113 +1136,8 @@ mod tests {
     }
 
     use super::*;
-    use diffpilot_core::cancel::CancelToken;
-    use diffpilot_core::claude::{ReviewError, Reviewer};
-    use diffpilot_core::review::{Finding, ReviewRequest, ReviewResult, Severity};
+    use crate::testing::{Opened, git, open, open_with, write};
     use gpui::TestAppContext;
-    use std::process::Command;
-
-    struct Canned;
-
-    impl Reviewer for Canned {
-        fn review(&self, _: &ReviewRequest, _: &CancelToken) -> Result<ReviewResult, ReviewError> {
-            let finding = |path: &str, line, severity, title: &str| Finding {
-                path: path.into(),
-                line,
-                severity,
-                title: title.into(),
-                body: format!("{title} body"),
-            };
-            Ok(ReviewResult {
-                summary: "Fine overall.".into(),
-                findings: vec![
-                    finding("base.txt", Some(2), Severity::MustFix, "Edited"),
-                    finding("src/staged.rs", None, Severity::Nit, "Name"),
-                    finding("docs/committed.md", None, Severity::Suggestion, "Doc"),
-                    finding("src/staged.rs", Some(5), Severity::Question, "Why"),
-                ],
-            })
-        }
-    }
-
-    fn claude() -> Claude {
-        Claude {
-            reviewer: Arc::new(Canned),
-            replier: Arc::new(ScriptedReplier::default()),
-        }
-    }
-
-    fn git(dir: &std::path::Path, args: &[&str]) {
-        let binary = diffpilot_core::git::binary().expect("git");
-        let status = Command::new(binary)
-            .arg("-C")
-            .arg(dir)
-            .args([
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@t",
-                "-c",
-                "commit.gpgsign=false",
-            ])
-            .args(args)
-            .status()
-            .expect("run git");
-        assert!(status.success(), "git {args:?}");
-    }
-
-    fn write(dir: &std::path::Path, path: &str, text: &str) {
-        let file = dir.join(path);
-        std::fs::create_dir_all(file.parent().expect("parent")).expect("mkdir");
-        std::fs::write(file, text).expect("write");
-    }
-
-    fn fixture() -> tempfile::TempDir {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let repo = dir.path();
-        git(repo, &["init", "-q", "-b", "main"]);
-        write(repo, "base.txt", "base\n");
-        git(repo, &["add", "."]);
-        git(repo, &["commit", "-q", "-m", "base"]);
-        git(repo, &["checkout", "-q", "-b", "feature"]);
-        write(repo, "docs/committed.md", "committed\n");
-        git(repo, &["add", "."]);
-        git(repo, &["commit", "-q", "-m", "committed"]);
-        write(repo, "base.txt", "base\nedited\n");
-        write(repo, "src/staged.rs", &"let value = 1;\n".repeat(300));
-        git(repo, &["add", "src/staged.rs"]);
-        dir
-    }
-
-    struct Opened {
-        view: Entity<RepoView>,
-        store: Arc<ViewedStore>,
-        _dir: tempfile::TempDir,
-    }
-
-    fn open(cx: &mut TestAppContext) -> (Opened, &mut gpui::VisualTestContext) {
-        open_with(cx, Settings::in_memory())
-    }
-
-    fn open_with(cx: &mut TestAppContext, settings: Settings) -> (Opened, &mut gpui::VisualTestContext) {
-        cx.update(diffpilot_ui_kit::init);
-        let dir = fixture();
-        let repo = dir.path().to_path_buf();
-        let store = Arc::new(ViewedStore::in_memory());
-        let settings = Arc::new(settings);
-        let shared = store.clone();
-        let mut view = None;
-        let handle = cx.add_window(|window, cx| {
-            let entity = cx.new(|cx| RepoView::new(repo, settings, shared, claude(), window, cx));
-            view = Some(entity.clone());
-            gpui_component::Root::new(entity, window, cx)
-        });
-        let cx = gpui::VisualTestContext::from_window(handle.into(), cx).into_mut();
-        let view = view.expect("the window builds the view");
-        cx.executor().allow_parking();
-        cx.run_until_parked();
-        (Opened { view, store, _dir: dir }, cx)
-    }
 
     fn sidebar_paths(opened: &Opened, cx: &mut gpui::VisualTestContext) -> Vec<String> {
         let sidebar = opened.view.read_with(cx, |view, _| view.current().sidebar.clone());
@@ -1550,7 +1464,7 @@ mod tests {
         cx.run_until_parked();
         assert!(compact(cx), "the result shows for a few seconds");
         cx.executor()
-            .advance_clock(Duration::from_secs(diffpilot::review::pill::RESULT_SECONDS + 1));
+            .advance_clock(Duration::from_secs(crate::review::pill::RESULT_SECONDS + 1));
         cx.run_until_parked();
         assert!(!compact(cx), "the result is gone");
     }

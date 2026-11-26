@@ -4,12 +4,139 @@ use gpui::{
 };
 use gpui::{Global, UniformListScrollHandle};
 use gpui_component::scroll::ScrollbarHandle;
+use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering::Relaxed};
 use std::time::Instant;
 
 pub const FRAME_BUDGET_MS: f64 = 1000.0 / 120.0;
+
+static COUNTING: AtomicBool = AtomicBool::new(false);
+static ALLOCS: AtomicU64 = AtomicU64::new(0);
+static ALLOC_BYTES: AtomicU64 = AtomicU64::new(0);
+static LIVE_BYTES: AtomicI64 = AtomicI64::new(0);
+
+/// The system allocator, plus counters that run only after [`Counting::enable`].
+/// A bench binary installs it with `#[global_allocator]`.
+pub struct Counting;
+
+impl Counting {
+    pub fn enable() {
+        COUNTING.store(true, Relaxed);
+    }
+
+    fn note(grow: usize, shrink: usize) {
+        if COUNTING.load(Relaxed) {
+            ALLOCS.fetch_add(1, Relaxed);
+            ALLOC_BYTES.fetch_add(grow as u64, Relaxed);
+            LIVE_BYTES.fetch_add(grow as i64 - shrink as i64, Relaxed);
+        }
+    }
+}
+
+unsafe impl GlobalAlloc for Counting {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let ptr = unsafe { System.alloc(layout) };
+        if !ptr.is_null() {
+            Self::note(layout.size(), 0);
+        }
+        ptr
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        let ptr = unsafe { System.alloc_zeroed(layout) };
+        if !ptr.is_null() {
+            Self::note(layout.size(), 0);
+        }
+        ptr
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(ptr, layout) };
+        if COUNTING.load(Relaxed) {
+            LIVE_BYTES.fetch_sub(layout.size() as i64, Relaxed);
+        }
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        let new = unsafe { System.realloc(ptr, layout, new_size) };
+        if !new.is_null() {
+            Self::note(new_size, layout.size());
+        }
+        new
+    }
+}
+
+/// Live bytes count only frees of blocks allocated while counting, so compare two readings, not one.
+pub fn live_bytes() -> i64 {
+    LIVE_BYTES.load(Relaxed)
+}
+
+#[repr(C, packed(4))]
+#[derive(Default)]
+struct MachTaskBasicInfo {
+    virtual_size: u64,
+    resident_size: u64,
+    resident_size_max: u64,
+    user_time: [i32; 2],
+    system_time: [i32; 2],
+    policy: i32,
+    suspend_count: i32,
+}
+
+unsafe extern "C" {
+    static mach_task_self_: u32;
+    fn task_info(task: u32, flavor: u32, info: *mut i32, count: *mut u32) -> i32;
+}
+
+const MACH_TASK_BASIC_INFO: u32 = 20;
+
+pub fn resident_bytes() -> u64 {
+    let mut info = MachTaskBasicInfo::default();
+    let mut count = (size_of::<MachTaskBasicInfo>() / 4) as u32;
+    let status = unsafe {
+        task_info(
+            mach_task_self_,
+            MACH_TASK_BASIC_INFO,
+            (&raw mut info).cast(),
+            &mut count,
+        )
+    };
+    if status == 0 { info.resident_size } else { 0 }
+}
+
+/// Allocations and the highest resident size seen between [`Meter::start`] and [`Meter::finish`].
+/// Peak RSS is the largest of the samples, so call [`Meter::sample`] once per frame.
+pub struct Meter {
+    allocs: u64,
+    alloc_bytes: u64,
+    peak_rss: u64,
+}
+
+impl Meter {
+    pub fn start() -> Self {
+        Self {
+            allocs: ALLOCS.load(Relaxed),
+            alloc_bytes: ALLOC_BYTES.load(Relaxed),
+            peak_rss: resident_bytes(),
+        }
+    }
+
+    pub fn sample(&mut self) {
+        self.peak_rss = self.peak_rss.max(resident_bytes());
+    }
+
+    pub fn finish(mut self) -> [(&'static str, u64); 3] {
+        self.sample();
+        [
+            ("allocs", ALLOCS.load(Relaxed) - self.allocs),
+            ("alloc_bytes", ALLOC_BYTES.load(Relaxed) - self.alloc_bytes),
+            ("peak_rss_bytes", self.peak_rss),
+        ]
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Stats {
@@ -91,6 +218,7 @@ struct Scroll {
     intervals: Vec<f64>,
     work: Vec<f64>,
     rows: usize,
+    meter: Meter,
 }
 
 struct Inner {
@@ -102,6 +230,8 @@ struct Inner {
     scroll: Option<Scroll>,
     scroll_started: bool,
     finished: bool,
+    launch: Option<Meter>,
+    memory: Vec<(String, u64)>,
 }
 
 #[derive(Clone)]
@@ -120,6 +250,8 @@ impl Bench {
             scroll: None,
             scroll_started: false,
             finished: false,
+            launch: Some(Meter::start()),
+            memory: Vec::new(),
         }))));
     }
 
@@ -165,6 +297,9 @@ impl Bench {
     pub fn begin_scroll(&self, handle: UniformListScrollHandle, rows: usize) {
         let mut inner = self.0.borrow_mut();
         inner.scroll_started = true;
+        if let Some(launch) = inner.launch.take() {
+            inner.memory.extend(memory_fields("launch", launch));
+        }
         inner.scroll = Some(Scroll {
             handle,
             offset: 0.0,
@@ -173,6 +308,7 @@ impl Bench {
             intervals: Vec::new(),
             work: Vec::new(),
             rows,
+            meter: Meter::start(),
         });
     }
 
@@ -182,10 +318,14 @@ impl Bench {
         for mark in std::mem::take(&mut inner.after_paint) {
             inner.marks.entry(mark).or_insert(elapsed);
         }
-        if let Some(scroll) = inner.scroll.as_mut()
-            && let Some(frame_start) = scroll.frame_start.take()
-        {
-            scroll.work.push(frame_start.elapsed().as_secs_f64() * 1000.0);
+        if let Some(launch) = inner.launch.as_mut() {
+            launch.sample();
+        }
+        if let Some(scroll) = inner.scroll.as_mut() {
+            scroll.meter.sample();
+            if let Some(frame_start) = scroll.frame_start.take() {
+                scroll.work.push(frame_start.elapsed().as_secs_f64() * 1000.0);
+            }
         }
     }
 
@@ -233,6 +373,7 @@ impl Bench {
             let scroll = inner.scroll.take().expect("scroll data");
             let intervals = stats(&scroll.intervals, FRAME_BUDGET_MS);
             let work = stats(&scroll.work, FRAME_BUDGET_MS);
+            inner.memory.extend(memory_fields("scroll", scroll.meter));
             report_json(
                 &inner.marks,
                 &inner.stages,
@@ -240,11 +381,19 @@ impl Bench {
                 &work,
                 scroll.rows,
                 inner.config.pixels_per_frame,
+                &inner.memory,
             )
         };
         println!("{report}");
         cx.quit();
     }
+}
+
+fn memory_fields(scenario: &str, meter: Meter) -> impl Iterator<Item = (String, u64)> {
+    meter
+        .finish()
+        .into_iter()
+        .map(move |(name, value)| (format!("{scenario}_{name}"), value))
 }
 
 fn number(value: f64) -> String {
@@ -269,6 +418,7 @@ pub fn report_json(
     work: &Stats,
     rows: usize,
     pixels_per_frame: f32,
+    memory: &[(String, u64)],
 ) -> String {
     let mut fields: Vec<String> = [Mark::WindowShown, Mark::SidebarLoaded, Mark::FirstDiffPaint]
         .iter()
@@ -286,6 +436,7 @@ pub fn report_json(
     fields.push(format!("  \"scroll_pixels_per_frame\": {pixels_per_frame}"));
     fields.push(format!("  \"scroll_frame_interval\": {}", stats_json(intervals)));
     fields.push(format!("  \"scroll_frame_cpu\": {}", stats_json(work)));
+    fields.extend(memory.iter().map(|(name, value)| format!("  \"{name}\": {value}")));
     format!("{{\n{}\n}}", fields.join(",\n"))
 }
 
@@ -368,6 +519,24 @@ mod tests {
     }
 
     #[test]
+    fn counting_sees_allocations_and_frees_after_enable() {
+        Counting::enable();
+        let meter = Meter::start();
+        let live = live_bytes();
+        let layout = Layout::from_size_align(100, 8).unwrap();
+        unsafe {
+            let ptr = Counting.alloc(layout);
+            let ptr = Counting.realloc(ptr, layout, 300);
+            Counting.dealloc(ptr, Layout::from_size_align(300, 8).unwrap());
+        }
+        let [allocs, bytes, rss] = meter.finish();
+        assert_eq!(allocs, ("allocs", 2));
+        assert_eq!(bytes, ("alloc_bytes", 400));
+        assert!(rss.1 > 0);
+        assert_eq!(live_bytes(), live);
+    }
+
+    #[test]
     fn empty_stats_are_zero() {
         assert_eq!(stats(&[], 8.33).frames, 0);
     }
@@ -387,8 +556,10 @@ mod tests {
         let mut marks = BTreeMap::new();
         marks.insert(Mark::WindowShown, 12.5);
         let empty = stats(&[], FRAME_BUDGET_MS);
-        let json = report_json(&marks, &BTreeMap::new(), &empty, &empty, 10, 96.0);
+        let memory = [("scroll_allocs".to_owned(), 42)];
+        let json = report_json(&marks, &BTreeMap::new(), &empty, &empty, 10, 96.0, &memory);
         assert!(json.contains("\"window_shown_ms\": 12.50"));
+        assert!(json.contains("\"scroll_allocs\": 42"));
         assert!(json.contains("\"sidebar_loaded_ms\": null"));
         assert!(json.contains("\"frames_over_8_33_ms\": 0"));
         assert!(json.starts_with('{') && json.ends_with('}'));

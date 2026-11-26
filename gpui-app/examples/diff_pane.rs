@@ -1,3 +1,4 @@
+use diffpilot::bench::{Counting, Meter, live_bytes};
 use diffpilot::diff_pane::highlight;
 use diffpilot::diff_pane::state::{Geometry, PaneState};
 use diffpilot::diff_pane::{DiffPane, DiffPaneEvent};
@@ -10,7 +11,8 @@ use diffpilot_core::settings::{self, Settings};
 use diffpilot_core::threads::{Side, ThreadAnchor};
 use diffpilot_ui_kit::Assets;
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, Application, Bounds, Entity, Window, WindowBounds, WindowOptions, px, size,
+    AnyWindowHandle, App, AppContext as _, Application, AsyncApp, Bounds, Entity, Window, WindowBounds, WindowKind,
+    WindowOptions, point, px, size,
 };
 use gpui_component::Root;
 use serde_json::{Map, Value, json};
@@ -24,6 +26,12 @@ use std::time::{Duration, Instant};
 
 const BUDGET_MS: f32 = 1000.0 / 120.0;
 const WINDOW: (f32, f32) = (1200.0, 800.0);
+const REOPEN_CYCLES: usize = 5;
+const SWEEP_FRAMES: usize = 240;
+const FLICK_FRAMES: usize = 120;
+
+#[global_allocator]
+static ALLOCATOR: Counting = Counting;
 
 fn ms(from: Instant) -> f64 {
     from.elapsed().as_secs_f64() * 1000.0
@@ -167,6 +175,7 @@ struct Run {
     done: usize,
     last_tick: Option<Instant>,
     intervals: Vec<f32>,
+    meter: Meter,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -197,14 +206,14 @@ fn plan() -> VecDeque<Phase> {
     };
     let flick = || Step::Pixels(100.0);
     VecDeque::from([
-        phase("sweep_nowrap", Unified, false, 800, Step::Sweep),
-        phase("sweep_wrap", Unified, true, 800, Step::Sweep),
-        phase("flick_nowrap", Unified, false, 240, flick()),
-        phase("flick_wrap", Unified, true, 240, flick()),
-        phase("split_sweep_nowrap", Split, false, 800, Step::Sweep),
-        phase("split_sweep_wrap", Split, true, 800, Step::Sweep),
-        phase("split_flick_nowrap", Split, false, 240, flick()),
-        phase("split_flick_wrap", Split, true, 240, flick()),
+        phase("sweep_nowrap", Unified, false, SWEEP_FRAMES, Step::Sweep),
+        phase("sweep_wrap", Unified, true, SWEEP_FRAMES, Step::Sweep),
+        phase("flick_nowrap", Unified, false, FLICK_FRAMES, flick()),
+        phase("flick_wrap", Unified, true, FLICK_FRAMES, flick()),
+        phase("split_sweep_nowrap", Split, false, SWEEP_FRAMES, Step::Sweep),
+        phase("split_sweep_wrap", Split, true, SWEEP_FRAMES, Step::Sweep),
+        phase("split_flick_nowrap", Split, false, FLICK_FRAMES, flick()),
+        phase("split_flick_wrap", Split, true, FLICK_FRAMES, flick()),
     ])
 }
 
@@ -212,16 +221,25 @@ fn start_phase(bench: &Rc<RefCell<Bench>>, window: &mut Window, cx: &mut App) {
     let next = bench.borrow_mut().queue.pop_front();
     let Some(phase) = next else {
         eprintln!("PHASE end");
-        let bench = bench.borrow();
-        let nested = json!({
-            "launch": bench.launch,
-            "load": headless(&bench.repo, false),
-            "scroll": Value::Object(bench.scroll.clone()),
-        });
-        let mut report = Map::new();
-        flatten("", &nested, &mut report);
-        println!("{}", serde_json::to_string_pretty(&report).expect("report serializes"));
-        cx.quit();
+        let bench = bench.clone();
+        cx.spawn(async move |cx| {
+            let repo = bench.borrow().repo.clone();
+            let started = Instant::now();
+            let retained = reopen_retained(&repo, cx).await;
+            eprintln!("PHASE reopen took {:.0} ms", ms(started));
+            let bench = bench.borrow();
+            let nested = json!({
+                "launch": bench.launch,
+                "load": headless(&bench.repo, false),
+                "scroll": Value::Object(bench.scroll.clone()),
+                "pane_retained_bytes": retained,
+            });
+            let mut report = Map::new();
+            flatten("", &nested, &mut report);
+            println!("{}", serde_json::to_string_pretty(&report).expect("report serializes"));
+            cx.update(|cx| cx.quit()).ok();
+        })
+        .detach();
         return;
     };
     eprintln!("PHASE {}", phase.name);
@@ -244,6 +262,7 @@ fn start_phase(bench: &Rc<RefCell<Bench>>, window: &mut Window, cx: &mut App) {
         done: 0,
         last_tick: None,
         intervals: Vec::new(),
+        meter: Meter::start(),
     });
     let drive = bench.borrow().drive;
     match drive {
@@ -279,6 +298,7 @@ fn tick(bench: &Rc<RefCell<Bench>>, window: &mut Window, cx: &mut App) {
     let finished = {
         let mut guard = bench.borrow_mut();
         let run = guard.run.as_mut().expect("a phase is running");
+        run.meter.sample();
         if let Some(last) = run.last_tick.replace(now) {
             run.intervals.push(now.duration_since(last).as_secs_f32() * 1000.0);
         }
@@ -321,11 +341,59 @@ fn finish_phase(bench: &Rc<RefCell<Bench>>, window: &mut Window, cx: &mut App) {
     stats("interval", &run.intervals, &mut metrics);
     stats("cpu", &cpu, &mut metrics);
     stats("lines", &lines, &mut metrics);
+    for (name, value) in run.meter.finish() {
+        metrics.insert(name.into(), json!(value));
+    }
     bench
         .borrow_mut()
         .scroll
         .insert(run.phase.name.to_string(), Value::Object(metrics));
     start_phase(bench, window, cx);
+}
+
+/// Opens a hidden window on the diff, lets highlighting finish, draws it, and closes it.
+/// The first cycle fills the caches that live for the whole process, so it does not count.
+async fn reopen_retained(repo: &Path, cx: &mut AsyncApp) -> i64 {
+    let mut before = 0;
+    for cycle in 0..=REOPEN_CYCLES {
+        let (files, _) = load(repo);
+        let window = cx
+            .update(|cx| {
+                let options = WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                        point(px(0.), px(0.)),
+                        size(px(WINDOW.0), px(WINDOW.1)),
+                    ))),
+                    show: false,
+                    focus: false,
+                    ..WindowOptions::default()
+                };
+                cx.open_window(options, |window, cx| {
+                    diffpilot_ui_kit::theme::install(window, cx);
+                    let pane = cx.new(|cx| DiffPane::new(window, cx));
+                    pane.update(cx, |pane, cx| pane.set_files(files, cx));
+                    pane
+                })
+            })
+            .expect("app is alive")
+            .expect("window opens");
+        for _ in 0..40 {
+            cx.background_executor().timer(Duration::from_millis(50)).await;
+            if !window.read_with(cx, |pane, _| pane.is_highlighting()).unwrap_or(false) {
+                break;
+            }
+        }
+        cx.update_window(window.into(), |_, window, cx| {
+            window.draw(cx).clear();
+            window.remove_window();
+        })
+        .ok();
+        cx.background_executor().timer(Duration::from_millis(50)).await;
+        if cycle == 0 {
+            before = live_bytes();
+        }
+    }
+    live_bytes() - before
 }
 
 fn start_bench(
@@ -360,6 +428,15 @@ fn start_bench(
         .ok();
     })
     .detach();
+}
+
+/// A covered window gets no frame callbacks, so a bench window floats above the others.
+fn bench_window_kind(benching: bool) -> WindowKind {
+    if benching {
+        WindowKind::PopUp
+    } else {
+        WindowKind::Normal
+    }
 }
 
 fn demo_enabled() -> bool {
@@ -413,6 +490,7 @@ fn run_window(repo: PathBuf, launch: Instant, bench: Option<Drive>) {
         let bounds = Bounds::centered(display, size(px(WINDOW.0), px(WINDOW.1)), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
+            kind: bench_window_kind(bench.is_some()),
             ..WindowOptions::default()
         };
         let make_pane = {
@@ -539,6 +617,9 @@ fn run_window(repo: PathBuf, launch: Instant, bench: Option<Drive>) {
 fn main() {
     let launch = Instant::now();
     let repo = repo_path();
+    if std::env::var_os("DIFFPILOT_BENCH").is_some() {
+        Counting::enable();
+    }
     match std::env::var("DIFFPILOT_BENCH").as_deref() {
         Ok("load") => println!(
             "{}",

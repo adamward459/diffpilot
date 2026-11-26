@@ -18,7 +18,7 @@ You don't need Xcode or its Metal toolchain. diffpilot compiles its GPU shaders 
 ```sh
 git clone https://github.com/adamward459/diffpilot.git
 cd diffpilot
-scripts/install.sh
+./install.sh
 ```
 
 The script does three things:
@@ -35,7 +35,7 @@ Options:
 | `--no-cli` | Skip the `diffpilot` command |
 | `--uninstall` | Remove the app and the command |
 
-To update, pull the latest code and run `scripts/install.sh` again.
+To update, pull the latest code and run `./install.sh` again.
 
 ## Run
 
@@ -78,12 +78,12 @@ The Cargo workspace has three crates:
 Common commands:
 
 ```sh
-git config core.hooksPath .githooks   # once per clone: format Rust and Python on commit
+git config core.hooksPath .githooks   # once per clone: format Rust on commit
 cargo run -p diffpilot                # debug build
-scripts/test.py related               # print the tests and checks for your change
-scripts/test.py unit                  # run all tests
-scripts/test.py hotpath               # compare frame-time benchmarks with the base branch
-scripts/test.py screenshot            # capture the app in light and dark
+cargo xtask related                   # print the tests and checks for your change
+cargo xtask unit                      # run all tests
+cargo xtask perf                      # compare time and memory benchmarks with the base branch
+cargo xtask visual                    # capture the screenshot scenes of every feature
 ```
 
 These environment variables help with testing:
@@ -96,4 +96,4 @@ These environment variables help with testing:
 | `DIFFPILOT_VIEWED_SEED=file.json` | Start with these files marked viewed, kept in memory |
 | `DIFFPILOT_BENCH=1` | Run a benchmark, print JSON, and quit |
 
-`scripts/fixture_repo.py` builds `.fixtures/large`, a test repository with about 2000 changed files. The benchmarks and screenshots use it.
+`cargo xtask fixture` builds `.fixtures/large`, a test repository with about 2000 changed files. The benchmarks and screenshots use it.

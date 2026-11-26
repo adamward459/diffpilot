@@ -5,6 +5,7 @@
 //! `DIFFPILOT_DEMO_START=1` starts a review at launch. `DIFFPILOT_DEMO_POPOVER=1` opens the popover.
 //! `DIFFPILOT_BENCH=1` runs a hidden window and prints frame times as JSON on stdout.
 
+use diffpilot::bench::{Counting, Meter, live_bytes};
 use diffpilot::review::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession, ThreadCard, ThreadChange};
 use diffpilot_core::changes::FileStatus;
 use diffpilot_core::claude::{Replier, Reviewer, ScriptedReplier, ScriptedReviewer, reviewer_from_env};
@@ -26,6 +27,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const CARD_WIDTH: f32 = 720.0;
+const REOPEN_CYCLES: usize = 5;
+
+#[global_allocator]
+static ALLOCATOR: Counting = Counting;
 
 type Heights = Rc<RefCell<HashMap<ThreadId, Pixels>>>;
 
@@ -256,19 +261,29 @@ async fn bench(cx: &mut AsyncApp) {
     for _ in 0..5 {
         draw(cx);
     }
-    let idle: Vec<Duration> = (0..60).map(|_| draw(cx)).collect();
+    let mut meter = Meter::start();
+    let idle: Vec<Duration> = (0..60)
+        .map(|_| {
+            let took = draw(cx);
+            meter.sample();
+            took
+        })
+        .collect();
+    let idle_memory = meter.finish();
 
     session
         .update(cx, |session, cx| session.ask_claude(id, cx))
         .expect("app is alive");
     let mut stream = Vec::new();
     let mut chars = 0;
+    let mut meter = Meter::start();
     while session
         .read_with(cx, |session, _| session.is_replying(id))
         .expect("app is alive")
     {
         cx.background_executor().timer(Duration::from_millis(33)).await;
         stream.push(draw(cx));
+        meter.sample();
         chars = session
             .read_with(cx, |session, _| {
                 session
@@ -279,6 +294,7 @@ async fn bench(cx: &mut AsyncApp) {
             .expect("app is alive");
     }
     draw(cx);
+    let stream_memory = meter.finish();
 
     session
         .update(cx, |session, cx| {
@@ -336,7 +352,12 @@ async fn bench(cx: &mut AsyncApp) {
     let (idle_median, idle_p95, idle_max) = milliseconds(idle);
     let (stream_median, stream_p95, stream_max) = milliseconds(stream.clone());
     eprintln!("stream frames={} final_chars={chars}", stream.len());
-    let metrics = serde_like(&[
+    let retained = reopen_retained(cx).await;
+    let memory = [("idle_frame", idle_memory), ("stream_frame", stream_memory)]
+        .into_iter()
+        .flat_map(|(scenario, fields)| fields.map(|(name, value)| (format!("{scenario}_{name}"), value as f64)))
+        .chain([("gallery_retained_bytes".to_owned(), retained as f64)]);
+    let mut pairs: Vec<(String, f64)> = [
         ("baseline_frame_median_ms", base_median),
         ("idle_frame_median_ms", idle_median),
         ("idle_frame_p95_ms", idle_p95),
@@ -346,12 +367,49 @@ async fn bench(cx: &mut AsyncApp) {
         ("stream_frame_max_ms", stream_max),
         ("measure_us", measure_cost.as_secs_f64() * 1e6),
         ("measure_error_px", f64::from(worst)),
-    ]);
-    println!("{metrics}");
+    ]
+    .into_iter()
+    .map(|(name, value)| (name.to_owned(), value))
+    .collect();
+    pairs.extend(memory);
+    println!("{}", serde_like(&pairs));
     cx.update(|cx| cx.quit()).ok();
 }
 
-fn serde_like(pairs: &[(&str, f64)]) -> String {
+/// Opens a hidden gallery on a fresh session, adds a thread, draws it, and closes it.
+/// The first cycle fills the caches that live for the whole process, so it does not count.
+async fn reopen_retained(cx: &mut AsyncApp) -> i64 {
+    let mut before = 0;
+    for cycle in 0..=REOPEN_CYCLES {
+        let window = cx
+            .update(|cx| {
+                let session = session(
+                    cx,
+                    Arc::new(ScriptedReviewer::default()),
+                    Arc::new(ScriptedReplier::default()),
+                );
+                session.update(cx, |session, cx| {
+                    let id = session.create_thread(ThreadAnchor::line("docs/archive.md", Side::New, 3), cx);
+                    session.post(id, "Is this line needed?", cx);
+                });
+                open_gallery(cx, true, session).0
+            })
+            .expect("app is alive");
+        for _ in 0..3 {
+            cx.update_window(window.into(), |_, window, cx| window.draw(cx).clear())
+                .expect("window is alive");
+        }
+        cx.update_window(window.into(), |_, window, _| window.remove_window())
+            .expect("window is alive");
+        cx.background_executor().timer(Duration::from_millis(50)).await;
+        if cycle == 0 {
+            before = live_bytes();
+        }
+    }
+    live_bytes() - before
+}
+
+fn serde_like(pairs: &[(String, f64)]) -> String {
     let body: Vec<String> = pairs
         .iter()
         .map(|(name, value)| format!("\"{name}\": {value:.3}"))
@@ -361,6 +419,9 @@ fn serde_like(pairs: &[(&str, f64)]) -> String {
 
 fn main() {
     let benching = std::env::var("DIFFPILOT_BENCH").is_ok_and(|value| value == "1");
+    if benching {
+        Counting::enable();
+    }
     Application::new()
         .with_assets(diffpilot_ui_kit::Assets)
         .run(move |cx: &mut App| {

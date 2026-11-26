@@ -1,27 +1,25 @@
-mod bench;
-mod comparison_control;
-mod comparison_menu;
-mod format;
-mod pane;
-mod repo_view;
-mod settings;
-mod sidebar;
-mod sidebar_rows;
-mod workspace;
-
-use bench::Bench;
+use diffpilot::bench::{self, Bench};
+use diffpilot::settings;
+use diffpilot::workspace::{self, Workspace};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::viewed::ViewedStore;
-use gpui::{Application, Bounds, TitlebarOptions, WindowBounds, WindowOptions, point, prelude::*, px, size};
+use gpui::{
+    Application, Bounds, TitlebarOptions, WindowBounds, WindowKind, WindowOptions, point, prelude::*, px, size,
+};
 use gpui_component::{Root, TitleBar};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
-use workspace::Workspace;
+
+#[global_allocator]
+static ALLOCATOR: bench::Counting = bench::Counting;
 
 fn main() {
     let start = Instant::now();
     let bench = bench::Config::from_env();
+    if bench.is_some() {
+        bench::Counting::enable();
+    }
 
     Application::new().with_assets(diffpilot_ui_kit::Assets).run(move |cx| {
         diffpilot_ui_kit::init(cx);
@@ -62,6 +60,11 @@ fn main() {
             let bounds = Bounds::centered(None, size(px(1388.), px(923.)), cx);
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                kind: if bench.is_some() {
+                    WindowKind::PopUp
+                } else {
+                    WindowKind::Normal
+                },
                 titlebar: Some(TitlebarOptions {
                     traffic_light_position: Some(point(px(20.), px(19.))),
                     ..TitleBar::title_bar_options()
