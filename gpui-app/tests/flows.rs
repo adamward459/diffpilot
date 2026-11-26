@@ -4,6 +4,8 @@ mod flows {
     mod comparison;
     mod diff_mode;
     mod editor;
+    mod file_menu;
+    mod filter;
     mod fix;
     mod folders;
     mod remote;

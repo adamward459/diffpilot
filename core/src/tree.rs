@@ -94,64 +94,71 @@ impl FileFilter {
 }
 
 pub struct FileMatcher {
-    needle: Vec<u8>,
+    terms: Vec<Vec<u8>>,
 }
 
 impl FileMatcher {
     pub fn new(query: &str) -> Option<Self> {
-        let text = query.trim_matches(|c| c == ' ' || c == '\t').to_lowercase();
-        (!text.is_empty()).then(|| Self {
-            needle: text.into_bytes(),
-        })
+        let terms: Vec<Vec<u8>> = query
+            .split_whitespace()
+            .map(|term| term.to_lowercase().into_bytes())
+            .collect();
+        (!terms.is_empty()).then_some(Self { terms })
     }
 
     pub fn score(&self, entry: &FileEntry) -> Option<i64> {
-        let path = entry.lower_path.as_bytes();
-        if self.needle.len() > path.len() {
-            return None;
-        }
-        let name_start = entry.name_start;
-        let count = path.len() as i64;
-        if let Some(index) = self.find(path, name_start) {
-            let bonus = if index == name_start { 500 } else { 0 };
-            return Some(3000 - (index - name_start) as i64 + bonus - count);
-        }
-        if let Some(index) = self.find(path, 0) {
-            return Some(2000 - index as i64 - count);
-        }
-        self.fuzzy(path, name_start)
+        self.terms
+            .iter()
+            .try_fold(0, |total, term| Some(total + score_term(term, entry)?))
     }
+}
 
-    fn find(&self, path: &[u8], start: usize) -> Option<usize> {
-        let last = path.len() - self.needle.len();
-        (start..=last).find(|&index| path[index..].starts_with(&self.needle))
+fn score_term(needle: &[u8], entry: &FileEntry) -> Option<i64> {
+    let path = entry.lower_path.as_bytes();
+    if needle.len() > path.len() {
+        return None;
     }
+    let name_start = entry.name_start;
+    let count = path.len() as i64;
+    if let Some(index) = find(needle, path, name_start) {
+        let bonus = if index == name_start { 500 } else { 0 };
+        return Some(3000 - (index - name_start) as i64 + bonus - count);
+    }
+    if let Some(index) = find(needle, path, 0) {
+        return Some(2000 - index as i64 - count);
+    }
+    fuzzy(needle, path, name_start)
+}
 
-    fn fuzzy(&self, path: &[u8], name_start: usize) -> Option<i64> {
-        let mut matched = 0;
-        let mut previous: i64 = -2;
-        let mut score: i64 = 1000;
-        for (index, &byte) in path.iter().enumerate() {
-            if byte != self.needle[matched] {
-                continue;
-            }
-            if index as i64 == previous + 1 {
-                score += 15;
-            }
-            if index >= name_start {
-                score += 5;
-            }
-            if index == 0 || is_separator(path[index - 1]) {
-                score += 10;
-            }
-            previous = index as i64;
-            matched += 1;
-            if matched == self.needle.len() {
-                return Some(score.min(1900) - path.len() as i64);
-            }
+fn find(needle: &[u8], path: &[u8], start: usize) -> Option<usize> {
+    let last = path.len() - needle.len();
+    (start..=last).find(|&index| path[index..].starts_with(needle))
+}
+
+fn fuzzy(needle: &[u8], path: &[u8], name_start: usize) -> Option<i64> {
+    let mut matched = 0;
+    let mut previous: i64 = -2;
+    let mut score: i64 = 1000;
+    for (index, &byte) in path.iter().enumerate() {
+        if byte != needle[matched] {
+            continue;
         }
-        None
+        if index as i64 == previous + 1 {
+            score += 15;
+        }
+        if index >= name_start {
+            score += 5;
+        }
+        if index == 0 || is_separator(path[index - 1]) {
+            score += 10;
+        }
+        previous = index as i64;
+        matched += 1;
+        if matched == needle.len() {
+            return Some(score.min(1900) - path.len() as i64);
+        }
     }
+    None
 }
 
 fn is_separator(byte: u8) -> bool {
@@ -447,6 +454,17 @@ mod tests {
     fn match_is_case_insensitive_on_the_full_path() {
         let result = filter(&filter_sample(), &query("TESTS/hooks"), &no_viewed());
         assert_eq!(paths(&result), ["tests/hooks/useArchiveUndo.test.ts"]);
+    }
+
+    #[test]
+    fn each_word_must_match_in_any_order() {
+        let result = filter(&filter_sample(), &query("undo tests"), &no_viewed());
+        assert_eq!(paths(&result), ["tests/hooks/useArchiveUndo.test.ts"]);
+        let result = filter(&filter_sample(), &query("  hooks   undo "), &no_viewed());
+        assert_eq!(
+            paths(&result),
+            ["src/hooks/useArchiveUndo.ts", "tests/hooks/useArchiveUndo.test.ts"]
+        );
     }
 
     #[test]

@@ -317,13 +317,17 @@ impl Sidebar {
             .px(px(10.))
             .border_y_1()
             .border_color(tokens.ui.line)
-            .child(filter_field(
-                &tokens,
-                Input::new(&self.filter_input)
-                    .appearance(false)
-                    .bordered(false)
-                    .focus_bordered(false)
-                    .small(),
+            .child(tag(
+                filter_field(
+                    &tokens,
+                    Input::new(&self.filter_input)
+                        .appearance(false)
+                        .bordered(false)
+                        .focus_bordered(false)
+                        .small(),
+                )
+                .id("filter-field"),
+                || "sidebar:filter",
             ))
             .child(glass_button(
                 "toggle-uncommitted",
@@ -384,8 +388,7 @@ impl Render for Sidebar {
             .child(header)
             .child(filter_row)
             .child(
-                div()
-                    .id("file-outline")
+                tag(div().id("file-outline"), || format!("sidebar:rows:{}", self.rows.len()))
                     .key_context(CONTEXT)
                     .track_focus(&self.focus)
                     .on_action(cx.listener(|this, _: &SelectPrevious, window, cx| this.on_step(-1, window, cx)))
