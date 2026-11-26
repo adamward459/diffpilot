@@ -2,12 +2,12 @@ use super::checks_popover::ChecksPopover;
 use super::rows::{Tone, checks_detail, outcome_tone, overall_tone, review_badge};
 use super::sync_popover::SyncPopover;
 use super::{RemoteStatus, ReviewState, SyncState};
+use diffpilot_ui_kit::components::popover;
 use diffpilot_ui_kit::components::{Button, Look, activity_capsule, glyph_icon, spinner, status_dot, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{Context, Corner, Entity, IntoElement, Render, Subscription, Window, div, px};
 use gpui_component::h_flex;
-use gpui_component::popover::Popover;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Open {
@@ -146,7 +146,7 @@ impl Render for RemoteCapsule {
                 }))
                 .tooltip("Checks");
             let content = self.checks.clone();
-            Popover::new("remote-checks-popover")
+            popover("remote-checks-popover")
                 .anchor(Corner::TopRight)
                 .open(self.open == Open::Checks)
                 .on_open_change(on_checks)
@@ -166,7 +166,7 @@ impl Render for RemoteCapsule {
         let sync_content = self.sync.clone();
         activity_capsule(&theme)
             .child(
-                Popover::new("remote-sync-popover")
+                popover("remote-sync-popover")
                     .anchor(Corner::TopRight)
                     .open(self.open == Open::Sync)
                     .on_open_change(on_sync)

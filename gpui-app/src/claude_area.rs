@@ -3,6 +3,7 @@ use crate::review::{ReviewPopover, ReviewSession};
 use crate::runs::now_ms;
 use diffpilot_core::run::{LogEntry, LogKind, Run, RunId, RunOutcome, RunState, StepState};
 use diffpilot_ui_kit::components::menu::{MenuItem, MenuSection, menu_button};
+use diffpilot_ui_kit::components::popover;
 use diffpilot_ui_kit::components::{Button, Look, glyph_icon, spinner, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
@@ -11,7 +12,6 @@ use gpui::{
     ParentElement, Render, ScrollStrategy, SharedString, StatefulInteractiveElement, Styled, Subscription, Task,
     UniformListScrollHandle, Window, div, px, uniform_list,
 };
-use gpui_component::popover::Popover;
 use gpui_component::{ActiveTheme, h_flex, v_flex};
 use std::ops::Range;
 use std::time::Duration;
@@ -193,8 +193,8 @@ impl ClaudeArea {
     }
 
     fn queue_button(&self, cx: &mut Context<Self>) -> AnyElement {
-        let popover = self.popover.clone();
-        Popover::new("claude-area-queue")
+        let queue = self.popover.clone();
+        popover("claude-area-queue")
             .anchor(Corner::BottomRight)
             .open(self.queue_open)
             .on_open_change(cx.listener(|this, open: &bool, _, cx| {
@@ -207,7 +207,7 @@ impl ClaudeArea {
                     .label("Queue…"),
                 || "claude-area:queue",
             ))
-            .content(move |_, _, _| popover.clone())
+            .content(move |_, _, _| queue.clone())
             .into_any_element()
     }
 

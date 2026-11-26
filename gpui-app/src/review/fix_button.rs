@@ -2,13 +2,13 @@ use crate::review::fix_picker::{FixPicker, PickerEvent};
 use crate::review::pill::RESULT_SECONDS;
 use crate::review::session::{ReviewEvent, ReviewSession};
 use diffpilot_core::run::{RunId, RunKind, RunState};
+use diffpilot_ui_kit::components::popover;
 use diffpilot_ui_kit::components::{Button, Look, filled_check, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::{
     AnyElement, AppContext, Context, Corner, Entity, EventEmitter, IntoElement, ParentElement, Render, Styled,
     Subscription, Task, Window, div, px,
 };
-use gpui_component::popover::Popover;
 use gpui_component::{ActiveTheme, h_flex};
 use std::time::Duration;
 
@@ -173,7 +173,7 @@ impl FixButton {
         Some(
             tag(div(), || format!("fix:ready:{count}"))
                 .child(
-                    Popover::new("fix-popover")
+                    popover("fix-popover")
                         .anchor(Corner::TopRight)
                         .open(self.open)
                         .on_open_change(cx.listener(|this, open: &bool, _, cx| this.set_open(*open, cx)))

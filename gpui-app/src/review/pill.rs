@@ -2,6 +2,7 @@ use crate::review::popover::{PopoverEvent, ReviewPopover};
 use crate::review::session::{ReviewEvent, ReviewSession};
 use diffpilot_core::review::Severity;
 use diffpilot_core::run::{Progress, Run, RunId, RunKind, RunState};
+use diffpilot_ui_kit::components::popover;
 use diffpilot_ui_kit::components::{Button, Look, filled_check, severity_badge, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
@@ -10,7 +11,6 @@ use gpui::{
     IntoElement, KeyBinding, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
     Task, WeakEntity, Window, actions, div, px,
 };
-use gpui_component::popover::Popover;
 use gpui_component::spinner::Spinner;
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{ActiveTheme, Icon, Sizable, h_flex};
@@ -263,7 +263,7 @@ impl Render for ReviewPill {
         let visible = session.host().visible_path.is_some();
         let claude = match session.current().filter(|run| !run.state.is_finished()) {
             Some(run) => self.working(run, theme, cx),
-            None => Popover::new("review-popover")
+            None => popover("review-popover")
                 .anchor(Corner::TopRight)
                 .open(self.open)
                 .on_open_change(cx.listener(|this, open: &bool, _, cx| {

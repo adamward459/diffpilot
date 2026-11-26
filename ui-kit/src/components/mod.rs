@@ -7,6 +7,7 @@ mod form;
 mod glass;
 mod interaction;
 pub mod menu;
+mod popover;
 
 pub use badge::{BadgeTone, avatar, filled_check, severity_badge, status_badge};
 pub use bar::{
@@ -24,3 +25,4 @@ pub use glass::{
     segmented, slab, thumb, toggle_capsule,
 };
 pub use interaction::{DISABLED_OPACITY, Fills, State, interactive};
+pub use popover::{ArrowPopover, popover};

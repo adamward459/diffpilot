@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ### Changed
 
+- Popovers (Checks, Sync, Ask Claude, Fix, Queue) now have an arrow that points at the button that opened them, like native macOS popovers.
 - Fix is now its own toolbar button, next to Ask Claude. It opens a list where you pick which comments to send, and it stays available while a review runs.
 - Glass controls now look like real glass: a sheen lit from the top, a crisp rim, and a shadow that sinks when you hover or press. Buttons are now capsules, and controls, toolbars, and text are larger.
 - The app is now named Diffpilot in the menu bar and the Dock.
