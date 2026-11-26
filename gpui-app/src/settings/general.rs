@@ -33,7 +33,7 @@ fn launch(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) 
                         "Without it, diffpilot starts with no folder until you press ⌘O.",
                     ))
                     .control(
-                        tag(switch(t, "open-last", open, true), "open-last").on_click(cx.listener(
+                        tag(switch(t, "open-last", open, true), || "open-last").on_click(cx.listener(
                             move |this, _, _, cx| {
                                 this.settings.set_open_last_repository(!open);
                                 cx.notify();
@@ -59,7 +59,7 @@ fn editor(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) 
     let current = saved.clone();
     let control = menu_button(
         "editor",
-        tag(picker(t, "editor", label, true), "editor"),
+        tag(picker(t, "editor", label, true), || "editor"),
         move |_, _| {
             let choose = |title: SharedString, choice: Option<Editor>, checked: bool| -> MenuRow {
                 let (this, template) = (this.clone(), template.clone());
@@ -175,7 +175,7 @@ pub fn diff(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>
                 Row::new(t, "Wrap lines")
                     .subtitle(caption(t, "Same as the wrap button in the toolbar."))
                     .control(
-                        tag(switch(t, "wrap-lines", wrap, true), "wrap-lines").on_click(cx.listener(
+                        tag(switch(t, "wrap-lines", wrap, true), || "wrap-lines").on_click(cx.listener(
                             move |this, _, _, cx| {
                                 this.settings.set_wrap_lines(!wrap);
                                 cx.notify();

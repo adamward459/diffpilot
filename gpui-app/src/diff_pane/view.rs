@@ -791,7 +791,7 @@ impl DiffPane {
                         })
                     }),
                 ),
-                format!("pane:open-in-editor:{}", diff.path),
+                || format!("pane:open-in-editor:{}", diff.path),
             ))
             .child(bar_button(
                 theme,

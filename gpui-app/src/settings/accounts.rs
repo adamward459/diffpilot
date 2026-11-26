@@ -44,7 +44,7 @@ pub fn render(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
                 Button::new("github-import")
                     .label("Import from gh")
                     .disabled(!(!working)),
-                "github:import",
+                || "github:import",
             )
             .when(!working, |this| {
                 this.on_click(cx.listener(|this, _, _, cx| this.import_from_gh(cx)))
@@ -54,7 +54,7 @@ pub fn render(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
             this.child(
                 tag(
                     Button::new("github-sign-out").label("Sign Out").disabled(!(!working)),
-                    "github:sign-out",
+                    || "github:sign-out",
                 )
                 .when(!working, |this| {
                     this.on_click(cx.listener(|this, _, _, cx| this.sign_out(cx)))
@@ -79,7 +79,7 @@ pub fn render(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
         .child(
             tag(
                 Button::new("github-save").label("Save").disabled(!(!working)),
-                "github:save",
+                || "github:save",
             )
             .when(!working, |this| {
                 this.on_click(cx.listener(|this, _, window, cx| this.save_token(window, cx)))

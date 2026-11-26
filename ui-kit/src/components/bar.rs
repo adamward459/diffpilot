@@ -186,7 +186,7 @@ pub fn icon_switch(
             let tooltip = item.tooltip;
             let hover = theme.hover;
             let marked = index == selected;
-            tag(h_flex().id((id, index)), format!("{id}:{}", item.name))
+            tag(h_flex().id((id, index)), || format!("{id}:{}", item.name))
                 .w(px(34.))
                 .h_full()
                 .justify_center()
@@ -198,7 +198,7 @@ pub fn icon_switch(
                 .on_click(move |_, window, cx| on_select(index, window, cx))
                 .child(
                     div()
-                        .when(marked, |this| tag(this, format!("{id}:{}:selected", item.name)))
+                        .when(marked, |this| tag(this, || format!("{id}:{}:selected", item.name)))
                         .child(Icon::new(item.glyph).size(px(16.)).text_color(theme.ui.text2)),
                 )
         }),

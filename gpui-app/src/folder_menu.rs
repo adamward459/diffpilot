@@ -224,7 +224,7 @@ impl Render for FolderMenu {
                 .font_weight(FontWeight::SEMIBOLD)
                 .label(name.clone())
                 .caret(true),
-            "folder-title",
+            || "folder-title",
         );
 
         let refresh = menu.clone();
@@ -253,7 +253,7 @@ impl Render for FolderMenu {
             }
         });
 
-        tag(h_flex(), format!("folder-active:{name}"))
+        tag(h_flex(), || format!("folder-active:{name}"))
             .gap(px(8.))
             .items_center()
             .child(popover)

@@ -35,7 +35,7 @@ pub fn comparison_control(
                         .icon(branch_glyph(comparison), 16.)
                         .label(branch_title(refs, comparison))
                         .tooltip(branch_tooltip(comparison)),
-                    "comparison-branch",
+                    || "comparison-branch",
                 ),
                 move |_, _| menu_sections(&branch_sections, &branch_select),
             )
@@ -57,7 +57,7 @@ pub fn comparison_control(
                         .icon(base_glyph(comparison), 16.)
                         .label(base_title(comparison))
                         .tooltip("Compared to"),
-                    "comparison-base",
+                    || "comparison-base",
                 ),
                 move |_, _| menu_sections(&base_sections, &base_select),
             )

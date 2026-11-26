@@ -226,12 +226,12 @@ impl ReviewPill {
                 .rounded_full()
                 .h(px(24.))
                 .gap(px(6.)),
-            "review:open",
+            || "review:open",
         );
         match run {
             ReviewRun::Done { counts } if self.shows_result => button
                 .child(filled_check(theme.ui.green, 16.))
-                .child(tag(div(), "review:done").child("Review done"))
+                .child(tag(div(), || "review:done").child("Review done"))
                 .children(Severity::ALL.iter().filter_map(|severity| {
                     let count = counts.get(severity).copied().unwrap_or(0);
                     (count > 0).then(|| {
@@ -328,7 +328,7 @@ impl ReviewPill {
                 format!("Fixed {fixed} · {open} open")
             };
             return Some(
-                tag(button("fix-result"), "pill:fix-result")
+                tag(button("fix-result"), || "pill:fix-result")
                     .child(filled_check(theme.ui.green, 16.))
                     .child(div().child(text))
                     .into_any_element(),
@@ -343,7 +343,7 @@ impl ReviewPill {
             .clone()
             .unwrap_or_else(|| "Ask Claude to fix the open comments".into());
         Some(
-            tag(div(), format!("pill:fix-ready:{count}"))
+            tag(div(), || format!("pill:fix-ready:{count}"))
                 .child(
                     tag(
                         Button::new("fix-threads")
@@ -356,7 +356,7 @@ impl ReviewPill {
                             .label(format!("Fix {count}"))
                             .tooltip(tooltip)
                             .disabled(blocker.is_some()),
-                        "pill:fix-threads",
+                        || "pill:fix-threads",
                     )
                     .on_click(cx.listener(|this, _, _, cx| this.fix(cx))),
                 )
@@ -422,7 +422,7 @@ impl Render for ReviewPill {
                         .label(count.to_string())
                         .tooltip("Comment on file")
                         .disabled(!visible),
-                    "pill:comment-on-file",
+                    || "pill:comment-on-file",
                 )
                 .on_click(cx.listener(|this, _, _, cx| this.comment_on_file(cx))),
             )
@@ -461,7 +461,7 @@ fn working(run: Working, theme: Theme, cx: &Context<ReviewPill>) -> impl IntoEle
                 .id((stop_id, 0usize))
                 .gap_1()
                 .child(
-                    tag(div(), format!("pill:{stop_id}:working"))
+                    tag(div(), || format!("pill:{stop_id}:working"))
                         .font_weight(FontWeight::SEMIBOLD)
                         .child(label),
                 )
@@ -483,7 +483,7 @@ fn working(run: Working, theme: Theme, cx: &Context<ReviewPill>) -> impl IntoEle
                     .px(px(0.))
                     .tooltip("Stop Claude (⌘.)")
                     .child(div().size(px(10.)).rounded(px(2.)).bg(theme.danger)),
-                format!("pill:{stop_id}"),
+                || format!("pill:{stop_id}"),
             )
             .on_click(cx.listener(move |this, _, _, cx| stop(this, cx))),
         )

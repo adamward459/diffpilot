@@ -22,9 +22,8 @@ pub fn spinner(id: impl Into<ElementId>, size: f32, color: Hsla) -> impl IntoEle
 }
 
 /// Names an element so tests can find it.
-pub fn tag<E: InteractiveElement>(element: E, name: impl Into<String>) -> E {
-    let name = name.into();
-    element.debug_selector(move || name)
+pub fn tag<E: InteractiveElement, S: Into<String>>(element: E, name: impl FnOnce() -> S) -> E {
+    element.debug_selector(|| name().into())
 }
 
 pub fn section(theme: &Theme, title: &'static str, content: impl IntoElement) -> Div {
@@ -251,7 +250,7 @@ pub fn segmented_control(
                         this.on_click(move |_, window, cx| on_select(ix, window, cx))
                     })
                     .child(*label),
-                format!("{id}:{label}"),
+                || format!("{id}:{label}"),
             )
         }))
 }

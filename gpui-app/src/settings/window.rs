@@ -481,7 +481,7 @@ impl SettingsWindow {
                     .on_click(cx.listener(move |this, _, window, cx| this.select_tab(tab, window, cx)))
                     .child(glyph_icon(tab.icon(), 16., color))
                     .child(tab.title()),
-                format!("tab:{}", tab.title()),
+                || format!("tab:{}", tab.title()),
             )
         });
         div()

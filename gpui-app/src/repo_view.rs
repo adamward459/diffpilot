@@ -886,16 +886,15 @@ impl RepoView {
                 nothing,
             ))
             .child(
-                tag(
-                    div(),
-                    format!("jump-bar:path:{}", self.visible_file.as_deref().unwrap_or_default()),
-                )
+                tag(div(), || {
+                    format!("jump-bar:path:{}", self.visible_file.as_deref().unwrap_or_default())
+                })
                 .flex_1()
                 .min_w_0()
                 .child(self.path_crumbs(&tokens)),
             )
             .child(
-                tag(h_flex(), format!("jump-bar:threads:{threads}"))
+                tag(h_flex(), || format!("jump-bar:threads:{threads}"))
                     .gap(px(3.))
                     .flex_none()
                     .text_size(px(13.))
@@ -997,7 +996,7 @@ impl RepoView {
             |_, _, _| {},
         );
         let drag = drag_region(&self.should_move);
-        let leading = (!self.sidebar_open).then(|| tag(sidebar_toggle(cx), "toolbar:sidebar-toggle"));
+        let leading = (!self.sidebar_open).then(|| tag(sidebar_toggle(cx), || "toolbar:sidebar-toggle"));
         drag(
             h_flex()
                 .id("toolbar")
@@ -1056,7 +1055,7 @@ impl Render for RepoView {
         let tokens = Theme::of(cx);
         let width = self.sidebar_width;
         let drag = drag_region(&self.should_move);
-        let toggle = tag(sidebar_toggle(cx), "sidebar:toggle");
+        let toggle = tag(sidebar_toggle(cx), || "sidebar:toggle");
         let toolbar = self.toolbar(cx);
         let jump_bar = self.jump_bar(cx);
         let bottom_bar = self.bottom_bar(cx);

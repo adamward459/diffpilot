@@ -268,7 +268,7 @@ impl Render for ReviewPopover {
                                 .hint("⌘↩")
                                 .regular()
                                 .look(Look::Primary),
-                            "review:start",
+                            || "review:start",
                         )
                         .on_click(cx.listener(|this, _, _, cx| this.start(cx))),
                     ),

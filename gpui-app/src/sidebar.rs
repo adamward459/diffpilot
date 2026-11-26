@@ -286,10 +286,9 @@ impl Sidebar {
             .pt(px(5.))
             .pb(px(10.))
             .child(
-                tag(
-                    div(),
-                    format!("sidebar:summary:{}/{} viewed", summary.viewed, summary.file_count),
-                )
+                tag(div(), || {
+                    format!("sidebar:summary:{}/{} viewed", summary.viewed, summary.file_count)
+                })
                 .text_size(px(12.))
                 .text_color(muted)
                 .whitespace_nowrap()
@@ -439,7 +438,7 @@ impl Sidebar {
         let path = row.path.clone();
         let depth = row.depth as f32;
 
-        let base = tag(h_flex().id(("row", index)), format!("sidebar:row:{path}"))
+        let base = tag(h_flex().id(("row", index)), || format!("sidebar:row:{path}"))
             .group("row")
             .w_full()
             .h(px(ROW_HEIGHT))
@@ -543,7 +542,7 @@ impl Sidebar {
                             .min_w_0()
                             .truncate()
                             .text_color(name_color)
-                            .when(viewed, |this| tag(this, format!("sidebar:is-viewed:{path}")))
+                            .when(viewed, |this| tag(this, || format!("sidebar:is-viewed:{path}")))
                             .child(SharedString::from(entry.name.clone())),
                     )
                     .when(*show_parent, |this| {
@@ -560,7 +559,7 @@ impl Sidebar {
                     .when(!*show_parent, |this| this.child(div().flex_1()))
                     .when(comments > 0, |this| {
                         this.child(
-                            tag(h_flex(), format!("sidebar:comments:{path}:{comments}"))
+                            tag(h_flex(), || format!("sidebar:comments:{path}:{comments}"))
                                 .gap(px(2.))
                                 .text_size(px(11.))
                                 .text_color(secondary)
@@ -580,7 +579,7 @@ impl Sidebar {
                                 cx.emit(SidebarEvent::ToggleViewed(toggle_path.clone()));
                             }),
                         ),
-                        format!("sidebar:viewed:{path}"),
+                        || format!("sidebar:viewed:{path}"),
                     ))
                     .child(status_badge(
                         change.status.code(),
@@ -593,7 +592,7 @@ impl Sidebar {
         div()
             .w_full()
             .px(px(6.))
-            .when(selected, |this| tag(this, format!("sidebar:selected:{path}")))
+            .when(selected, |this| tag(this, || format!("sidebar:selected:{path}")))
             .child(element)
             .into_any_element()
     }

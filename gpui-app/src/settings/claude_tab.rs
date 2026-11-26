@@ -110,7 +110,7 @@ fn connection(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
             this.child(
                 tag(
                     Button::new("claude-recheck").label("Check Again").disabled(!(true)),
-                    "claude:recheck",
+                    || "claude:recheck",
                 )
                 .on_click(cx.listener(|this, _, _, cx| this.refresh_claude(cx))),
             )
@@ -119,7 +119,7 @@ fn connection(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
             this.child(
                 tag(
                     Button::new("claude-default").label("Use Default").disabled(!(true)),
-                    "claude:default",
+                    || "claude:default",
                 )
                 .on_click(cx.listener(|this, _, _, cx| this.use_default_claude_path(cx))),
             )
@@ -127,7 +127,7 @@ fn connection(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
         .child(
             tag(
                 Button::new("claude-set-path").label("Set Path…").disabled(!(!busy)),
-                "claude:set-path",
+                || "claude:set-path",
             )
             .when(!busy, |this| {
                 this.on_click(cx.listener(|this, _, _, cx| this.choose_claude_path(cx)))
@@ -172,7 +172,7 @@ fn model_picker(
     save: fn(&Settings, ReviewModel),
 ) -> impl IntoElement {
     let this = cx.entity();
-    menu_button(id, tag(picker(t, id, model.title(), true), id), move |_, _| {
+    menu_button(id, tag(picker(t, id, model.title(), true), || id), move |_, _| {
         let set = |label: &str, next: ReviewModel, checked: bool| -> MenuRow {
             let this = this.clone();
             MenuItem::new(title_case(label), move |_, cx| {
@@ -237,7 +237,10 @@ fn editing(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>)
     let this = cx.entity();
     let picker = menu_button(
         "edit-permission",
-        tag(picker(t, "edit-permission", current.title(), true), "edit-permission"),
+        tag(
+            picker(t, "edit-permission", current.title(), true),
+            || "edit-permission",
+        ),
         move |_, _| {
             let rows = EditPermission::ALL
                 .into_iter()
@@ -303,7 +306,7 @@ fn terminal_agents(window: &SettingsWindow, t: &Theme, cx: &mut Context<Settings
         .child(
             tag(
                 Button::new("mcp-install").label(action).disabled(!(can_install)),
-                "mcp:install",
+                || "mcp:install",
             )
             .when(can_install, |this| {
                 this.on_click(cx.listener(|this, _, _, cx| this.install_mcp(cx)))
@@ -316,7 +319,7 @@ fn terminal_agents(window: &SettingsWindow, t: &Theme, cx: &mut Context<Settings
                 "Claude Code in your terminal can read and answer the comments you leave here.",
             ))
             .control(
-                tag(switch(t, "allow-terminal", allowed, true), "allow-terminal")
+                tag(switch(t, "allow-terminal", allowed, true), || "allow-terminal")
                     .on_click(cx.listener(move |this, _, _, cx| this.set_allow_terminal_agents(!allowed, cx))),
             )
             .into_any_element(),

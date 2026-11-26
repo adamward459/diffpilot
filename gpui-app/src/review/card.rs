@@ -458,10 +458,9 @@ impl ThreadCard {
     }
 
     fn button(&self, label: &'static str, key: &'static str) -> Button {
-        tag(
-            Button::new((key, self.id.0 as usize)).label(label),
-            format!("thread:{key}:{}", self.key),
-        )
+        tag(Button::new((key, self.id.0 as usize)).label(label), || {
+            format!("thread:{key}:{}", self.key)
+        })
     }
 
     fn ask_button(&self, busy: bool) -> Button {
@@ -535,7 +534,7 @@ impl ThreadCard {
 
     fn comment(&self, comment: &ThreadComment, first: bool, fonts: &Fonts) -> AnyElement {
         let theme = fonts.theme;
-        tag(h_flex(), comment_tag(comment))
+        tag(h_flex(), || comment_tag(comment))
             .items_start()
             .gap(px(m::AVATAR_GAP))
             .px(px(m::SIDE))
@@ -584,10 +583,9 @@ impl ThreadCard {
                         .py(px(4.)),
                 )
                 .into_any_element(),
-            None => tag(
-                div().id(("composer", self.id.0 as usize)),
-                format!("thread:composer:{}", self.key),
-            )
+            None => tag(div().id(("composer", self.id.0 as usize)), || {
+                format!("thread:composer:{}", self.key)
+            })
             .h(px(m::INPUT_ROW + m::INPUT_PAD))
             .px(px(9.))
             .flex()
@@ -698,7 +696,7 @@ impl ThreadCard {
             .text_size(px(m::TEXT_SIZE))
             .child(severity_badge(finding.severity, &theme, 15.))
             .child(
-                tag(div(), format!("finding:{}", finding.title))
+                tag(div(), || format!("finding:{}", finding.title))
                     .min_w_0()
                     .overflow_hidden()
                     .text_ellipsis()
@@ -921,7 +919,7 @@ fn comment_tag(comment: &ThreadComment) -> String {
 
 fn tag_comment(element: gpui::Div, comment: Option<&ThreadComment>) -> gpui::Div {
     match comment {
-        Some(comment) => tag(element, comment_tag(comment)),
+        Some(comment) => tag(element, || comment_tag(comment)),
         None => element,
     }
 }
