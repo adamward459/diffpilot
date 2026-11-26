@@ -4,6 +4,7 @@
 
 use crate::diff::{FileDiff, LineKind};
 use crate::threads::{ReviewThread, Side, ThreadAnchor};
+use std::borrow::Borrow;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Placement {
@@ -31,11 +32,11 @@ fn side_lines(file: &FileDiff, side: Side) -> Vec<(u32, &str)> {
     lines
 }
 
-fn file_of<'a>(files: &'a [FileDiff], path: &str) -> Option<&'a FileDiff> {
-    files
-        .iter()
+fn file_of<'a, F: Borrow<FileDiff>>(files: &'a [F], path: &str) -> Option<&'a FileDiff> {
+    let mut all = files.iter().map(|file| file.borrow());
+    all.clone()
         .find(|file| file.path == path)
-        .or_else(|| files.iter().find(|file| file.old_path.as_deref() == Some(path)))
+        .or_else(|| all.find(|file| file.old_path.as_deref() == Some(path)))
 }
 
 fn last_line(end_line: Option<u32>, line: u32) -> u32 {
@@ -57,23 +58,23 @@ pub fn lines_text(file: &FileDiff, side: Side, start: u32, end: u32) -> Option<S
 }
 
 /// The text of the thread's lines, when the diff shows all of them.
-pub fn text_of(thread: &ReviewThread, files: &[FileDiff]) -> Option<String> {
+pub fn text_of<F: Borrow<FileDiff>>(thread: &ReviewThread, files: &[F]) -> Option<String> {
     let ThreadAnchor::Line { path, side, line } = &thread.anchor else {
         return None;
     };
     lines_text(file_of(files, path)?, *side, *line, last_line(thread.end_line, *line))
 }
 
-pub fn place(thread: &ReviewThread, files: &[FileDiff]) -> Placement {
+pub fn place<F: Borrow<FileDiff>>(thread: &ReviewThread, files: &[F]) -> Placement {
     place_at(&thread.anchor, thread.end_line, thread.anchor_text.as_deref(), files)
 }
 
 /// Where an anchor with `end_line` and the text it was made on sits in `files` now. Guides use this for their notes.
-pub fn place_at(
+pub fn place_at<F: Borrow<FileDiff>>(
     anchor: &ThreadAnchor,
     end_line: Option<u32>,
     anchor_text: Option<&str>,
-    files: &[FileDiff],
+    files: &[F],
 ) -> Placement {
     let (path, side, line) = match anchor {
         ThreadAnchor::Change => return Placement::Current,

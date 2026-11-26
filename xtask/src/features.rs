@@ -417,7 +417,14 @@ pub const FEATURES: &[Feature] = &[
     },
     Feature {
         name: "guide",
-        paths: &["core/src/guide/**", "core/src/store/guides.rs", "core/tests/guide.rs"],
+        paths: &[
+            "core/src/guide/**",
+            "core/src/store/guides.rs",
+            "core/tests/guide.rs",
+            "gpui-app/src/guide/**",
+            "gpui-app/examples/guide.rs",
+            "gpui-app/tests/guide.rs",
+        ],
         tests: &[
             Lib {
                 package: CORE,
@@ -431,9 +438,33 @@ pub const FEATURES: &[Feature] = &[
                 package: CORE,
                 test: "guide",
             },
+            Lib {
+                package: APP,
+                module: "guide::",
+            },
+            Target {
+                package: APP,
+                test: "guide",
+            },
         ],
         bench: None,
-        scenes: &[],
+        scenes: &[
+            Scene {
+                name: "overview-light",
+                target: Binary::app_example("guide"),
+                env: &[("DIFFPILOT_GUIDE_STEP", "overview"), ("DIFFPILOT_APPEARANCE", "light")],
+            },
+            Scene {
+                name: "chapter-light",
+                target: Binary::app_example("guide"),
+                env: &[("DIFFPILOT_GUIDE_STEP", "chapter"), ("DIFFPILOT_APPEARANCE", "light")],
+            },
+            Scene {
+                name: "chapter-dark",
+                target: Binary::app_example("guide"),
+                env: &[("DIFFPILOT_GUIDE_STEP", "chapter"), ("DIFFPILOT_APPEARANCE", "dark")],
+            },
+        ],
     },
     Feature {
         name: "app-shell",

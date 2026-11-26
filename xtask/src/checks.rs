@@ -435,7 +435,7 @@ pub fn related() -> Result {
             .map(|p| p.feature.name)
             .collect();
         if !benched.is_empty() || !scened.is_empty() {
-            println!("These open windows. Run them only when the user asks:");
+            println!("These open windows. Run each once:");
         }
         if !benched.is_empty() {
             println!("  cargo xtask perf {}", benched.join(" "));

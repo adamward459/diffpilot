@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - A sidebar that shows the changed files as a tree or a list, with a name filter and filters for uncommitted and viewed files.
 - Comment threads on diff lines. Type `@claude` in a comment to get a reply from Claude.
 - Ask Claude to review the change, with focus areas, extra instructions, and a model choice. Findings appear as threads on their lines.
+- Guide mode (⌘2): Claude writes a guide to the change, and you read it chapter by chapter, with notes under the lines they explain and a panel that lists what to check.
+- Guide diagrams: flowcharts and sequence diagrams drawn in the app, with a Source view and a step-by-step walk through the flow.
+- The guide shows when it is out of date because the branch moved, and Rewrite writes a new one.
 - Click the ahead and behind counts to fetch, pull, or push. The popover says what each action does and tells you to pull first when the remote is ahead. Shortcuts: ⇧⌘F, ⇧⌘L, ⇧⌘U.
 - The branch menu lists open GitHub pull requests. Pick one to compare it with its base without a checkout, or choose Open on GitHub. The branch you are on shows its PR number and checks state.
 - The toolbar shows the checks and review state of the branch's pull request. Open the checks to see each job, re-run one or all failed jobs, and open a job's log in the browser.
