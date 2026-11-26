@@ -1,3 +1,5 @@
+mod bundle;
+mod changelog;
 mod checks;
 mod features;
 mod fixture;
@@ -32,6 +34,13 @@ cargo xtask visual [feature...] [--compare [--base REF]] [--dry-run]
 cargo xtask pr-screenshots [feature...]
                                 capture and push the scenes of the features the open PR touches,
                                 and put the images in its body
+cargo xtask bundle [--universal] [--zip]
+                                build diffpilot.app (arm64 + x86_64 with --universal) into
+                                target/bundle/ and print its path; --zip also writes diffpilot-macos.zip
+cargo xtask release VERSION     move the Unreleased notes of CHANGELOG.md into VERSION and set it
+                                as the diffpilot version in gpui-app/Cargo.toml and Cargo.lock
+cargo xtask release-notes VERSION
+                                print the CHANGELOG.md section of VERSION; fail if it is empty
 cargo xtask related             print the commands that match the current changes
 cargo xtask features            print the feature table and the files no feature lists";
 
@@ -50,6 +59,9 @@ fn main() -> ExitCode {
         Some("baseline") => perf::baseline(rest),
         Some("visual") => visual::visual(rest),
         Some("pr-screenshots") => pr::pr_screenshots(rest),
+        Some("bundle") => bundle::bundle(rest),
+        Some("release") => changelog::release(rest),
+        Some("release-notes") => changelog::release_notes(rest),
         Some("related") => checks::related(),
         Some("features") => checks::features(),
         _ => {
@@ -100,7 +112,8 @@ fn precommit() -> Result {
         add.extend(staged.iter().map(String::as_str));
         git(&add)?;
     }
-    check_bin_paths()
+    check_bin_paths()?;
+    changelog::check()
 }
 
 // With the shared build dir, env! bakes in the path of whichever worktree compiled the test.

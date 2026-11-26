@@ -8,34 +8,33 @@ diffpilot is a macOS app for reviewing Git changes before you push them. It show
 
 - macOS 13 or later, Apple Silicon or Intel.
 - Git. Install the Xcode command line tools if you don't have it: `xcode-select --install`.
-- Rust, from [rustup](https://rustup.rs): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 - Optional, for the Claude features: [Claude Code](https://docs.claude.com/en/docs/claude-code), signed in. diffpilot runs the `claude` command on your Mac. It needs no API key.
-
-You don't need Xcode or its Metal toolchain. diffpilot compiles its GPU shaders when it starts.
 
 ## Install
 
 ```sh
-git clone https://github.com/adamward459/diffpilot.git
-cd diffpilot
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/adamward459/diffpilot/main/install.sh | bash
 ```
 
 The script does three things:
 
-1. It builds a release binary. The first build takes a few minutes.
+1. It downloads the latest release from [GitHub Releases](https://github.com/adamward459/diffpilot/releases). The app runs on Apple Silicon and Intel.
 2. It puts `diffpilot.app` in `/Applications`, or in `~/Applications` if `/Applications` is not writable.
 3. It adds a `diffpilot` command in `~/.local/bin`. If that folder is not on your `PATH`, the script tells you the line to add to `~/.zshrc`.
 
-Options:
+To pass options, use `bash -s --`, for example `curl -fsSL .../install.sh | bash -s -- --no-cli`.
 
 | Option | What it does |
 | --- | --- |
+| `--version vX.Y.Z` | Install that release instead of the latest |
+| `--from-source` | Build from a clone instead of downloading. Needs [Rust](https://rustup.rs). Run `./install.sh --from-source` inside the clone |
 | `--dest DIR` | Install the app into `DIR` |
 | `--no-cli` | Skip the `diffpilot` command |
 | `--uninstall` | Remove the app and the command |
 
-To update, pull the latest code and run `./install.sh` again.
+To update, run the install command again.
+
+The app is not notarized by Apple. If you download `diffpilot-macos.zip` with a browser instead of the script, macOS blocks the app. Allow it with `xattr -dr com.apple.quarantine /Applications/diffpilot.app`.
 
 ## Run
 
@@ -97,3 +96,10 @@ These environment variables help with testing:
 | `DIFFPILOT_BENCH=1` | Run a benchmark, print JSON, and quit |
 
 `cargo xtask fixture` builds `.fixtures/large`, a test repository with about 2000 changed files. The benchmarks and screenshots use it.
+
+## Release
+
+1. Write each change under `## [Unreleased]` in `CHANGELOG.md` as you make it. Keep each line at 250 characters or less.
+2. Run the **Release** workflow on `main`, from the Actions tab or with `gh workflow run release.yml -f version=X.Y.Z`.
+
+The workflow moves the Unreleased notes into `## [X.Y.Z] - <date>`, updates the compare links, and sets the version in `gpui-app/Cargo.toml` and `Cargo.lock` (`cargo xtask release X.Y.Z`). It builds a universal `diffpilot.app` (`cargo xtask bundle --universal --zip`). Only after the build passes does it push the `chore(release): vX.Y.Z` commit and the `vX.Y.Z` tag to `main`, and then it publishes `diffpilot-macos.zip` with that version's changelog section as the release notes. To build the same app locally, run `cargo xtask bundle --universal`.

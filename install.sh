@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
-# Build diffpilot, install diffpilot.app, and add a `diffpilot` command.
+# Install diffpilot.app from the latest GitHub release and add a `diffpilot` command.
 #
-#   install.sh                 install to /Applications (or ~/Applications)
-#   install.sh --dest DIR      install the app into DIR
-#   install.sh --no-cli        skip the `diffpilot` command
-#   install.sh --uninstall     remove the app and the command
+#   install.sh                     install to /Applications (or ~/Applications)
+#   install.sh --version v0.2.0    install that release instead of the latest
+#   install.sh --from-source       build from this clone instead of downloading
+#   install.sh --dest DIR          install the app into DIR
+#   install.sh --no-cli            skip the `diffpilot` command
+#   install.sh --uninstall         remove the app and the command
 set -euo pipefail
 
 APP_NAME="diffpilot"
-BUNDLE_ID="com.adamward459.diffpilot"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="adamward459/diffpilot"
 BIN_DIR="${DIFFPILOT_BIN_DIR:-$HOME/.local/bin}"
 DEST=""
 CLI=1
 UNINSTALL=0
+FROM_SOURCE=0
+VERSION=""
 
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 fail() {
@@ -27,6 +30,14 @@ while [[ $# -gt 0 ]]; do
         DEST="${2:?--dest needs a folder}"
         shift 2
         ;;
+    --version)
+        VERSION="${2:?--version needs a tag, e.g. v0.2.0}"
+        shift 2
+        ;;
+    --from-source)
+        FROM_SOURCE=1
+        shift
+        ;;
     --no-cli)
         CLI=0
         shift
@@ -36,7 +47,7 @@ while [[ $# -gt 0 ]]; do
         shift
         ;;
     -h | --help)
-        sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
         exit 0
         ;;
     *) fail "unknown option: $1 (try --help)" ;;
@@ -66,62 +77,45 @@ if [[ $UNINSTALL -eq 1 ]]; then
     exit 0
 fi
 
-if ! command -v cargo >/dev/null 2>&1; then
-    if [[ -x "$HOME/.cargo/bin/cargo" ]]; then
-        PATH="$HOME/.cargo/bin:$PATH"
-    else
-        fail "Rust is not installed. Install it with:
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-then run this script again."
-    fi
-fi
 command -v git >/dev/null 2>&1 || fail "git is not installed. Run: xcode-select --install"
-
-say "Building release binary (the first build takes a few minutes)"
-(cd "$ROOT" && cargo build --release -p diffpilot -p diffpilot-core --bins)
-TARGET_DIR="$(cd "$ROOT" && cargo metadata --format-version 1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
-BINARY="$TARGET_DIR/release/$APP_NAME"
-HELPERS=(diffpilot-guard diffpilot-mcp)
-for bin in "$BINARY" "${HELPERS[@]/#/$TARGET_DIR/release/}"; do
-    [[ -x "$bin" ]] || fail "build finished but $bin is missing"
-done
-
-VERSION="$(cd "$ROOT" && cargo pkgid -p diffpilot)"
-VERSION="${VERSION##*[#@]}"
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
-BUNDLE="$STAGE/$APP_NAME.app"
-mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
-cp "$BINARY" "$BUNDLE/Contents/MacOS/$APP_NAME"
-for helper in "${HELPERS[@]}"; do
-    cp "$TARGET_DIR/release/$helper" "$BUNDLE/Contents/MacOS/$helper"
-done
-cat >"$BUNDLE/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleName</key><string>$APP_NAME</string>
-    <key>CFBundleDisplayName</key><string>$APP_NAME</string>
-    <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
-    <key>CFBundleExecutable</key><string>$APP_NAME</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>$VERSION</string>
-    <key>CFBundleVersion</key><string>$VERSION</string>
-    <key>LSMinimumSystemVersion</key><string>13.0</string>
-    <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
-    <key>NSHighResolutionCapable</key><true/>
-    <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
-</dict>
-</plist>
-PLIST
-codesign --force --sign - "$BUNDLE" >/dev/null 2>&1 || say "Ad-hoc signing failed; the app may still run."
+
+if [[ $FROM_SOURCE -eq 1 ]]; then
+    ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    [[ -f "$ROOT/Cargo.toml" ]] || fail "--from-source needs a clone: git clone https://github.com/$REPO.git"
+    if ! command -v cargo >/dev/null 2>&1; then
+        if [[ -x "$HOME/.cargo/bin/cargo" ]]; then
+            PATH="$HOME/.cargo/bin:$PATH"
+        else
+            fail "Rust is not installed. Install it with:
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+then run this script again."
+        fi
+    fi
+    say "Building release binary (the first build takes a few minutes)"
+    BUNDLE="$(cd "$ROOT" && cargo xtask bundle | tail -1)"
+else
+    if [[ -n "$VERSION" ]]; then
+        URL="https://github.com/$REPO/releases/download/$VERSION/diffpilot-macos.zip"
+    else
+        URL="https://github.com/$REPO/releases/latest/download/diffpilot-macos.zip"
+    fi
+    say "Downloading $URL"
+    curl -fsSL "$URL" -o "$STAGE/diffpilot.zip" ||
+        fail "download failed. Check the version, or build it yourself with --from-source."
+    ditto -x -k "$STAGE/diffpilot.zip" "$STAGE"
+    BUNDLE="$STAGE/$APP_NAME.app"
+fi
+[[ -x "$BUNDLE/Contents/MacOS/$APP_NAME" ]] || fail "$BUNDLE is not a diffpilot app"
 
 say "Installing $APP"
 mkdir -p "$DEST"
 rm -rf "$APP"
 ditto "$BUNDLE" "$APP"
+# The app is ad-hoc signed, so Gatekeeper would block it if it kept the quarantine flag.
+xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
 
 if [[ $CLI -eq 1 ]]; then
     say "Installing the diffpilot command at $SHIM"
