@@ -1,6 +1,7 @@
 pub mod bench;
 pub mod claude_area;
 mod claude_status;
+mod commit_popover;
 mod comparison_control;
 mod comparison_menu;
 pub mod diff_pane;

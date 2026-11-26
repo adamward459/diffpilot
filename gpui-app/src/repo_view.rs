@@ -1,6 +1,7 @@
 use crate::bench::{Bench, Mark};
 use crate::claude_area::{ClaudeArea, ClaudeAreaEvent, HEIGHT as CLAUDE_AREA_HEIGHT};
 use crate::claude_status::{Actions, status_row};
+use crate::commit_popover::{CommitEvent, CommitPopover};
 use crate::comparison_control::{Select, comparison_control};
 use crate::diff_pane::layout::SPLIT_MIN_WIDTH;
 use crate::folder_menu::FolderMenu;
@@ -34,9 +35,10 @@ use diffpilot_ui_kit::components::{
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{
-    App, Context, Entity, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render,
-    SharedString, Styled, Subscription, Task, Window, WindowControlArea, div, px,
+    App, Context, Corner, Entity, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
+    Render, SharedString, Styled, Subscription, Task, Window, WindowControlArea, div, px,
 };
+use gpui_component::popover::Popover;
 use gpui_component::{ActiveTheme, Icon, InteractiveElementExt as _, StyledExt, h_flex, v_flex};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
@@ -221,7 +223,9 @@ pub struct RepoView {
     refs: Option<Refs>,
     remote: Entity<RemoteStatus>,
     remote_capsule: Entity<RemoteCapsule>,
-    uncommitted: usize,
+    uncommitted: Option<usize>,
+    commit: Entity<CommitPopover>,
+    commit_open: bool,
     comparison: Option<Comparison>,
     session: Option<Session>,
     next_session_id: u64,
@@ -241,6 +245,7 @@ pub struct RepoView {
     refs_task: Option<Task<()>>,
     _watch_task: Option<Task<()>>,
     _remote_events: Subscription,
+    _commit_events: Subscription,
 }
 
 impl RepoView {
@@ -270,6 +275,11 @@ impl RepoView {
                 RemoteEvent::Review(comparison) => this.select_comparison(comparison.clone(), window, cx),
             },
         );
+        let commit = cx.new(|cx| CommitPopover::new(repo.clone(), window, cx));
+        let commit_events = cx.subscribe(&commit, |this, _, CommitEvent::Dismiss, cx| {
+            this.commit_open = false;
+            cx.notify();
+        });
         let mut this = Self {
             repo,
             folder_name: folder_name.into(),
@@ -282,7 +292,9 @@ impl RepoView {
             refs: None,
             remote,
             remote_capsule,
-            uncommitted: 0,
+            uncommitted: None,
+            commit,
+            commit_open: false,
             comparison: None,
             session: None,
             next_session_id: 0,
@@ -302,6 +314,7 @@ impl RepoView {
             refs_task: None,
             _watch_task: None,
             _remote_events: remote_events,
+            _commit_events: commit_events,
         };
         cx.observe_global::<crate::settings::SettingsChanged>(|this, cx| this.apply_settings(cx))
             .detach();
@@ -675,7 +688,9 @@ impl RepoView {
             .filter(|change| change.is_uncommitted)
             .map(|change| change.path.clone())
             .collect();
-        self.uncommitted = uncommitted.len();
+        let count = uncommitted.len();
+        self.uncommitted = Some(count);
+        self.commit.update(cx, |commit, cx| commit.set_changed(count, cx));
         if let Some(session) = self.session.as_ref() {
             session
                 .pane
@@ -1214,7 +1229,7 @@ impl RepoView {
 
     fn bottom_bar(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let tokens = Theme::of(cx);
-        let uncommitted = self.uncommitted;
+        let uncommitted = self.uncommitted.unwrap_or(0);
         status_bar(&tokens)
             .id("bottom-bar")
             .h(px(BAR_HEIGHT))
@@ -1245,13 +1260,43 @@ impl RepoView {
                         .child(format!("{uncommitted} uncommitted")),
                 )
             })
-            .child(
-                h_flex()
-                    .gap(px(4.))
-                    .opacity(0.45)
-                    .child(glyph_icon(Glyph::GitCommit, 14., tokens.ui.muted))
-                    .child("Commit\u{2026}"),
-            )
+            .child(self.commit_button(cx))
+            .into_any_element()
+    }
+
+    fn commit_button(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let enabled = self.uncommitted.is_some_and(|count| count > 0);
+        let trigger = tag(
+            Button::new("bottom-bar-commit")
+                .look(Look::Ghost)
+                .regular()
+                .icon(Glyph::GitCommit, 14.)
+                .label("Commit\u{2026}")
+                .disabled(!enabled),
+            move || match (enabled, self.uncommitted) {
+                (true, _) => "bottom-bar:commit",
+                (false, Some(_)) => "bottom-bar:commit:disabled",
+                (false, None) => "bottom-bar:commit:loading",
+            },
+        );
+        if !enabled {
+            return trigger.into_any_element();
+        }
+        Popover::new("commit-popover")
+            .anchor(Corner::BottomRight)
+            .open(self.commit_open)
+            .on_open_change(cx.listener(|this, open: &bool, window, cx| {
+                this.commit_open = *open;
+                if *open {
+                    this.commit.update(cx, |commit, cx| commit.focus(window, cx));
+                }
+                cx.notify();
+            }))
+            .trigger(trigger)
+            .content({
+                let commit = self.commit.clone();
+                move |_, _, _| commit.clone()
+            })
             .into_any_element()
     }
 

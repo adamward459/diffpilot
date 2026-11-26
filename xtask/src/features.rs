@@ -496,8 +496,8 @@ pub const FEATURES: &[Feature] = &[
     Feature {
         name: "app-shell",
         paths: &[
-            "gpui-app/src/{main,lib,workspace,repo_view,bench,testing,folder_menu}.rs",
-            "core/src/folder_status.rs",
+            "gpui-app/src/{main,lib,workspace,repo_view,bench,testing,folder_menu,commit_popover}.rs",
+            "core/src/{folder_status,commit}.rs",
             "gpui-app/tests/flows.rs",
             "gpui-app/tests/flows/**",
         ],
@@ -513,6 +513,10 @@ pub const FEATURES: &[Feature] = &[
             Lib {
                 package: CORE,
                 module: "folder_status::",
+            },
+            Lib {
+                package: CORE,
+                module: "commit::",
             },
         ],
         bench: Some(Binary::App),

@@ -2,6 +2,7 @@ mod common;
 
 mod flows {
     mod claude_area;
+    mod commit;
     mod comparison;
     mod diff_mode;
     mod editor;

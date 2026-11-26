@@ -2,6 +2,7 @@ pub mod anchor;
 pub mod cancel;
 pub mod changes;
 pub mod claude;
+pub mod commit;
 pub mod comparison;
 pub mod connection;
 pub mod diff;

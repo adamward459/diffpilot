@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ### Added
 
+- The Commit… button in the bottom bar now opens a message box and commits all uncommitted changes.
 - Send to Claude in the comment box (also ⌘⇧↩) posts your comment and asks Claude to fix just that thread.
 - Drag over lines in the diff to select them. A floating bar lets you copy the code, open the first line in your editor, or comment on the last line.
 - Link folders outside the repo to a guide by path. Claude reads them for context and can list code there that the change may break.
