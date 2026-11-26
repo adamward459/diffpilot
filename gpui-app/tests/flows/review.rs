@@ -135,6 +135,6 @@ fn comments_a_running_review_writes_become_threads_and_the_next_review_replaces_
     );
 
     click(cx, "review:open");
-    click(cx, "review:start");
+    click(cx, "claude-area:run-again");
     wait_until_shows(cx, "jump-bar:threads:4");
 }

@@ -1,6 +1,7 @@
 mod common;
 
 mod flows {
+    mod claude_area;
     mod comparison;
     mod diff_mode;
     mod editor;

@@ -1,4 +1,6 @@
 pub mod bench;
+pub mod claude_area;
+mod claude_status;
 mod comparison_control;
 mod comparison_menu;
 pub mod diff_pane;

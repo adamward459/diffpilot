@@ -1,4 +1,6 @@
 use crate::bench::{Bench, Mark};
+use crate::claude_area::{ClaudeArea, ClaudeAreaEvent, HEIGHT as CLAUDE_AREA_HEIGHT};
+use crate::claude_status::{Actions, status_row};
 use crate::comparison_control::{Select, comparison_control};
 use crate::diff_pane::layout::SPLIT_MIN_WIDTH;
 use crate::folder_menu::FolderMenu;
@@ -19,7 +21,7 @@ use diffpilot_core::diff::{self, DiffMode, FileDiff};
 use diffpilot_core::editor;
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::refs::Refs;
-use diffpilot_core::run::RunKind;
+use diffpilot_core::run::{RunKind, RunState};
 use diffpilot_core::settings::{self, Settings};
 use diffpilot_core::store::Store;
 use diffpilot_core::tree;
@@ -196,6 +198,7 @@ struct Session {
     sidebar: Entity<Sidebar>,
     pane: Entity<DiffPane>,
     pill: Entity<ReviewPill>,
+    area: Entity<ClaudeArea>,
     review: Entity<ReviewSession>,
     guide: Entity<GuideSession>,
     navigator: Entity<GuideNavigator>,
@@ -223,6 +226,8 @@ pub struct RepoView {
     next_session_id: u64,
     nav: Nav,
     inspector_open: bool,
+    claude_area_open: bool,
+    claude_area_generation: u32,
     sidebar_open: bool,
     sidebar_width: Pixels,
     resizing: bool,
@@ -282,6 +287,8 @@ impl RepoView {
             next_session_id: 0,
             nav: Nav::Files,
             inspector_open: true,
+            claude_area_open: false,
+            claude_area_generation: 0,
             sidebar_open: true,
             sidebar_width: px(IDEAL_SIDEBAR),
             resizing: false,
@@ -446,6 +453,10 @@ impl RepoView {
         };
         pane.update(cx, |pane, cx| pane.set_review(review.clone(), window, cx));
         let pill = cx.new(|cx| ReviewPill::new(review.clone(), window, cx));
+        let area = {
+            let popover = pill.read(cx).popover();
+            cx.new(|cx| ClaudeArea::new(review.clone(), popover, cx))
+        };
         let guide = {
             let (settings, store) = (self.settings.clone(), self.review_store.clone());
             cx.new(|cx| GuideSession::new(review.clone(), settings, store, cx))
@@ -462,28 +473,52 @@ impl RepoView {
                 this.sync_guide(window, cx);
                 cx.notify();
             }),
-            cx.subscribe_in(&navigator, window, |this, _, event: &NavigatorEvent, window, cx| match event {
-                NavigatorEvent::Go(step) => this.go_to(*step, window, cx),
-                NavigatorEvent::Reveal(path) => {
-                    if let Some(session) = &this.session {
-                        session.pane.update(cx, |pane, cx| pane.reveal(path, cx));
+            cx.subscribe_in(
+                &navigator,
+                window,
+                |this, _, event: &NavigatorEvent, window, cx| match event {
+                    NavigatorEvent::Go(step) => this.go_to(*step, window, cx),
+                    NavigatorEvent::Reveal(path) => {
+                        if let Some(session) = &this.session {
+                            session.pane.update(cx, |pane, cx| pane.reveal(path, cx));
+                        }
                     }
-                }
+                },
+            ),
+            cx.subscribe_in(
+                &stage,
+                window,
+                |this, _, StageEvent::Open(code): &StageEvent, window, cx| this.open_ref(code, window, cx),
+            ),
+            cx.subscribe_in(
+                &inspector,
+                window,
+                |this, _, event: &InspectorEvent, window, cx| match event {
+                    InspectorEvent::Open(code) => this.open_ref(code, window, cx),
+                    InspectorEvent::MarkViewedAndContinue => this.mark_chapter_viewed(window, cx),
+                },
+            ),
+            cx.subscribe_in(
+                &review,
+                window,
+                |this, review, event: &ReviewEvent, _, cx| match event {
+                    ReviewEvent::ThreadsChanged(change)
+                        if !matches!(change, crate::review::ThreadChange::Updated(_)) =>
+                    {
+                        this.show_comment_counts(review, cx);
+                    }
+                    ReviewEvent::RunFinished(RunState::Done) if review.read(cx).follows_current() => {
+                        this.set_claude_area(false, cx);
+                    }
+                    _ => {}
+                },
+            ),
+            cx.subscribe(&area, |this, _, ClaudeAreaEvent::Close, cx| {
+                this.set_claude_area(false, cx)
             }),
-            cx.subscribe_in(&stage, window, |this, _, StageEvent::Open(code): &StageEvent, window, cx| {
-                this.open_ref(code, window, cx)
-            }),
-            cx.subscribe_in(&inspector, window, |this, _, event: &InspectorEvent, window, cx| match event {
-                InspectorEvent::Open(code) => this.open_ref(code, window, cx),
-                InspectorEvent::MarkViewedAndContinue => this.mark_chapter_viewed(window, cx),
-            }),
-            cx.subscribe_in(&review, window, |this, review, event: &ReviewEvent, _, cx| {
-                if matches!(event, ReviewEvent::ThreadsChanged(change) if !matches!(change, crate::review::ThreadChange::Updated(_))) {
-                    this.show_comment_counts(review, cx);
-                }
-            }),
-            cx.subscribe(&pill, |this, _, PillEvent::NeedsRoomChanged(room), cx| {
-                this.set_compact_toolbar(*room, cx)
+            cx.subscribe(&pill, |this, _, event: &PillEvent, cx| match event {
+                PillEvent::NeedsRoomChanged(room) => this.set_compact_toolbar(*room, cx),
+                PillEvent::ShowArea => this.show_claude_log(cx),
             }),
             cx.subscribe_in(
                 &sidebar,
@@ -527,6 +562,7 @@ impl RepoView {
             sidebar,
             pane,
             pill,
+            area,
             review,
             guide,
             navigator,
@@ -802,6 +838,29 @@ impl RepoView {
             Nav::Guide => Nav::Files,
         };
         self.show_nav(next, window, cx);
+    }
+
+    pub fn claude_area_open(&self) -> bool {
+        self.claude_area_open
+    }
+
+    pub fn toggle_claude_area(&mut self, cx: &mut Context<Self>) {
+        self.set_claude_area(!self.claude_area_open, cx);
+    }
+
+    fn set_claude_area(&mut self, open: bool, cx: &mut Context<Self>) {
+        if self.claude_area_open != open {
+            self.claude_area_open = open;
+            self.claude_area_generation += 1;
+            cx.notify();
+        }
+    }
+
+    fn show_claude_log(&mut self, cx: &mut Context<Self>) {
+        if let Some(session) = &self.session {
+            session.review.update(cx, |review, cx| review.follow_current(cx));
+        }
+        self.set_claude_area(true, cx);
     }
 
     pub fn toggle_inspector(&mut self, cx: &mut Context<Self>) {
@@ -1133,13 +1192,23 @@ impl RepoView {
         status_bar(&tokens)
             .id("bottom-bar")
             .h(px(BAR_HEIGHT))
-            .child(
-                h_flex()
-                    .gap(px(6.))
-                    .opacity(0.6)
-                    .child(glyph_icon(Glyph::SquareTerminal, 14., tokens.ui.muted))
-                    .child("Claude \u{b7} no review yet"),
-            )
+            .children(self.session.as_ref().map(|session| {
+                status_row(
+                    session.review.read(cx),
+                    self.claude_area_open,
+                    self.claude_area_generation,
+                    &tokens,
+                    Actions {
+                        toggle: cx.listener(|this, _, _, cx| this.toggle_claude_area(cx)),
+                        show_log: cx.listener(|this, _, _, cx| this.show_claude_log(cx)),
+                        run_again: cx.listener(|this, _, _, cx| {
+                            if let Some(session) = &this.session {
+                                session.review.update(cx, |review, cx| review.run_again(cx));
+                            }
+                        }),
+                    },
+                )
+            }))
             .child(div().flex_1())
             .when(uncommitted > 0, |this| {
                 this.child(
@@ -1260,6 +1329,17 @@ impl Render for RepoView {
         let toolbar = self.toolbar(cx);
         let jump_bar = self.jump_bar(cx);
         let bottom_bar = self.bottom_bar(cx);
+        let claude_area = match &self.session {
+            Some(session) if self.claude_area_open => Some(
+                tag(div().id("claude-area-slot"), || {
+                    format!("claude-area:{}", self.claude_area_generation)
+                })
+                .h(px(CLAUDE_AREA_HEIGHT))
+                .flex_none()
+                .child(session.area.clone()),
+            ),
+            _ => None,
+        };
 
         let sidebar_content = match (&self.session, self.nav) {
             (Some(session), Nav::Files) => session.sidebar.clone().into_any_element(),
@@ -1396,6 +1476,7 @@ impl Render for RepoView {
                             .child(div().flex_1().min_w_0().h_full().child(detail_content))
                             .children(inspector),
                     )
+                    .children(claude_area)
                     .child(bottom_bar),
             )
     }
@@ -1438,7 +1519,7 @@ mod tests {
     }
 
     use super::*;
-    use crate::testing::{Opened, git, open, open_with, write};
+    use crate::testing::{FakeClaude, Opened, canned_review, fake_claude, git, open, open_with, wait_for_run, write};
     use gpui::TestAppContext;
 
     fn sidebar_paths(opened: &Opened, cx: &mut gpui::VisualTestContext) -> Vec<String> {
@@ -1715,13 +1796,22 @@ mod tests {
         pane.read_with(cx, |pane, _| pane.review().cloned().expect("a review session"))
     }
 
+    fn canned_claude_run(cx: &mut TestAppContext) -> FakeClaude {
+        let fake = fake_claude(cx);
+        fake.review_with(&canned_review());
+        fake.finish();
+        fake
+    }
+
     fn run_review(opened: &Opened, cx: &mut gpui::VisualTestContext) {
-        review_session(opened, cx).update(cx, |session, cx| session.start_review(cx));
-        cx.run_until_parked();
+        let session = review_session(opened, cx);
+        session.update(cx, |session, cx| session.start_review(cx));
+        wait_for_run(cx, &session);
     }
 
     #[gpui::test]
     fn review_findings_become_rows_in_the_pane_and_counts_in_the_sidebar(cx: &mut TestAppContext) {
+        let _fake = canned_claude_run(cx);
         let (opened, cx) = open(cx);
         run_review(&opened, cx);
         let (sidebar, pane) = opened.view.read_with(cx, |view, _| {
@@ -1758,12 +1848,14 @@ mod tests {
 
     #[gpui::test]
     fn the_toolbar_compacts_while_a_review_runs_and_while_its_result_shows(cx: &mut TestAppContext) {
+        let _fake = canned_claude_run(cx);
         let (opened, cx) = open(cx);
         let compact = |cx: &mut gpui::VisualTestContext| opened.view.read_with(cx, |view, _| view.compact_toolbar);
         assert!(!compact(cx));
-        review_session(&opened, cx).update(cx, |session, cx| session.start_review(cx));
+        let session = review_session(&opened, cx);
+        session.update(cx, |session, cx| session.start_review(cx));
         assert!(compact(cx), "running");
-        cx.run_until_parked();
+        wait_for_run(cx, &session);
         assert!(compact(cx), "the result shows for a few seconds");
         cx.executor()
             .advance_clock(Duration::from_secs(crate::review::pill::RESULT_SECONDS + 1));

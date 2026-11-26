@@ -172,8 +172,14 @@ pub fn open_repo(
     store: Arc<ViewedStore>,
     claude: Claude,
 ) -> (Entity<RepoView>, &'static mut VisualTestContext) {
-    let review_store = Arc::new(Store::open_in_memory().expect("an in-memory store opens"));
+    let review_store = engine_store(cx);
     open_repo_in(cx, repo, settings, store, review_store, claude)
+}
+
+/// The store of the fake engine when a test installed one, so that runs and threads share a database as they do in the app.
+fn engine_store(cx: &mut TestAppContext) -> Arc<Store> {
+    cx.update(|cx| cx.try_global::<Runs>().map(|runs| runs.engine().store().clone()))
+        .unwrap_or_else(|| Arc::new(Store::open_in_memory().expect("an in-memory store opens")))
 }
 
 pub fn open_repo_in(
@@ -263,7 +269,10 @@ pub fn open_workspace(
     ready(cx);
     let folder = folder.to_path_buf();
     let handle = cx.add_window(|window, cx| {
-        let review_store = Arc::new(Store::open_in_memory().expect("an in-memory store opens"));
+        let review_store = cx.try_global::<Runs>().map_or_else(
+            || Arc::new(Store::open_in_memory().expect("an in-memory store opens")),
+            |runs| runs.engine().store().clone(),
+        );
         let workspace = cx.new(|cx| {
             Workspace::new(
                 settings,
@@ -328,6 +337,17 @@ pub fn type_text(cx: &mut VisualTestContext, text: &str) {
 
 pub fn clipboard(cx: &mut VisualTestContext) -> Option<String> {
     cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()))
+}
+
+pub fn wait_for_run(cx: &mut VisualTestContext, session: &Entity<crate::review::ReviewSession>) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !session.read_with(cx, |session, _| {
+        session.current().is_some_and(|run| run.state.is_finished()) && !session.is_busy()
+    }) {
+        assert!(std::time::Instant::now() < deadline, "the run did not end");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        draw(cx);
+    }
 }
 
 pub fn wait_until_shows(cx: &mut VisualTestContext, selector: &str) {

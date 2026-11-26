@@ -45,6 +45,7 @@ pub fn init(cx: &mut App) {
 pub enum PillEvent {
     /// The pill wants more toolbar width: while a review runs and while its result shows.
     NeedsRoomChanged(bool),
+    ShowArea,
 }
 
 pub struct ReviewPill {
@@ -373,7 +374,13 @@ impl Render for ReviewPill {
             None => Popover::new("review-popover")
                 .anchor(Corner::TopRight)
                 .open(self.open)
-                .on_open_change(cx.listener(|this, open: &bool, _, cx| this.set_open(*open, cx)))
+                .on_open_change(cx.listener(|this, open: &bool, _, cx| {
+                    if *open && (this.shows_result() || this.shows_fix_result()) {
+                        cx.emit(PillEvent::ShowArea);
+                    } else {
+                        this.set_open(*open, cx);
+                    }
+                }))
                 .trigger(self.trigger(session, visible, theme))
                 .content({
                     let popover = self.popover.clone();
@@ -415,6 +422,7 @@ fn working(run: Working, theme: Theme, cx: &Context<ReviewPill>) -> impl IntoEle
                 .id((stop_id, 0usize))
                 .gap(px(7.))
                 .items_center()
+                .cursor_pointer()
                 .child(
                     Spinner::new()
                         .icon(Icon::new(Glyph::Spinner))
@@ -437,7 +445,8 @@ fn working(run: Working, theme: Theme, cx: &Context<ReviewPill>) -> impl IntoEle
                 )
                 .when_some(activity, |row, text| {
                     row.tooltip(move |window, cx| Tooltip::new(text.clone()).build(window, cx))
-                }),
+                })
+                .on_click(cx.listener(|_, _, _, cx| cx.emit(PillEvent::ShowArea))),
         )
         .child(
             tag(

@@ -188,6 +188,7 @@ pub const FEATURES: &[Feature] = &[
             "core/src/{review,threads,fix}.rs",
             "core/src/{fix_comments,make_changes,reply_thread}.md",
             "gpui-app/src/review/**",
+            "gpui-app/src/claude_{area,status}.rs",
             "gpui-app/examples/review.rs",
             "gpui-app/tests/review_*.rs",
             "gpui-app/src/runs.rs",
@@ -210,6 +211,10 @@ pub const FEATURES: &[Feature] = &[
             Lib {
                 package: APP,
                 module: "review::",
+            },
+            Lib {
+                package: APP,
+                module: "claude_area::",
             },
             Target {
                 package: APP,

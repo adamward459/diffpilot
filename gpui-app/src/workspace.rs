@@ -44,7 +44,8 @@ actions!(
         ToggleGuide,
         NextChapter,
         PreviousChapter,
-        ToggleInspector
+        ToggleInspector,
+        ToggleClaudeArea
     ]
 );
 
@@ -68,6 +69,7 @@ pub fn init(cx: &mut App) {
         gpui::KeyBinding::new("cmd-1", ShowFiles, None),
         gpui::KeyBinding::new("cmd-2", ShowGuide, None),
         gpui::KeyBinding::new("alt-cmd-0", ToggleInspector, None),
+        gpui::KeyBinding::new("shift-cmd-y", ToggleClaudeArea, None),
         gpui::KeyBinding::new("g", ToggleGuide, Some("!Input")),
         gpui::KeyBinding::new("]", NextChapter, Some("!Input")),
         gpui::KeyBinding::new("[", PreviousChapter, Some("!Input")),
@@ -107,6 +109,7 @@ pub fn init(cx: &mut App) {
                 MenuItem::action("Show Files", ShowFiles),
                 MenuItem::action("Show Guide", ShowGuide),
                 MenuItem::action("Toggle Inspector", ToggleInspector),
+                MenuItem::action("Toggle Claude Activity", ToggleClaudeArea),
             ],
         },
     ]);
@@ -357,6 +360,11 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ToggleInspector, _, cx| {
                 if let Some(repo) = this.active_view() {
                     repo.update(cx, |repo, cx| repo.toggle_inspector(cx));
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ToggleClaudeArea, _, cx| {
+                if let Some(repo) = this.active_view() {
+                    repo.update(cx, |repo, cx| repo.toggle_claude_area(cx));
                 }
             }))
             .on_action(cx.listener(|this, _: &Folder1, window, cx| this.switch_to_index(0, window, cx)))
