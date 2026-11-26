@@ -18,7 +18,6 @@ pub fn preview_kind(path: &str) -> Option<PreviewKind> {
     }
 }
 
-/// The bytes of `path` on one side of the comparison, or `None` when the file does not exist there.
 /// For the old side of a renamed file, pass the old path.
 pub fn read_side(repo: &Path, comparison: &Comparison, side: Side, path: &str) -> Option<Vec<u8>> {
     match side {

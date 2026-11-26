@@ -198,7 +198,6 @@ impl Tops {
         Self::with_heights(rows, files, wrap, threads, &HashMap::new())
     }
 
-    /// `previews` holds the row height of each previewed file by path. A file without one takes `PREVIEW`.
     pub fn with_heights(
         rows: &[Row],
         files: &[Arc<FileDiff>],

@@ -238,7 +238,6 @@ impl DiffPane {
         self.sync(cx);
     }
 
-    /// Files with an image or Markdown extension show a preview of what is in `repo` for `comparison`.
     /// Without a source every file shows its diff.
     pub fn set_preview_source(&mut self, source: Option<(PathBuf, Comparison)>, cx: &mut Context<Self>) {
         let source = source.map(|(repo, comparison)| PreviewSource { repo, comparison });

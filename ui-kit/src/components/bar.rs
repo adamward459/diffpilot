@@ -238,7 +238,6 @@ pub fn label_segment(theme: &Theme, id: &'static str, items: &[(&'static str, bo
     }))
 }
 
-/// Like `label_segment` with every label clickable. `name` gives each label the name tests find it by.
 pub fn label_switch(
     theme: &Theme,
     id: &'static str,

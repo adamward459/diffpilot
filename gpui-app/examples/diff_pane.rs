@@ -58,7 +58,6 @@ fn gradient(width: u32, height: u32, from: [u8; 3], to: [u8; 3]) -> image::RgbaI
     })
 }
 
-/// A repo whose feature branch changes a PNG and a Markdown file and adds one of each.
 fn preview_repo() -> PathBuf {
     let repo = std::env::temp_dir().join(format!("diffpilot-preview-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&repo);

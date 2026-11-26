@@ -112,7 +112,6 @@ pub fn write_png(dir: &Path, path: &str, width: u32, height: u32, color: [u8; 4]
         .expect("write png");
 }
 
-/// A feature branch that changes a PNG and adds a Markdown file.
 pub fn preview_fixture() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
     let repo = dir.path();

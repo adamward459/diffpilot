@@ -211,7 +211,6 @@ impl PaneState {
         self.nearby_files().filter(|&index| self.shows_lines(index)).collect()
     }
 
-    /// Files that show a preview and are in view or just below it.
     pub fn previews_to_load(&self) -> Vec<usize> {
         self.nearby_files()
             .filter(|&index| {
@@ -312,7 +311,6 @@ impl PaneState {
         self.relayout(anchor);
     }
 
-    /// Files with an image or Markdown extension show a preview while the pane has a source to read them from.
     pub fn set_preview_source(&mut self, on: bool) {
         if on == self.preview_source {
             return;
@@ -348,8 +346,7 @@ impl PaneState {
         self.relayout(anchor);
     }
 
-    /// Sets the row height of a file's preview. Rows below it move, and a row above the viewport keeps the
-    /// content in view where it is.
+    /// A row above the viewport keeps the content in view where it is.
     pub fn set_preview_height(&mut self, path: &str, height: f32) -> bool {
         if self.preview_heights.get(path) == Some(&height) {
             return false;
