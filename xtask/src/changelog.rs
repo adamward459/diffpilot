@@ -4,7 +4,7 @@ use std::process::Command;
 use crate::{Result, root, run};
 
 const FILE: &str = "CHANGELOG.md";
-const MAX_LINE: usize = 250;
+const MAX_LINE: usize = 225;
 
 pub fn check() -> Result {
     let text = fs::read_to_string(root().join(FILE))?;
