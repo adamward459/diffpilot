@@ -1,7 +1,7 @@
 use crate::review::popover::PopoverEvent;
 use crate::review::{ReviewPopover, ReviewSession};
 use crate::runs::now_ms;
-use diffpilot_core::run::{LogEntry, LogKind, Run, RunOutcome, RunState, StepState};
+use diffpilot_core::run::{LogEntry, LogKind, Run, RunId, RunOutcome, RunState, StepState};
 use diffpilot_ui_kit::components::menu::{MenuItem, MenuSection, menu_button};
 use diffpilot_ui_kit::components::{Button, Look, glyph_icon, spinner, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
@@ -33,11 +33,38 @@ pub struct ClaudeArea {
     popover: Entity<ReviewPopover>,
     queue_open: bool,
     log_scroll: UniformListScrollHandle,
+    log_follow: LogFollow,
     ticker: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<ClaudeAreaEvent> for ClaudeArea {}
+
+#[derive(Default)]
+struct LogFollow {
+    run: Option<RunId>,
+    rows: usize,
+    following: bool,
+}
+
+impl LogFollow {
+    /// Follows while the list sits at the bottom. A scroll up stops it, and a scroll back down or another run resumes it.
+    /// Returns whether the list should scroll to its last row.
+    fn update(&mut self, run: Option<RunId>, rows: usize, at_bottom: bool) -> bool {
+        if self.run != run {
+            *self = Self {
+                run,
+                rows: 0,
+                following: true,
+            };
+        } else {
+            self.following = at_bottom;
+        }
+        let grew = rows > self.rows;
+        self.rows = rows;
+        self.following && grew
+    }
+}
 
 impl ClaudeArea {
     pub fn new(session: Entity<ReviewSession>, popover: Entity<ReviewPopover>, cx: &mut Context<Self>) -> Self {
@@ -53,6 +80,7 @@ impl ClaudeArea {
             popover,
             queue_open: false,
             log_scroll: UniformListScrollHandle::new(),
+            log_follow: LogFollow::default(),
             ticker: None,
             _subscriptions: subscriptions,
         };
@@ -280,11 +308,17 @@ impl ClaudeArea {
             .into_any_element()
     }
 
-    fn log_pane(&self, run: Option<&Run>, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+    fn log_pane(&mut self, run: Option<&Run>, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         let running = run.is_some_and(|run| !run.state.is_finished());
-        let following = running && self.session.read(cx).follows_current();
         let rows = run.map_or(0, |run| run.log.len() + usize::from(running));
-        if following && rows > 0 {
+        let at_bottom = {
+            let state = self.log_scroll.0.borrow();
+            state.last_item_size.is_none()
+                || -state.base_handle.offset().y + px(1.) >= state.base_handle.max_offset().height
+        };
+        let scroll_to_last = self.log_follow.update(run.map(|run| run.id), rows, at_bottom);
+        let following = running && self.session.read(cx).follows_current() && self.log_follow.following;
+        if following && scroll_to_last {
             self.log_scroll.scroll_to_item(rows - 1, ScrollStrategy::Bottom);
         }
         let list = uniform_list(
@@ -368,7 +402,7 @@ impl Render for ClaudeArea {
     }
 }
 
-fn stop_button(run: Option<diffpilot_core::run::RunId>, theme: Theme, cx: &mut Context<ClaudeArea>) -> AnyElement {
+fn stop_button(run: Option<RunId>, theme: Theme, cx: &mut Context<ClaudeArea>) -> AnyElement {
     tag(
         Button::new("claude-area-stop")
             .child(div().size(px(9.)).rounded(px(2.)).bg(theme.danger))
@@ -573,6 +607,25 @@ pub fn ago(now_ms: i64, then_ms: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_log_follows_new_rows_until_the_user_scrolls_up() {
+        let run = Some(RunId(1));
+        let mut follow = LogFollow::default();
+        assert!(follow.update(run, 3, true), "a new run starts at the bottom");
+        assert!(!follow.update(run, 3, true), "no new row, no scroll");
+        assert!(follow.update(run, 4, true), "a new row at the bottom scrolls");
+        assert!(
+            !follow.update(run, 5, false),
+            "after a scroll up a new row does not pull the user down"
+        );
+        assert!(!follow.update(run, 6, false));
+        assert!(follow.update(run, 7, true), "back at the bottom it follows again");
+        assert!(
+            follow.update(Some(RunId(2)), 2, false),
+            "another run is followed from its start"
+        );
+    }
 
     #[test]
     fn a_log_time_shows_minutes_and_seconds() {
