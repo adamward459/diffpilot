@@ -9,9 +9,11 @@ pub mod build;
 mod fixtures;
 pub mod mermaid;
 pub mod prompt;
+pub mod reading;
 pub mod stale;
 
 pub use mermaid::{DiagramKind, Graph};
+pub use reading::{ChapterKey, Reading, ReadingChapter};
 pub use stale::{Staleness, check, fingerprint};
 
 use crate::threads::{Side, ThreadAnchor};
