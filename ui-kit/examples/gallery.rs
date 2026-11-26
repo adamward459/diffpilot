@@ -3,7 +3,8 @@
 use diffpilot_core::review::Severity;
 use diffpilot_ui_kit::components::{
     BadgeTone, Button, Fills, Look, State, avatar, capsule, card_shell, chip, filled_check, filter_field, glass_button,
-    icon_button, interactive, segmented, severity_badge, status_badge, toggle_capsule, viewed_check, viewed_toggle,
+    icon_button, interactive, segmented, segmented_control, severity_badge, status_badge, toggle_capsule, viewed_check,
+    viewed_toggle,
 };
 use diffpilot_ui_kit::{Assets, Glyph, Theme, painted};
 use gpui::{
@@ -147,7 +148,15 @@ fn glass(theme: &Theme) -> impl IntoElement {
                 .child(div().w(px(220.)).child(filter_field(
                     theme,
                     div().text_color(theme.chrome.secondary).child("Filter"),
-                ))),
+                )))
+                .child(segmented_control(
+                    theme,
+                    "appearance",
+                    &["System", "Light", "Dark"],
+                    0,
+                    true,
+                    |_, _, _| {},
+                )),
         )
 }
 

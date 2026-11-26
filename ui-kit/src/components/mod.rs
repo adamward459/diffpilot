@@ -19,5 +19,8 @@ pub use check::{viewed_check, viewed_toggle};
 pub use form::{
     Row, caption, glyph_icon, grouped, mono_text, note, picker, section, segmented_control, spinner, switch, tag,
 };
-pub use glass::{OnSelect, capsule, filter_field, glass_button, glass_surface, segmented, toggle_capsule};
+pub use glass::{
+    CAPSULE_HEIGHT, CONTROL_HEIGHT, OnSelect, capsule, filter_field, glass_button, glass_fills, glass_surface, rim,
+    segmented, slab, thumb, toggle_capsule,
+};
 pub use interaction::{DISABLED_OPACITY, Fills, State, interactive};

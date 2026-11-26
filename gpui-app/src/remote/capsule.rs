@@ -58,7 +58,7 @@ impl RemoteCapsule {
                 .look(Look::Ghost)
                 .regular()
                 .rounded_full()
-                .h(px(27.))
+                .h(px(30.))
                 .px(px(10.))
                 .gap(px(8.)),
             move || tag_name,

@@ -1,5 +1,5 @@
 use super::form::{glyph_icon, tag};
-use super::glass::{OnSelect, glass_surface};
+use super::glass::{CAPSULE_HEIGHT, CONTROL_HEIGHT, OnSelect, glass_surface, thumb};
 use super::interaction::DISABLED_OPACITY;
 use crate::icons::Glyph;
 use crate::theme::Theme;
@@ -8,7 +8,7 @@ use gpui::{ClickEvent, Div, FontWeight, Hsla, SharedString, Stateful, Window, di
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{Icon, h_flex};
 
-pub const BAR_HEIGHT: f32 = 36.0;
+pub const BAR_HEIGHT: f32 = 40.0;
 
 pub struct SwitchItem {
     pub glyph: Glyph,
@@ -19,35 +19,36 @@ pub struct SwitchItem {
 }
 
 pub fn switch_bar(theme: &Theme, id: &'static str, items: &[SwitchItem], selected: usize, on_select: OnSelect) -> Div {
-    let thumb = theme.chrome.segment;
-    glass_surface(h_flex().h(px(34.)).p(px(3.)).gap(px(2.)).rounded_full(), theme).children(
-        items.iter().enumerate().map(|(index, item)| {
-            let on_select = on_select.clone();
-            let chosen = index == selected;
-            let enabled = item.enabled;
-            let hover = theme.hover;
-            h_flex()
-                .id((id, index))
-                .flex_1()
-                .h_full()
-                .justify_center()
-                .gap(px(5.))
-                .rounded_full()
-                .text_size(px(13.))
-                .text_color(theme.chrome.label)
-                .when(chosen, |this| this.bg(thumb))
-                .when(!enabled, |this| this.opacity(DISABLED_OPACITY))
-                .when(enabled && !chosen, |this| {
-                    this.cursor_pointer().hover(move |style| style.bg(hover))
-                })
-                .when(enabled, |this| {
-                    this.on_click(move |_, window, cx| on_select(index, window, cx))
-                })
-                .child(glyph_icon(item.glyph, 14., item.glyph_color.unwrap_or(theme.ui.text2)))
-                .child(item.label)
-                .child(div().text_size(px(11.5)).text_color(theme.ui.faint).child(item.hint))
-        }),
+    glass_surface(
+        h_flex().h(px(CAPSULE_HEIGHT)).p(px(3.)).gap(px(2.)).rounded_full(),
+        theme,
     )
+    .children(items.iter().enumerate().map(|(index, item)| {
+        let on_select = on_select.clone();
+        let chosen = index == selected;
+        let enabled = item.enabled;
+        let hover = theme.hover;
+        h_flex()
+            .id((id, index))
+            .flex_1()
+            .h_full()
+            .justify_center()
+            .gap(px(6.))
+            .rounded_full()
+            .text_size(px(14.))
+            .text_color(theme.chrome.label)
+            .when(chosen, |this| thumb(this, theme, None))
+            .when(!enabled, |this| this.opacity(DISABLED_OPACITY))
+            .when(enabled && !chosen, |this| {
+                this.cursor_pointer().hover(move |style| style.bg(hover))
+            })
+            .when(enabled, |this| {
+                this.on_click(move |_, window, cx| on_select(index, window, cx))
+            })
+            .child(glyph_icon(item.glyph, 16., item.glyph_color.unwrap_or(theme.ui.text2)))
+            .child(item.label)
+            .child(div().text_size(px(12.5)).text_color(theme.ui.faint).child(item.hint))
+    }))
 }
 
 pub fn jump_bar(theme: &Theme) -> Div {
@@ -64,11 +65,11 @@ pub fn status_bar(theme: &Theme) -> Div {
     h_flex()
         .h(px(BAR_HEIGHT))
         .flex_shrink_0()
-        .px(px(12.))
-        .gap(px(10.))
+        .px(px(14.))
+        .gap(px(12.))
         .border_t_1()
         .border_color(theme.ui.line)
-        .text_size(px(13.))
+        .text_size(px(14.))
         .text_color(theme.ui.muted)
 }
 
@@ -83,9 +84,9 @@ pub fn crumbs(theme: &Theme, items: Vec<Crumb>) -> Div {
     let count = items.len();
     h_flex()
         .min_w_0()
-        .gap(px(5.))
+        .gap(px(6.))
         .overflow_hidden()
-        .text_size(px(13.))
+        .text_size(px(14.))
         .text_color(theme.ui.text2)
         .whitespace_nowrap()
         .children(
@@ -93,10 +94,10 @@ pub fn crumbs(theme: &Theme, items: Vec<Crumb>) -> Div {
                 .into_iter()
                 .enumerate()
                 .flat_map(|(index, crumb)| {
-                    let separator = (index + 1 < count).then(|| glyph_icon(Glyph::ChevronRight, 11., theme.ui.faint));
+                    let separator = (index + 1 < count).then(|| glyph_icon(Glyph::ChevronRight, 12., theme.ui.faint));
                     let item = h_flex()
                         .gap(px(4.))
-                        .child(glyph_icon(crumb.glyph, 14., crumb.color.unwrap_or(theme.ui.muted)))
+                        .child(glyph_icon(crumb.glyph, 16., crumb.color.unwrap_or(theme.ui.muted)))
                         .child(
                             div()
                                 .text_color(if crumb.last { theme.ui.text } else { theme.ui.text2 })
@@ -126,12 +127,12 @@ pub fn chip_label(theme: &Theme, text: impl Into<SharedString>, tone: ChipTone) 
     };
     h_flex()
         .flex_none()
-        .h(px(20.))
-        .px(px(7.))
+        .h(px(22.))
+        .px(px(8.))
         .gap(px(4.))
         .rounded_full()
         .bg(fill)
-        .text_size(px(12.))
+        .text_size(px(13.))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(text_color)
         .whitespace_nowrap()
@@ -150,7 +151,7 @@ pub fn bar_button(
     let (hover, press) = (theme.hover, theme.press);
     h_flex()
         .id(id)
-        .size(px(28.))
+        .size(px(CONTROL_HEIGHT))
         .flex_none()
         .justify_center()
         .rounded_full()
@@ -163,7 +164,7 @@ pub fn bar_button(
                 .on_click(click)
         })
         .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
-        .child(Icon::new(glyph).size(px(16.)).text_color(theme.ui.text2))
+        .child(Icon::new(glyph).size(px(18.)).text_color(theme.ui.text2))
 }
 
 pub struct IconSegment {
@@ -179,37 +180,38 @@ pub fn icon_switch(
     selected: usize,
     on_select: OnSelect,
 ) -> Div {
-    let thumb = theme.chrome.segment;
-    glass_surface(h_flex().h(px(34.)).p(px(3.)).gap(px(2.)).rounded_full(), theme).children(
-        items.into_iter().enumerate().map(|(index, item)| {
-            let on_select = on_select.clone();
-            let tooltip = item.tooltip;
-            let hover = theme.hover;
-            let marked = index == selected;
-            tag(h_flex().id((id, index)), || format!("{id}:{}", item.name))
-                .w(px(34.))
-                .h_full()
-                .justify_center()
-                .rounded_full()
-                .cursor_pointer()
-                .when(index == selected, |this| this.bg(thumb))
-                .when(index != selected, |this| this.hover(move |style| style.bg(hover)))
-                .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
-                .on_click(move |_, window, cx| on_select(index, window, cx))
-                .child(
-                    div()
-                        .when(marked, |this| tag(this, || format!("{id}:{}:selected", item.name)))
-                        .child(Icon::new(item.glyph).size(px(16.)).text_color(theme.ui.text2)),
-                )
-        }),
+    glass_surface(
+        h_flex().h(px(CAPSULE_HEIGHT)).p(px(3.)).gap(px(2.)).rounded_full(),
+        theme,
     )
+    .children(items.into_iter().enumerate().map(|(index, item)| {
+        let on_select = on_select.clone();
+        let tooltip = item.tooltip;
+        let hover = theme.hover;
+        let marked = index == selected;
+        tag(h_flex().id((id, index)), || format!("{id}:{}", item.name))
+            .w(px(40.))
+            .h_full()
+            .justify_center()
+            .rounded_full()
+            .cursor_pointer()
+            .when(index == selected, |this| thumb(this, theme, None))
+            .when(index != selected, |this| this.hover(move |style| style.bg(hover)))
+            .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+            .on_click(move |_, window, cx| on_select(index, window, cx))
+            .child(
+                div()
+                    .when(marked, |this| tag(this, || format!("{id}:{}:selected", item.name)))
+                    .child(Icon::new(item.glyph).size(px(18.)).text_color(theme.ui.text2)),
+            )
+    }))
 }
 
 pub fn activity_capsule(theme: &Theme) -> Div {
-    super::glass::capsule(theme, 35.)
+    super::glass::capsule(theme, CAPSULE_HEIGHT)
         .px(px(4.))
         .gap(px(2.))
-        .text_size(px(13.))
+        .text_size(px(14.))
         .text_color(theme.ui.text2)
 }
 
@@ -218,19 +220,20 @@ pub fn status_dot(color: Hsla) -> Div {
 }
 
 pub fn label_segment(theme: &Theme, id: &'static str, items: &[(&'static str, bool)], selected: usize) -> Div {
-    let thumb = theme.chrome.segment;
-    glass_surface(h_flex().h(px(28.)).p(px(3.)).gap(px(2.)).rounded_full(), theme).children(
-        items.iter().enumerate().map(|(index, (label, enabled))| {
-            h_flex()
-                .id((id, index))
-                .h_full()
-                .px(px(10.))
-                .rounded_full()
-                .text_size(px(13.))
-                .text_color(theme.chrome.label)
-                .when(index == selected, |this| this.bg(thumb))
-                .when(!enabled, |this| this.opacity(DISABLED_OPACITY))
-                .child(*label)
-        }),
+    glass_surface(
+        h_flex().h(px(CONTROL_HEIGHT)).p(px(3.)).gap(px(2.)).rounded_full(),
+        theme,
     )
+    .children(items.iter().enumerate().map(|(index, (label, enabled))| {
+        h_flex()
+            .id((id, index))
+            .h_full()
+            .px(px(12.))
+            .rounded_full()
+            .text_size(px(14.))
+            .text_color(theme.chrome.label)
+            .when(index == selected, |this| thumb(this, theme, None))
+            .when(!enabled, |this| this.opacity(DISABLED_OPACITY))
+            .child(*label)
+    }))
 }

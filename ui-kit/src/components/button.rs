@@ -1,6 +1,7 @@
+use super::glass::rim;
 use super::interaction::{DISABLED_OPACITY, State};
 use crate::icons::Glyph;
-use crate::theme::Theme;
+use crate::theme::{Rise, Theme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton,
@@ -28,7 +29,7 @@ pub enum Scale {
 
 type Handler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
-/// A 22 pt button in the Swift app's look. gpui-component's `Button` turns its label red on hover.
+/// A glass capsule button: 26 pt compact, 30 pt regular. gpui-component's `Button` turns its label red on hover.
 #[derive(IntoElement)]
 pub struct Button {
     base: gpui::Stateful<gpui::Div>,
@@ -206,10 +207,17 @@ fn colors(look: Look, theme: &Theme) -> Colors {
 
 impl RenderOnce for Button {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let c = colors(self.look, &Theme::of(cx));
-        let (size, weight, pad, radius) = match self.scale {
-            Scale::Compact => (12., FontWeight::MEDIUM, 8., 5.),
-            Scale::Regular => (13., FontWeight::NORMAL, 10., 6.),
+        let theme = Theme::of(cx);
+        let c = colors(self.look, &theme);
+        let (size, weight, pad, height) = match self.scale {
+            Scale::Compact => (13., FontWeight::MEDIUM, 11., 26.),
+            Scale::Regular => (14., FontWeight::NORMAL, 13., 30.),
+        };
+        let glass = self.look != Look::Ghost;
+        let rise = match self.state {
+            State::Hover => Rise::Hover,
+            State::Pressed => Rise::Pressed,
+            _ => Rise::Rest,
         };
         let disabled = self.disabled || self.state == State::Disabled;
         let selected = self.selected && self.look == Look::Ghost;
@@ -224,20 +232,32 @@ impl RenderOnce for Button {
             .flex_none()
             .items_center()
             .justify_center()
-            .gap(px(4.))
-            .h(px(22.))
+            .gap(px(5.))
+            .h(px(height))
             .px(px(pad))
-            .rounded(px(radius))
+            .rounded_full()
             .border_1()
             .border_color(c.border)
-            .bg(fill)
+            .when(glass, |b| {
+                b.relative()
+                    .bg(theme.glass_body(fill))
+                    .shadow(theme.slab_shadow(rise))
+                    .child(rim(&theme, None))
+            })
+            .when(!glass, |b| b.bg(fill))
             .text_color(c.text)
             .text_size(px(size))
             .font_weight(weight)
             .whitespace_nowrap()
             .when(disabled, |b| b.opacity(DISABLED_OPACITY))
             .when(!disabled, |b| b.cursor_pointer())
-            .when(live, |b| b.hover(|s| s.bg(c.hover)).active(|s| s.bg(c.press)))
+            .when(live && glass, |b| {
+                let (hover, press) = (theme.glass_body(c.hover), theme.glass_body(c.press));
+                let (lower, set_down) = (theme.slab_shadow(Rise::Hover), theme.slab_shadow(Rise::Pressed));
+                b.hover(move |s| s.bg(hover).shadow(lower))
+                    .active(move |s| s.bg(press).shadow(set_down))
+            })
+            .when(live && !glass, |b| b.hover(|s| s.bg(c.hover)).active(|s| s.bg(c.press)))
             .refine_style(&self.style)
             .when_some(on_click, |b, handler| {
                 b.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
@@ -255,9 +275,9 @@ impl RenderOnce for Button {
             })
             .children(self.label)
             .children(self.children)
-            .when(self.caret, |b| b.child(Icon::new(Glyph::ChevronDown).size(px(12.))))
+            .when(self.caret, |b| b.child(Icon::new(Glyph::ChevronDown).size(px(13.))))
             .when_some(self.hint, |b, hint| {
-                b.child(div().text_size(px(10.)).opacity(0.75).child(hint))
+                b.child(div().text_size(px(11.)).opacity(0.75).child(hint))
             })
     }
 }
@@ -265,8 +285,8 @@ impl RenderOnce for Button {
 pub fn icon_button(id: impl Into<ElementId>, glyph: Glyph, color: Hsla) -> Button {
     Button::new(id)
         .look(Look::Ghost)
-        .icon_color(glyph, 11., color)
-        .w(px(22.))
+        .icon_color(glyph, 14., color)
+        .w(px(30.))
         .px(px(0.))
         .rounded_full()
 }
@@ -275,9 +295,9 @@ pub fn chip(name: &'static str, on: bool) -> Button {
     let chip = Button::new(name)
         .label(name)
         .regular()
-        .px(px(11.))
+        .px(px(12.))
         .rounded_full()
-        .text_size(px(12.))
+        .text_size(px(13.))
         .look(if on { Look::Tint } else { Look::Plain });
-    if on { chip.icon(Glyph::CheckThin, 10.) } else { chip }
+    if on { chip.icon(Glyph::CheckThin, 11.) } else { chip }
 }

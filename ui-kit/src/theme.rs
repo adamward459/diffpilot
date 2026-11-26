@@ -1,7 +1,10 @@
 use diffpilot_core::file_kind::FileTint;
 use diffpilot_core::review::Severity;
 use diffpilot_core::settings::{Appearance, appearance_override};
-use gpui::{App, BoxShadow, Global, Hsla, Rgba, Window, WindowAppearance, point, px, rgb, rgba};
+use gpui::{
+    App, Background, BoxShadow, Global, Hsla, Rgba, Window, WindowAppearance, linear_color_stop, linear_gradient,
+    point, px, rgb, rgba,
+};
 use gpui_component::{Theme as ComponentTheme, ThemeMode};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -40,6 +43,36 @@ pub struct Chrome {
     pub badge_fill: Hsla,
     pub badge_uncommitted_fill: Hsla,
     pub badge_selected_fill: Hsla,
+}
+
+/// Glass after Glassy UI's slab: a body lit from above, a rim, and a shadow that draws in as the slab lowers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Glass {
+    pub sheen: Hsla,
+    pub rim_top: Hsla,
+    pub rim_bottom: Hsla,
+    pub shade: Hsla,
+    pub shade_near: f32,
+    pub shade_far: f32,
+    pub hairline: Hsla,
+}
+
+/// How high a slab rests above the page. A pointer lowers it and a press sets it down.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Rise {
+    Rest,
+    Hover,
+    Pressed,
+}
+
+impl Rise {
+    fn height(self) -> f32 {
+        match self {
+            Rise::Rest => 1.0,
+            Rise::Hover => 0.5,
+            Rise::Pressed => 0.2,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -84,6 +117,7 @@ pub struct Theme {
     pub lift_press: Hsla,
     pub ui: Ui,
     pub chrome: Chrome,
+    pub glass: Glass,
     pub diff: Diff,
 }
 
@@ -165,10 +199,10 @@ impl Theme {
             label: pick(0x000000, 0xffffff),
             secondary: pick(0x7d7d7d, 0x9a9a9a),
             tertiary: pick(0xbcbcbc, 0x585858),
-            glass: pick(0xffffff, 0x1a1a1a),
-            glass_border: by_mode(rgba(0x0000000d).into(), rgba(0xffffff1f).into()),
+            glass: pick(0xefeff2, 0x262628),
+            glass_border: by_mode(rgba(0x0000001c).into(), rgba(0xffffff29).into()),
             glass_shadow: by_mode(rgba(0x0000001a).into(), rgba(0x00000066).into()),
-            segment: pick(0xe4e4e4, 0x3e3e3e),
+            segment: pick(0xffffff, 0x47474b),
             panel: pick(0xf8f8f8, 0x1f1f1f),
             panel_border: by_mode(rgba(0x0000000f).into(), rgba(0xffffff1a).into()),
             gutter: pick(0xf3f3f4, 0x242424),
@@ -177,6 +211,15 @@ impl Theme {
             badge_fill: by_mode(rgba(0x00000012).into(), rgba(0xffffff1a).into()),
             badge_uncommitted_fill: by_mode(rgba(0xe07b0029).into(), rgba(0xff9f0a33).into()),
             badge_selected_fill: rgba(0xffffff38).into(),
+        };
+        let glass = Glass {
+            sheen: by_mode(gpui::white().opacity(0.6), gpui::white().opacity(0.10)),
+            rim_top: by_mode(gpui::white(), gpui::white().opacity(0.38)),
+            rim_bottom: by_mode(gpui::white().opacity(0.7), gpui::white().opacity(0.14)),
+            shade: by_mode(rgb(0x343e54).into(), gpui::black()),
+            shade_near: if dark { 0.28 } else { 0.10 },
+            shade_far: if dark { 0.34 } else { 0.14 },
+            hairline: by_mode(rgba(0x00000008).into(), rgba(0x00000059).into()),
         };
         Self {
             dark,
@@ -196,6 +239,7 @@ impl Theme {
             lift_press: gpui::white().opacity(0.24),
             ui,
             chrome,
+            glass,
             diff: Self::diff_colors(dark),
         }
     }
@@ -319,13 +363,45 @@ impl Theme {
         ]
     }
 
+    /// `base` lit from above: the sheen fades out by 60% of the height, as on a Glassy UI button.
+    /// A see-through fill is laid over the page first, so the slab shadow never shows through the glass.
+    pub fn glass_body(&self, base: Hsla) -> Background {
+        let base = composite(self.background, base);
+        linear_gradient(
+            180.,
+            linear_color_stop(composite(base, self.glass.sheen.opacity(self.glass.sheen.a * 0.8)), 0.),
+            linear_color_stop(base, 0.6),
+        )
+    }
+
+    /// Glassy UI's slab shadow: a sharp contact shadow and a soft one further out, both scaled by the rise.
+    pub fn slab_shadow(&self, rise: Rise) -> Vec<BoxShadow> {
+        let h = rise.height();
+        let g = &self.glass;
+        vec![
+            BoxShadow {
+                color: g.hairline,
+                offset: point(px(0.), px(0.)),
+                blur_radius: px(0.),
+                spread_radius: px(0.5),
+            },
+            BoxShadow {
+                color: g.shade.opacity(g.shade_near),
+                offset: point(px(0.), px(1.5 * h)),
+                blur_radius: px(3. * h),
+                spread_radius: px(-h),
+            },
+            BoxShadow {
+                color: g.shade.opacity(g.shade_far),
+                offset: point(px(0.), px(6. * h)),
+                blur_radius: px(18. * h),
+                spread_radius: px(-4. * h),
+            },
+        ]
+    }
+
     pub fn glass_shadow(&self) -> Vec<BoxShadow> {
-        vec![BoxShadow {
-            color: self.chrome.glass_shadow,
-            offset: point(px(0.), px(2.)),
-            blur_radius: px(10.),
-            spread_radius: px(0.),
-        }]
+        self.slab_shadow(Rise::Rest)
     }
 }
 
@@ -368,7 +444,7 @@ fn apply_to_components(theme: &Theme, cx: &mut App) {
     let dark = theme.dark;
     let pick = |light: u32, dark_value: u32| -> Hsla { rgb(if dark { dark_value } else { light }).into() };
     let target = ComponentTheme::global_mut(cx);
-    target.font_size = px(13.);
+    target.font_size = px(14.);
     target.radius = px(6.);
     target.radius_lg = px(10.);
     target.background = theme.background;

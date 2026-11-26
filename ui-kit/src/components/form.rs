@@ -1,5 +1,6 @@
+use super::glass::{CONTROL_HEIGHT, rim, thumb};
 use crate::icons::Glyph;
-use crate::theme::Theme;
+use crate::theme::{Rise, Theme};
 use gpui::prelude::*;
 use gpui::{
     Animation, AnimationExt, AnyElement, App, Div, ElementId, FontWeight, Hsla, SharedString, Stateful, Transformation,
@@ -33,7 +34,7 @@ pub fn section(theme: &Theme, title: &'static str, content: impl IntoElement) ->
         .gap(px(8.))
         .child(
             div()
-                .text_size(px(14.))
+                .text_size(px(15.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme.ui.text)
                 .child(title),
@@ -61,8 +62,8 @@ pub fn note(theme: &Theme, color: Hsla, text: impl Into<SharedString>) -> Div {
     div()
         .px(px(13.))
         .py(px(8.))
-        .text_size(px(13.))
-        .line_height(px(18.))
+        .text_size(px(14.))
+        .line_height(px(20.))
         .text_color(color)
         .bg(theme.ui.raised)
         .child(text.into())
@@ -70,8 +71,8 @@ pub fn note(theme: &Theme, color: Hsla, text: impl Into<SharedString>) -> Div {
 
 pub fn caption(theme: &Theme, text: impl Into<SharedString>) -> Div {
     div()
-        .text_size(px(12.5))
-        .line_height(px(16.))
+        .text_size(px(13.))
+        .line_height(px(18.))
         .text_color(theme.ui.muted)
         .child(text.into())
 }
@@ -79,7 +80,7 @@ pub fn caption(theme: &Theme, text: impl Into<SharedString>) -> Div {
 pub fn mono_text(theme: &Theme, cx: &App, text: impl Into<SharedString>) -> Div {
     div()
         .font_family(cx.theme().mono_font_family.clone())
-        .text_size(px(12.))
+        .text_size(px(13.))
         .text_color(theme.ui.text2)
         .child(text.into())
 }
@@ -149,8 +150,8 @@ impl RenderOnce for Row {
                     .min_w_0()
                     .child(
                         div()
-                            .text_size(px(14.))
-                            .line_height(px(19.))
+                            .text_size(px(15.))
+                            .line_height(px(20.))
                             .text_color(t.ui.text)
                             .child(self.title),
                     )
@@ -169,15 +170,21 @@ pub fn switch(theme: &Theme, id: impl Into<ElementId>, on: bool, enabled: bool) 
         .flex()
         .items_center()
         .flex_none()
-        .w(px(32.))
-        .h(px(19.))
+        .w(px(38.))
+        .h(px(22.))
         .p(px(2.))
-        .rounded(px(10.))
+        .rounded(px(11.))
         .bg(if on { theme.accent } else { theme.ui.line2 })
         .when(on, |this| this.justify_end())
         .when(enabled, |this| this.cursor_pointer())
         .when(!enabled, |this| this.opacity(0.5))
-        .child(div().size(px(15.)).rounded_full().bg(theme.on_accent))
+        .child(
+            div()
+                .size(px(18.))
+                .rounded_full()
+                .bg(theme.on_accent)
+                .shadow(theme.slab_shadow(Rise::Pressed)),
+        )
 }
 
 /// A closed dropdown: label and up-down chevrons. The caller opens a `menu` under it.
@@ -188,18 +195,21 @@ pub fn picker(theme: &Theme, id: impl Into<ElementId>, label: impl Into<SharedSt
         .flex()
         .items_center()
         .gap(px(6.))
-        .h(px(28.))
-        .pl(px(10.))
-        .pr(px(6.))
-        .rounded(px(6.))
+        .h(px(CONTROL_HEIGHT))
+        .pl(px(12.))
+        .pr(px(8.))
+        .rounded(px(8.))
         .border_1()
         .border_color(theme.ui.cap_border)
-        .bg(theme.ui.cap)
-        .text_size(px(13.))
+        .relative()
+        .bg(theme.glass_body(theme.ui.cap))
+        .shadow(theme.slab_shadow(Rise::Rest))
+        .child(rim(theme, Some(7.)))
+        .text_size(px(14.))
         .text_color(theme.ui.text)
         .whitespace_nowrap()
         .child(label.into())
-        .child(glyph_icon(Glyph::ChevronsUpDown, 10., theme.ui.muted))
+        .child(glyph_icon(Glyph::ChevronsUpDown, 11., theme.ui.muted))
         .when(enabled, |this| {
             this.cursor_pointer().hover(move |style| style.bg(press))
         })
@@ -216,17 +226,20 @@ pub fn segmented_control(
     on_select: impl Fn(usize, &mut Window, &mut App) + 'static,
 ) -> Div {
     let on_select = Rc::new(on_select);
-    let press = theme.pressed(theme.ui.cap);
-    let (text, thumb) = (theme.ui.text, theme.chrome.segment);
+    let (hover, press) = (theme.hover, theme.press);
+    let text = theme.ui.text;
     div()
         .flex()
         .items_center()
         .gap(px(2.))
         .p(px(2.))
-        .rounded(px(6.))
-        .bg(theme.ui.cap)
+        .rounded(px(8.))
+        .relative()
+        .bg(theme.glass_body(theme.chrome.glass))
         .border_1()
-        .border_color(theme.ui.cap_border)
+        .border_color(theme.chrome.glass_border)
+        .shadow(theme.slab_shadow(Rise::Rest))
+        .child(rim(theme, Some(7.)))
         .when(!enabled, |this| this.opacity(0.5))
         .children(labels.iter().enumerate().map(|(ix, label)| {
             let on_select = on_select.clone();
@@ -237,14 +250,16 @@ pub fn segmented_control(
                     .flex()
                     .items_center()
                     .justify_center()
-                    .h(px(20.))
-                    .px(px(10.))
-                    .rounded(px(4.))
-                    .text_size(px(12.))
+                    .h(px(24.))
+                    .px(px(12.))
+                    .rounded(px(6.))
+                    .text_size(px(13.))
                     .text_color(text)
-                    .when(chosen, |this| this.bg(thumb))
+                    .when(chosen, |this| thumb(this, theme, Some(6.)))
                     .when(enabled && !chosen, |this| {
-                        this.cursor_pointer().hover(move |style| style.bg(press))
+                        this.cursor_pointer()
+                            .hover(move |style| style.bg(hover))
+                            .active(move |style| style.bg(press))
                     })
                     .when(enabled, |this| {
                         this.on_click(move |_, window, cx| on_select(ix, window, cx))

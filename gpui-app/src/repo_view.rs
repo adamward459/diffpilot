@@ -28,8 +28,8 @@ use diffpilot_core::tree;
 use diffpilot_core::viewed::{ViewedFiles, ViewedKey, ViewedStore};
 use diffpilot_core::watcher::{self, WatchGuard};
 use diffpilot_ui_kit::components::{
-    BAR_HEIGHT, Button, Crumb, IconSegment, Look, OnSelect, SwitchItem, bar_button, capsule, crumbs, glyph_icon,
-    icon_switch, jump_bar, status_bar, switch_bar, tag,
+    BAR_HEIGHT, Button, CAPSULE_HEIGHT, Crumb, IconSegment, Look, OnSelect, SwitchItem, bar_button, capsule, crumbs,
+    glyph_icon, icon_switch, jump_bar, status_bar, switch_bar, tag,
 };
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
@@ -51,8 +51,7 @@ const PANEL_RADIUS: f32 = 20.0;
 const MIN_SIDEBAR: f32 = 240.0 + PANEL_INSET;
 const IDEAL_SIDEBAR: f32 = 272.0 + PANEL_INSET;
 const MAX_SIDEBAR: f32 = 480.0 + PANEL_INSET;
-const TOOLBAR_HEIGHT: f32 = 52.0;
-const GLASS_HEIGHT: f32 = 35.0;
+const TOOLBAR_HEIGHT: f32 = 56.0;
 const NAV_TABS: [SwitchItem; 2] = [
     SwitchItem {
         glyph: Glyph::File,
@@ -1109,7 +1108,7 @@ impl RepoView {
                 tag(h_flex(), || format!("jump-bar:threads:{threads}"))
                     .gap(px(3.))
                     .flex_none()
-                    .text_size(px(13.))
+                    .text_size(px(14.))
                     .text_color(tokens.ui.text2)
                     .child(
                         Icon::new(Glyph::MessageSquare)
@@ -1191,7 +1190,7 @@ impl RepoView {
             _ => None,
         };
         let pill = self.session.as_ref().map(|session| {
-            capsule(&tokens, GLASS_HEIGHT)
+            capsule(&tokens, CAPSULE_HEIGHT)
                 .id("toolbar-claude-slot")
                 .px(px(6.))
                 .child(session.pill.clone())

@@ -218,7 +218,7 @@ impl Render for FolderMenu {
                 .look(Look::Ghost)
                 .regular()
                 .rounded_full()
-                .h(px(24.))
+                .h(px(30.))
                 .gap(px(6.))
                 .text_size(px(15.))
                 .font_weight(FontWeight::SEMIBOLD)

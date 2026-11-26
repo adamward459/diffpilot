@@ -224,7 +224,7 @@ impl ReviewPill {
                 .look(Look::Ghost)
                 .regular()
                 .rounded_full()
-                .h(px(24.))
+                .h(px(30.))
                 .gap(px(6.)),
             || "review:open",
         );
@@ -306,7 +306,7 @@ impl ReviewPill {
                 .look(Look::Ghost)
                 .regular()
                 .rounded_full()
-                .h(px(24.))
+                .h(px(30.))
                 .gap(px(6.))
         };
         if let Some(problem) = session.fix_problem() {
@@ -350,7 +350,7 @@ impl ReviewPill {
                             .look(Look::Claude)
                             .regular()
                             .rounded_full()
-                            .h(px(24.))
+                            .h(px(30.))
                             .gap(px(6.))
                             .icon(Glyph::Pencil, 14.)
                             .label(format!("Fix {count}"))
@@ -416,7 +416,7 @@ impl Render for ReviewPill {
                         .look(Look::Ghost)
                         .regular()
                         .rounded_full()
-                        .h(px(24.))
+                        .h(px(30.))
                         .gap(px(6.))
                         .icon(Glyph::MessageSquare, 16.)
                         .label(count.to_string())

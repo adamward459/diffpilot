@@ -7,7 +7,7 @@ use diffpilot_core::comparison::Comparison;
 use diffpilot_core::refs::Refs;
 use diffpilot_ui_kit::Theme;
 use diffpilot_ui_kit::components::menu::{MenuItem, MenuRow, MenuSection, menu_button};
-use diffpilot_ui_kit::components::{Button, Look, capsule, tag};
+use diffpilot_ui_kit::components::{Button, CAPSULE_HEIGHT, Look, capsule, tag};
 use gpui::prelude::*;
 use gpui::{App, IntoElement, ParentElement, Styled, Window, div, px};
 use std::rc::Rc;
@@ -27,7 +27,7 @@ pub fn comparison_control(
     let branch_select = select.clone();
     let base_select = select;
     let chip = remote.chip_element(tokens);
-    capsule(tokens, 35.)
+    capsule(tokens, CAPSULE_HEIGHT)
         .px(px(4.))
         .gap(px(4.))
         .child(
@@ -52,7 +52,7 @@ pub fn comparison_control(
         .when(!compact, |this| {
             this.child(
                 div()
-                    .text_size(px(13.))
+                    .text_size(px(14.))
                     .text_color(tokens.chrome.secondary)
                     .child("compared to"),
             )
@@ -77,7 +77,7 @@ fn segment(id: &'static str, tokens: &Theme) -> Button {
     Button::new(id)
         .look(Look::Ghost)
         .regular()
-        .h(px(27.))
+        .h(px(30.))
         .px(px(8.))
         .gap(px(5.))
         .rounded_full()
