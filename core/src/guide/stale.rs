@@ -9,20 +9,26 @@ use crate::diff::FileDiff;
 use crate::git;
 use crate::threads::ThreadAnchor;
 use sha2::{Digest, Sha256};
+use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-pub fn file_fingerprints(files: &[FileDiff]) -> BTreeMap<String, String> {
+pub fn file_fingerprints<F: Borrow<FileDiff>>(files: &[F]) -> BTreeMap<String, String> {
     files
         .iter()
-        .map(|file| (file.path.clone(), file.fingerprint()))
+        .map(|file| (file.borrow().path.clone(), file.borrow().fingerprint()))
         .collect()
 }
 
 /// A hash of the whole diff: every path with the fingerprint of its file diff, in path order.
-pub fn fingerprint(files: &[FileDiff]) -> String {
+pub fn fingerprint<F: Borrow<FileDiff>>(files: &[F]) -> String {
+    fingerprint_of(&file_fingerprints(files))
+}
+
+/// The same hash from the per-file fingerprints, so a caller that has them does not hash every line again.
+pub fn fingerprint_of(prints: &BTreeMap<String, String>) -> String {
     let mut hasher = Sha256::new();
-    for (path, file) in file_fingerprints(files) {
+    for (path, file) in prints {
         hasher.update(path.as_bytes());
         hasher.update([0]);
         hasher.update(file.as_bytes());
@@ -75,7 +81,7 @@ impl Staleness {
     }
 }
 
-pub fn check(guide: &Guide, files: &[FileDiff]) -> Staleness {
+pub fn check<F: Borrow<FileDiff>>(guide: &Guide, files: &[F]) -> Staleness {
     let now = file_fingerprints(files);
     let chapters = guide
         .chapters
@@ -124,9 +130,10 @@ pub fn check(guide: &Guide, files: &[FileDiff]) -> Staleness {
         })
         .collect();
     Staleness {
-        is_stale: guide.fingerprint != fingerprint(files),
+        is_stale: guide.fingerprint != fingerprint_of(&now),
         uncovered_files: files
             .iter()
+            .map(Borrow::borrow)
             .filter(|file| !guide.covers(&file.path))
             .map(|file| file.path.clone())
             .collect(),
@@ -203,6 +210,24 @@ mod tests {
         write(repo.path(), "notes.md", "# notes\n- undo send, five seconds\n");
         git(repo.path(), &["add", "-A"]);
         assert_ne!(fingerprint(&files), fingerprint(&load(repo.path())));
+    }
+
+    #[test]
+    fn the_fingerprint_from_the_per_file_map_is_the_hash_of_path_and_file_fingerprint_pairs() {
+        let repo = repo();
+        let files = load(repo.path());
+        let mut sorted: Vec<_> = files.iter().collect();
+        sorted.sort_by(|a, b| a.path.cmp(&b.path));
+        let mut hasher = Sha256::new();
+        for file in sorted {
+            for part in [file.path.clone(), file.fingerprint()] {
+                hasher.update(part.as_bytes());
+                hasher.update([0]);
+            }
+        }
+        let expected: String = hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect();
+        assert_eq!(fingerprint_of(&file_fingerprints(&files)), expected);
+        assert_eq!(fingerprint(&files), expected);
     }
 
     #[test]

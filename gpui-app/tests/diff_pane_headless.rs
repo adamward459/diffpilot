@@ -164,6 +164,20 @@ fn highlights_arrive_from_the_background_and_apply(cx: &mut TestAppContext) {
     assert!(!busy);
 }
 
+#[gpui::test]
+fn highlights_survive_a_filter_and_clearing_it(cx: &mut TestAppContext) {
+    let (pane, cx, _) = open(cx);
+    pane.update(cx, |pane, cx| pane.set_files(files(), cx));
+    cx.run_until_parked();
+    let ready = pane.read_with(cx, |pane, _| pane.highlighted_files());
+    assert!(ready >= 3, "{ready} files highlighted");
+
+    pane.update(cx, |pane, cx| pane.set_filter(Some(vec!["a.ts".into()]), cx));
+    cx.run_until_parked();
+    pane.update(cx, |pane, cx| pane.set_filter(None, cx));
+    assert_eq!(pane.read_with(cx, |pane, _| pane.highlighted_files()), ready);
+}
+
 fn split_files() -> Vec<FileDiff> {
     let mut renamed = changed("moved.ts", FileStatus::Renamed, "cddaacdaaa");
     renamed.old_path = Some("old/moved.ts".into());

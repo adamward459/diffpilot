@@ -208,6 +208,6 @@ mod tests {
     fn naming_a_feature_without_scenes_selects_nothing() {
         assert!(with_scenes(&["sidebar".to_owned()]).unwrap().is_empty());
         let names: Vec<_> = with_scenes(&[]).unwrap().iter().map(|f| f.name).collect();
-        assert_eq!(names, ["diff-pane", "review", "app-shell", "shared"]);
+        assert_eq!(names, ["diff-pane", "review", "guide", "app-shell", "shared"]);
     }
 }

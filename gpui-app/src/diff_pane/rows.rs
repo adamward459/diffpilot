@@ -61,7 +61,7 @@ pub enum RowKind {
         left: Option<u32>,
         right: Option<u32>,
     },
-    Thread {
+    Block {
         slot: u32,
     },
     Gap,
@@ -94,10 +94,17 @@ impl Row {
     }
 }
 
-/// A review thread the pane places in the row list. The pane never creates these itself.
+/// What a block row shows: a review thread, or a note of the guide by its position in the guide's note list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BlockId {
+    Thread(ThreadId),
+    Note(u32),
+}
+
+/// A block the pane places in the row list under a line or a file. The pane never creates these itself.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ThreadSlot {
-    pub id: ThreadId,
+pub struct BlockSlot {
+    pub id: BlockId,
     pub anchor: ThreadAnchor,
 }
 
@@ -109,14 +116,14 @@ pub enum RowRef {
     Gap,
     Hunk(u32),
     Line(u32, u32),
-    Thread(ThreadId),
+    Block(BlockId),
 }
 
 #[derive(Default)]
 pub struct Rows {
     pub rows: Vec<Row>,
     pub file_start: Vec<usize>,
-    pub thread_rows: Vec<Option<usize>>,
+    pub block_rows: Vec<Option<usize>>,
 }
 
 impl Rows {
@@ -129,11 +136,11 @@ impl Rows {
         (file + 1 < self.file_start.len()).then(|| self.file_start[file])
     }
 
-    pub fn thread_row(&self, slot: u32) -> Option<usize> {
-        self.thread_rows.get(slot as usize).copied().flatten()
+    pub fn block_row(&self, slot: u32) -> Option<usize> {
+        self.block_rows.get(slot as usize).copied().flatten()
     }
 
-    pub fn row_ref(&self, index: usize, threads: &[ThreadSlot]) -> RowRef {
+    pub fn row_ref(&self, index: usize, threads: &[BlockSlot]) -> RowRef {
         match self.rows[index].kind {
             RowKind::FileHeader => RowRef::Header,
             RowKind::Notice(_) => RowRef::Notice,
@@ -141,14 +148,14 @@ impl Rows {
             RowKind::Hunk { hunk } => RowRef::Hunk(hunk),
             RowKind::Line { hunk, line } => RowRef::Line(hunk, line),
             RowKind::Pair { hunk, left, right } => RowRef::Line(hunk, left.or(right).unwrap_or_default()),
-            RowKind::Thread { slot } => RowRef::Thread(threads[slot as usize].id),
+            RowKind::Block { slot } => RowRef::Block(threads[slot as usize].id),
         }
     }
 
-    pub fn find(&self, file: usize, target: RowRef, threads: &[ThreadSlot]) -> Option<usize> {
-        if let RowRef::Thread(id) = target {
+    pub fn find(&self, file: usize, target: RowRef, threads: &[BlockSlot]) -> Option<usize> {
+        if let RowRef::Block(id) = target {
             let slot = threads.iter().position(|thread| thread.id == id)?;
-            return self.thread_row(slot as u32);
+            return self.block_row(slot as u32);
         }
         self.file_range(file)?.find(|&index| match target {
             RowRef::Line(hunk, line) => self.rows[index].shows_line(hunk, line),
@@ -200,8 +207,8 @@ pub fn body_notice(file: &FileDiff, loaded: bool) -> Option<Notice> {
     None
 }
 
-pub fn build(files: &[Arc<FileDiff>], visibility: Visibility, threads: &[ThreadSlot], mode: DiffMode) -> Rows {
-    let mut by_path: HashMap<&str, Vec<(u32, &ThreadSlot)>> = HashMap::new();
+pub fn build(files: &[Arc<FileDiff>], visibility: Visibility, threads: &[BlockSlot], mode: DiffMode) -> Rows {
+    let mut by_path: HashMap<&str, Vec<(u32, &BlockSlot)>> = HashMap::new();
     for (slot, thread) in threads.iter().enumerate() {
         by_path
             .entry(thread.anchor.path())
@@ -215,14 +222,14 @@ pub fn build(files: &[Arc<FileDiff>], visibility: Visibility, threads: &[ThreadS
     let mut out = Rows {
         rows: Vec::with_capacity(capacity),
         file_start: Vec::with_capacity(files.len() + 1),
-        thread_rows: vec![None; threads.len()],
+        block_rows: vec![None; threads.len()],
     };
     if !files.is_empty() {
         for (slot, thread) in threads.iter().enumerate() {
             if thread.anchor == ThreadAnchor::Change {
                 out.rows.push(Row {
                     file: 0,
-                    kind: RowKind::Thread { slot: slot as u32 },
+                    kind: RowKind::Block { slot: slot as u32 },
                 });
             }
         }
@@ -240,7 +247,7 @@ pub fn build(files: &[Arc<FileDiff>], visibility: Visibility, threads: &[ThreadS
             if matches!(thread.anchor, ThreadAnchor::File { .. }) {
                 out.rows.push(Row {
                     file: f,
-                    kind: RowKind::Thread { slot: *slot },
+                    kind: RowKind::Block { slot: *slot },
                 });
             }
         }
@@ -261,8 +268,8 @@ pub fn build(files: &[Arc<FileDiff>], visibility: Visibility, threads: &[ThreadS
     }
     out.file_start.push(out.rows.len());
     for (index, row) in out.rows.iter().enumerate() {
-        if let RowKind::Thread { slot } = row.kind {
-            out.thread_rows[slot as usize] = Some(index);
+        if let RowKind::Block { slot } = row.kind {
+            out.block_rows[slot as usize] = Some(index);
         }
     }
     out
@@ -273,7 +280,7 @@ fn push_body(
     f: u32,
     file: &FileDiff,
     loaded: bool,
-    threads: &[(u32, &ThreadSlot)],
+    threads: &[(u32, &BlockSlot)],
     mode: DiffMode,
 ) {
     if let Some(notice) = body_notice(file, loaded) {
@@ -296,7 +303,7 @@ fn push_body(
     }
 }
 
-fn push_unified_hunk(rows: &mut Vec<Row>, f: u32, hunk_index: u32, hunk: &Hunk, threads: &[(u32, &ThreadSlot)]) {
+fn push_unified_hunk(rows: &mut Vec<Row>, f: u32, hunk_index: u32, hunk: &Hunk, threads: &[(u32, &BlockSlot)]) {
     for (l, line) in hunk.lines.iter().enumerate() {
         rows.push(Row {
             file: f,
@@ -311,7 +318,7 @@ fn push_unified_hunk(rows: &mut Vec<Row>, f: u32, hunk_index: u32, hunk: &Hunk, 
 
 /// Each run of changed lines becomes rows that put its deletions on the left and its additions on the right,
 /// in order. The shorter side ends early and the other side's cells have no partner.
-fn push_split_hunk(rows: &mut Vec<Row>, f: u32, hunk_index: u32, hunk: &Hunk, threads: &[(u32, &ThreadSlot)]) {
+fn push_split_hunk(rows: &mut Vec<Row>, f: u32, hunk_index: u32, hunk: &Hunk, threads: &[(u32, &BlockSlot)]) {
     let lines = &hunk.lines;
     let mut push_pair = |left: Option<u32>, right: Option<u32>| {
         rows.push(Row {
@@ -354,7 +361,7 @@ fn push_split_hunk(rows: &mut Vec<Row>, f: u32, hunk_index: u32, hunk: &Hunk, th
     }
 }
 
-fn push_line_threads(rows: &mut Vec<Row>, f: u32, line: &DiffLine, threads: &[(u32, &ThreadSlot)]) {
+fn push_line_threads(rows: &mut Vec<Row>, f: u32, line: &DiffLine, threads: &[(u32, &BlockSlot)]) {
     if threads.is_empty() {
         return;
     }
@@ -373,7 +380,7 @@ fn push_line_threads(rows: &mut Vec<Row>, f: u32, line: &DiffLine, threads: &[(u
         {
             rows.push(Row {
                 file: f,
-                kind: RowKind::Thread { slot: *slot },
+                kind: RowKind::Block { slot: *slot },
             });
         }
     }
@@ -546,24 +553,24 @@ mod tests {
     fn thread_rows_follow_their_anchor() {
         let files = sample();
         let threads = vec![
-            ThreadSlot {
-                id: ThreadId(1),
+            BlockSlot {
+                id: BlockId::Thread(ThreadId(1)),
                 anchor: ThreadAnchor::file("a.ts"),
             },
-            ThreadSlot {
-                id: ThreadId(2),
+            BlockSlot {
+                id: BlockId::Thread(ThreadId(2)),
                 anchor: ThreadAnchor::line("a.ts", Side::Old, 2),
             },
-            ThreadSlot {
-                id: ThreadId(3),
+            BlockSlot {
+                id: BlockId::Thread(ThreadId(3)),
                 anchor: ThreadAnchor::line("a.ts", Side::New, 2),
             },
-            ThreadSlot {
-                id: ThreadId(4),
+            BlockSlot {
+                id: BlockId::Thread(ThreadId(4)),
                 anchor: ThreadAnchor::line("a.ts", Side::Old, 1),
             },
-            ThreadSlot {
-                id: ThreadId(5),
+            BlockSlot {
+                id: BlockId::Thread(ThreadId(5)),
                 anchor: ThreadAnchor::file("elsewhere.ts"),
             },
         ];
@@ -582,28 +589,28 @@ mod tests {
             kinds(&rows)[..8],
             [
                 (0, FileHeader),
-                (0, Thread { slot: 0 }),
+                (0, Block { slot: 0 }),
                 (0, Hunk { hunk: 0 }),
                 (0, Line { hunk: 0, line: 0 }),
                 (0, Line { hunk: 0, line: 1 }),
-                (0, Thread { slot: 1 }),
+                (0, Block { slot: 1 }),
                 (0, Line { hunk: 0, line: 2 }),
-                (0, Thread { slot: 2 }),
+                (0, Block { slot: 2 }),
             ]
         );
-        assert!(!kinds(&rows).contains(&(0, Thread { slot: 3 })));
+        assert!(!kinds(&rows).contains(&(0, Block { slot: 3 })));
     }
 
     #[test]
     fn change_threads_lead_the_rows_and_every_thread_row_is_indexed() {
         let files = sample();
         let threads = vec![
-            ThreadSlot {
-                id: ThreadId(7),
+            BlockSlot {
+                id: BlockId::Thread(ThreadId(7)),
                 anchor: ThreadAnchor::line("a.ts", Side::New, 2),
             },
-            ThreadSlot {
-                id: ThreadId(8),
+            BlockSlot {
+                id: BlockId::Thread(ThreadId(8)),
                 anchor: ThreadAnchor::Change,
             },
         ];
@@ -617,21 +624,24 @@ mod tests {
             &threads,
             DiffMode::Unified,
         );
-        assert_eq!(rows.rows[0].kind, RowKind::Thread { slot: 1 });
+        assert_eq!(rows.rows[0].kind, RowKind::Block { slot: 1 });
         assert_eq!(rows.lead(), 1);
         assert_eq!(rows.header_index(0), Some(1));
-        assert_eq!(rows.thread_row(1), Some(0));
-        let line = rows.thread_row(0).expect("the line thread is placed");
+        assert_eq!(rows.block_row(1), Some(0));
+        let line = rows.block_row(0).expect("the line thread is placed");
         assert_eq!(rows.rows[line - 1].kind, RowKind::Line { hunk: 0, line: 2 });
-        assert_eq!(rows.find(0, RowRef::Thread(ThreadId(7)), &threads), Some(line));
+        assert_eq!(
+            rows.find(0, RowRef::Block(BlockId::Thread(ThreadId(7))), &threads),
+            Some(line)
+        );
         assert_eq!(rows.find(1, RowRef::Line(0, 0), &threads), Some(rows.file_start[1] + 2));
         assert_eq!(rows.find(1, RowRef::Line(5, 5), &threads), None);
     }
 
     #[test]
     fn a_pane_without_files_has_no_change_rows() {
-        let threads = vec![ThreadSlot {
-            id: ThreadId(1),
+        let threads = vec![BlockSlot {
+            id: BlockId::Thread(ThreadId(1)),
             anchor: ThreadAnchor::Change,
         }];
         let none = HashSet::new();
@@ -645,10 +655,10 @@ mod tests {
             DiffMode::Unified,
         );
         assert!(rows.rows.is_empty());
-        assert_eq!(rows.thread_row(0), None);
+        assert_eq!(rows.block_row(0), None);
     }
 
-    fn split_of(files: &[Arc<FileDiff>], threads: &[ThreadSlot]) -> Rows {
+    fn split_of(files: &[Arc<FileDiff>], threads: &[BlockSlot]) -> Rows {
         let none = HashSet::new();
         build(
             files,
@@ -844,20 +854,20 @@ mod tests {
     #[test]
     fn a_thread_sits_under_the_row_that_shows_its_line_left_side_first() {
         let threads = vec![
-            ThreadSlot {
-                id: ThreadId(1),
+            BlockSlot {
+                id: BlockId::Thread(ThreadId(1)),
                 anchor: ThreadAnchor::line("a.ts", Side::New, 2),
             },
-            ThreadSlot {
-                id: ThreadId(2),
+            BlockSlot {
+                id: BlockId::Thread(ThreadId(2)),
                 anchor: ThreadAnchor::line("a.ts", Side::Old, 2),
             },
-            ThreadSlot {
-                id: ThreadId(3),
+            BlockSlot {
+                id: BlockId::Thread(ThreadId(3)),
                 anchor: ThreadAnchor::line("a.ts", Side::New, 1),
             },
-            ThreadSlot {
-                id: ThreadId(4),
+            BlockSlot {
+                id: BlockId::Thread(ThreadId(4)),
                 anchor: ThreadAnchor::line("a.ts", Side::Old, 1),
             },
         ];
@@ -865,7 +875,7 @@ mod tests {
         let shown: Vec<_> = rows.rows[..7]
             .iter()
             .map(|row| match row.kind {
-                RowKind::Thread { slot } => format!("thread {}", slot + 1),
+                RowKind::Block { slot } => format!("thread {}", slot + 1),
                 RowKind::Pair { left, right, .. } => format!("{left:?}|{right:?}"),
                 other => format!("{other:?}"),
             })
@@ -888,7 +898,7 @@ mod tests {
     #[test]
     fn a_line_is_found_in_either_mode_by_the_row_that_shows_it() {
         let files = sample();
-        let threads: [ThreadSlot; 0] = [];
+        let threads: [BlockSlot; 0] = [];
         let unified = rows_of(&files, &[]);
         let split = split_of(&files, &threads);
         assert_eq!(unified.find(0, RowRef::Line(0, 1), &threads), Some(3));

@@ -32,6 +32,18 @@ pub fn file_count(count: usize) -> String {
     format!("{} {noun}", grouped(count))
 }
 
+/// "just now", "4 min ago", "2 h ago", "3 days ago".
+pub fn ago(now_ms: i64, then_ms: i64) -> String {
+    let minutes = ((now_ms - then_ms).max(0) / 60_000) as u64;
+    match minutes {
+        0 => "just now".into(),
+        1..=59 => format!("{minutes} min ago"),
+        60..=1439 => format!("{} h ago", minutes / 60),
+        1440..=2879 => "1 day ago".into(),
+        _ => format!("{} days ago", minutes / 1440),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,5 +74,16 @@ mod tests {
     fn counts_files() {
         assert_eq!(file_count(1), "1 file");
         assert_eq!(file_count(2000), "2,000 files");
+    }
+
+    #[test]
+    fn says_how_long_ago() {
+        let minute = 60_000;
+        assert_eq!(ago(10 * minute, 10 * minute), "just now");
+        assert_eq!(ago(14 * minute, 10 * minute), "4 min ago");
+        assert_eq!(ago(130 * minute, 10 * minute), "2 h ago");
+        assert_eq!(ago(2000 * minute, 10 * minute), "1 day ago");
+        assert_eq!(ago(5000 * minute, 10 * minute), "3 days ago");
+        assert_eq!(ago(0, minute), "just now", "a clock that moved back is not the future");
     }
 }

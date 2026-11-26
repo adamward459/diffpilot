@@ -2,9 +2,9 @@ use crate::diff_pane::layout::{
     CODE_PADDING, GUTTER, Position, SPLIT_GUTTER, THREAD, Tops, cells, column_width, columns_for, position, shown_mode,
     split_columns_for,
 };
-use crate::diff_pane::rows::{RowRef, Rows, ThreadSlot, Visibility, body_notice, build};
+use crate::diff_pane::rows::{BlockId, BlockSlot, RowKind, RowRef, Rows, Visibility, body_notice, build};
 use diffpilot_core::diff::{DiffMode, FileDiff};
-use diffpilot_core::threads::ThreadId;
+use diffpilot_core::threads::Side;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::Arc;
@@ -30,14 +30,17 @@ struct Anchor {
 
 /// Everything the pane knows that does not need a window: files, rows, heights and the scroll offset.
 pub struct PaneState {
+    all: Vec<Arc<FileDiff>>,
+    filter: Option<Vec<String>>,
+    /// The files the pane shows: all of them in diff order, or the filter's paths in the filter's order.
     pub files: Vec<Arc<FileDiff>>,
     pub rows: Rows,
     pub tops: Tops,
     pub collapsed: HashSet<String>,
     pub viewed: HashSet<String>,
     pub loaded: HashSet<String>,
-    pub threads: Vec<ThreadSlot>,
-    thread_heights: Vec<f32>,
+    pub blocks: Vec<BlockSlot>,
+    block_heights: Vec<f32>,
     wrap: bool,
     mode: DiffMode,
     geometry: Geometry,
@@ -52,14 +55,16 @@ pub struct PaneState {
 impl PaneState {
     pub fn new(geometry: Geometry) -> Self {
         Self {
+            all: Vec::new(),
+            filter: None,
             files: Vec::new(),
             rows: Rows::default(),
             tops: Tops::default(),
             collapsed: HashSet::new(),
             viewed: HashSet::new(),
             loaded: HashSet::new(),
-            threads: Vec::new(),
-            thread_heights: Vec::new(),
+            blocks: Vec::new(),
+            block_heights: Vec::new(),
             wrap: true,
             mode: DiffMode::Unified,
             geometry,
@@ -200,22 +205,58 @@ impl PaneState {
         !self.collapsed.contains(&file.path) && body_notice(file, self.loaded.contains(&file.path)).is_none()
     }
 
+    pub fn all_files(&self) -> &[Arc<FileDiff>] {
+        &self.all
+    }
+
     pub fn replace_files(&mut self, files: Vec<FileDiff>) -> Vec<Option<usize>> {
         let anchor = self.anchor();
-        let mut reused = Vec::with_capacity(files.len());
-        let mut next = Vec::with_capacity(files.len());
-        for file in files {
-            let old = self
-                .index
-                .get(&file.path)
-                .copied()
-                .filter(|&index| *self.files[index] == file);
-            reused.push(old);
-            next.push(match old {
-                Some(index) => Arc::clone(&self.files[index]),
-                None => Arc::new(file),
-            });
+        let known: HashMap<&str, &Arc<FileDiff>> = self.all.iter().map(|file| (file.path.as_str(), file)).collect();
+        self.all = files
+            .into_iter()
+            .map(|file| match known.get(file.path.as_str()) {
+                Some(old) if ***old == file => Arc::clone(old),
+                _ => Arc::new(file),
+            })
+            .collect();
+        self.refilter(anchor)
+    }
+
+    pub fn set_filter(&mut self, filter: Option<Vec<String>>) -> Vec<Option<usize>> {
+        if filter == self.filter {
+            return (0..self.files.len()).map(Some).collect();
         }
+        let anchor = self.anchor();
+        self.filter = filter;
+        self.refilter(anchor)
+    }
+
+    pub fn filter(&self) -> Option<&[String]> {
+        self.filter.as_deref()
+    }
+
+    /// For each file now shown, its index among the files shown before when the same diff was.
+    fn refilter(&mut self, anchor: Option<Anchor>) -> Vec<Option<usize>> {
+        let next: Vec<Arc<FileDiff>> = match &self.filter {
+            None => self.all.clone(),
+            Some(paths) => {
+                let by_path: HashMap<&str, &Arc<FileDiff>> =
+                    self.all.iter().map(|file| (file.path.as_str(), file)).collect();
+                paths
+                    .iter()
+                    .filter_map(|path| by_path.get(path.as_str()).map(|file| Arc::clone(file)))
+                    .collect()
+            }
+        };
+        let reused = next
+            .iter()
+            .map(|file| {
+                self.index
+                    .get(&file.path)
+                    .copied()
+                    .filter(|&index| Arc::ptr_eq(&self.files[index], file))
+            })
+            .collect();
         self.files = next;
         self.widest = None;
         self.index = self
@@ -297,6 +338,40 @@ impl PaneState {
         true
     }
 
+    /// Scrolls so the row that shows `line` of `side` sits under the pinned header of height `inset`. A line the
+    /// pane does not show leaves the file's header at the top instead.
+    pub fn reveal_line(&mut self, path: &str, side: Side, line: u32, inset: f32) -> bool {
+        let Some(file) = self.file_index(path) else {
+            return false;
+        };
+        let Some(range) = self.rows.file_range(file) else {
+            return false;
+        };
+        let diff = &self.files[file];
+        let number = |hunk: u32, index: u32| {
+            let line = &diff.hunks[hunk as usize].lines[index as usize];
+            match side {
+                Side::Old => line.old,
+                Side::New => line.new,
+            }
+        };
+        let row = range.into_iter().find(|&index| match self.rows.rows[index].kind {
+            RowKind::Line { hunk, line: at } => number(hunk, at) == Some(line),
+            RowKind::Pair { hunk, left, right } => [left, right]
+                .into_iter()
+                .flatten()
+                .any(|at| number(hunk, at) == Some(line)),
+            _ => false,
+        });
+        match row {
+            Some(row) => {
+                self.scroll_to(self.tops.top(row) - inset);
+                true
+            }
+            None => self.reveal(path),
+        }
+    }
+
     fn header_top(&self, path: &str) -> Option<f32> {
         let file = self.file_index(path)?;
         Some(self.tops.top(self.rows.header_index(file)?))
@@ -307,7 +382,7 @@ impl PaneState {
         let path = self.files.get(self.rows.rows[index].file as usize)?.path.clone();
         let header = self.header_top(&path)?;
         Some(Anchor {
-            row: self.rows.row_ref(index, &self.threads),
+            row: self.rows.row_ref(index, &self.blocks),
             in_row: self.scroll - self.tops.top(index),
             from_header: (self.scroll - header).max(0.0),
             path,
@@ -317,8 +392,8 @@ impl PaneState {
     fn anchored_scroll(&self, anchor: &Anchor) -> Option<f32> {
         let file = self.file_index(&anchor.path);
         let found = match (anchor.row, file) {
-            (RowRef::Thread(_), _) => self.rows.find(0, anchor.row, &self.threads),
-            (row, Some(file)) => self.rows.find(file, row, &self.threads),
+            (RowRef::Block(_), _) => self.rows.find(0, anchor.row, &self.blocks),
+            (row, Some(file)) => self.rows.find(file, row, &self.blocks),
             (_, None) => None,
         };
         if let Some(index) = found {
@@ -347,55 +422,55 @@ impl PaneState {
                 collapsed: &self.collapsed,
                 loaded: &self.loaded,
             },
-            &self.threads,
+            &self.blocks,
             self.shown_mode(),
         );
         self.retop(anchor);
     }
 
     fn retop(&mut self, anchor: Option<Anchor>) {
-        self.tops = Tops::with_threads(&self.rows.rows, &self.files, self.wrap_cols(), &self.thread_heights);
+        self.tops = Tops::with_threads(&self.rows.rows, &self.files, self.wrap_cols(), &self.block_heights);
         self.restore(anchor);
     }
 
-    /// Replaces the thread rows. A thread that was already placed keeps its height.
-    pub fn set_threads(&mut self, threads: Vec<ThreadSlot>) {
+    /// Replaces the block rows. A block that was already placed keeps its height.
+    pub fn set_blocks(&mut self, blocks: Vec<BlockSlot>) {
         let anchor = self.anchor();
-        let known: HashMap<ThreadId, f32> = self
-            .threads
+        let known: HashMap<BlockId, f32> = self
+            .blocks
             .iter()
-            .map(|thread| thread.id)
-            .zip(self.thread_heights.iter().copied())
+            .map(|block| block.id)
+            .zip(self.block_heights.iter().copied())
             .collect();
-        self.thread_heights = threads
+        self.block_heights = blocks
             .iter()
-            .map(|thread| known.get(&thread.id).copied().unwrap_or(THREAD))
+            .map(|block| known.get(&block.id).copied().unwrap_or(THREAD))
             .collect();
-        self.threads = threads;
+        self.blocks = blocks;
         self.relayout(anchor);
     }
 
-    pub fn thread_height(&self, id: ThreadId) -> Option<f32> {
-        let slot = self.threads.iter().position(|thread| thread.id == id)?;
-        Some(self.thread_heights[slot])
+    pub fn block_height(&self, id: BlockId) -> Option<f32> {
+        let slot = self.blocks.iter().position(|block| block.id == id)?;
+        Some(self.block_heights[slot])
     }
 
-    pub fn thread_top(&self, id: ThreadId) -> Option<f32> {
-        let slot = self.threads.iter().position(|thread| thread.id == id)?;
-        Some(self.tops.top(self.rows.thread_row(slot as u32)?))
+    pub fn block_top(&self, id: BlockId) -> Option<f32> {
+        let slot = self.blocks.iter().position(|block| block.id == id)?;
+        Some(self.tops.top(self.rows.block_row(slot as u32)?))
     }
 
-    /// Sets the height of a thread's row. Rows below it move. A row above the viewport keeps the
+    /// Sets the height of a block's row. Rows below it move. A row above the viewport keeps the
     /// content in view where it is, and a row under the viewport top grows downward.
-    pub fn set_thread_height(&mut self, id: ThreadId, height: f32) -> bool {
-        let Some(slot) = self.threads.iter().position(|thread| thread.id == id) else {
+    pub fn set_block_height(&mut self, id: BlockId, height: f32) -> bool {
+        let Some(slot) = self.blocks.iter().position(|block| block.id == id) else {
             return false;
         };
-        if self.thread_heights[slot] == height {
+        if self.block_heights[slot] == height {
             return false;
         }
-        self.thread_heights[slot] = height;
-        if let Some(row) = self.rows.thread_row(slot as u32) {
+        self.block_heights[slot] = height;
+        if let Some(row) = self.rows.block_row(slot as u32) {
             let (top, old) = (self.tops.top(row), self.tops.height(row));
             self.tops.set_height(row, height);
             if top + old <= self.scroll {
@@ -406,12 +481,12 @@ impl PaneState {
         true
     }
 
-    /// Scrolls just enough to show the thread under the pinned header of height `inset`.
-    pub fn reveal_thread(&mut self, id: ThreadId, inset: f32) -> bool {
-        let Some(slot) = self.threads.iter().position(|thread| thread.id == id) else {
+    /// Scrolls just enough to show the block under the pinned header of height `inset`.
+    pub fn reveal_block(&mut self, id: BlockId, inset: f32) -> bool {
+        let Some(slot) = self.blocks.iter().position(|block| block.id == id) else {
             return false;
         };
-        let Some(row) = self.rows.thread_row(slot as u32) else {
+        let Some(row) = self.rows.block_row(slot as u32) else {
             return false;
         };
         let (top, bottom) = (self.tops.top(row), self.tops.top(row + 1));
@@ -428,7 +503,7 @@ mod tests {
     use super::*;
     use crate::diff_pane::layout::{FILE_HEADER, GAP, HUNK, LINE, NOTICE, SPLIT_MIN_WIDTH};
     use crate::diff_pane::testing::{added, diff, lines_with};
-    use diffpilot_core::threads::{Side, ThreadAnchor};
+    use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 
     const GEOMETRY: Geometry = Geometry {
         width: 400.0,
@@ -688,14 +763,14 @@ mod tests {
         assert!(!state.reveal("x"));
     }
 
-    fn slot(id: u32, anchor: ThreadAnchor) -> ThreadSlot {
-        ThreadSlot {
-            id: ThreadId(id),
+    fn slot(id: u32, anchor: ThreadAnchor) -> BlockSlot {
+        BlockSlot {
+            id: BlockId::Thread(ThreadId(id)),
             anchor,
         }
     }
 
-    fn line_thread(id: u32, path: &str, line: u32) -> ThreadSlot {
+    fn line_thread(id: u32, path: &str, line: u32) -> BlockSlot {
         slot(id, ThreadAnchor::line(path, Side::New, line))
     }
 
@@ -708,30 +783,30 @@ mod tests {
     fn new_thread_rows_start_at_the_placeholder_and_keep_a_measured_height() {
         let mut state = state(three_files());
         let before = state.tops.total();
-        state.set_threads(vec![line_thread(1, "f0.ts", 3)]);
-        assert_eq!(state.thread_height(ThreadId(1)), Some(THREAD));
+        state.set_blocks(vec![line_thread(1, "f0.ts", 3)]);
+        assert_eq!(state.block_height(BlockId::Thread(ThreadId(1))), Some(THREAD));
         assert_eq!(state.tops.total(), before + THREAD);
-        assert!(state.set_thread_height(ThreadId(1), 220.0));
-        assert!(!state.set_thread_height(ThreadId(1), 220.0));
+        assert!(state.set_block_height(BlockId::Thread(ThreadId(1)), 220.0));
+        assert!(!state.set_block_height(BlockId::Thread(ThreadId(1)), 220.0));
         assert_eq!(state.tops.total(), before + 220.0);
-        state.set_threads(vec![line_thread(1, "f0.ts", 3), line_thread(2, "f1.ts", 1)]);
-        assert_eq!(state.thread_height(ThreadId(1)), Some(220.0));
-        assert_eq!(state.thread_height(ThreadId(2)), Some(THREAD));
+        state.set_blocks(vec![line_thread(1, "f0.ts", 3), line_thread(2, "f1.ts", 1)]);
+        assert_eq!(state.block_height(BlockId::Thread(ThreadId(1))), Some(220.0));
+        assert_eq!(state.block_height(BlockId::Thread(ThreadId(2))), Some(THREAD));
         assert_eq!(state.tops.total(), before + 220.0 + THREAD);
-        assert!(!state.set_thread_height(ThreadId(9), 10.0));
+        assert!(!state.set_block_height(BlockId::Thread(ThreadId(9)), 10.0));
     }
 
     #[test]
     fn a_thread_above_the_viewport_growing_keeps_the_content_in_view() {
         let mut state = state(three_files());
-        state.set_threads(vec![line_thread(1, "f0.ts", 3)]);
+        state.set_blocks(vec![line_thread(1, "f0.ts", 3)]);
         state.scroll_to(FILE_HEIGHT + 3.0 * LINE);
         let before = content_at_top(&state);
         let at = state.scroll();
-        state.set_thread_height(ThreadId(1), 400.0);
+        state.set_block_height(BlockId::Thread(ThreadId(1)), 400.0);
         assert_eq!(state.scroll(), at + (400.0 - THREAD));
         assert_eq!(content_at_top(&state), (before.0, before.1));
-        state.set_thread_height(ThreadId(1), 100.0);
+        state.set_block_height(BlockId::Thread(ThreadId(1)), 100.0);
         assert_eq!(state.scroll(), at - (THREAD - 100.0));
         assert_eq!(content_at_top(&state), (before.0, before.1));
     }
@@ -739,13 +814,13 @@ mod tests {
     #[test]
     fn a_thread_under_the_viewport_top_grows_downward_and_one_below_moves_nothing() {
         let mut state = state(three_files());
-        state.set_threads(vec![line_thread(1, "f0.ts", 3), line_thread(2, "f2.ts", 3)]);
-        let row = state.rows.thread_row(0).unwrap();
+        state.set_blocks(vec![line_thread(1, "f0.ts", 3), line_thread(2, "f2.ts", 3)]);
+        let row = state.rows.block_row(0).unwrap();
         let top = state.tops.top(row);
         state.scroll_to(top + 30.0);
-        state.set_thread_height(ThreadId(1), 400.0);
+        state.set_block_height(BlockId::Thread(ThreadId(1)), 400.0);
         assert_eq!(state.scroll(), top + 30.0);
-        state.set_thread_height(ThreadId(2), 400.0);
+        state.set_block_height(BlockId::Thread(ThreadId(2)), 400.0);
         assert_eq!(state.scroll(), top + 30.0);
     }
 
@@ -754,13 +829,13 @@ mod tests {
         let mut state = state(three_files());
         state.scroll_to(FILE_HEIGHT + 4.0 * LINE);
         let before = content_at_top(&state);
-        let before_row = state.rows.row_ref(before.0, &state.threads);
-        state.set_threads(vec![line_thread(1, "f0.ts", 3)]);
+        let before_row = state.rows.row_ref(before.0, &state.blocks);
+        state.set_blocks(vec![line_thread(1, "f0.ts", 3)]);
         let after = content_at_top(&state);
-        assert_eq!(state.rows.row_ref(after.0, &state.threads), before_row);
+        assert_eq!(state.rows.row_ref(after.0, &state.blocks), before_row);
         assert_eq!(after.1, before.1);
         assert_eq!(state.scroll(), FILE_HEIGHT + 4.0 * LINE + THREAD);
-        state.set_threads(Vec::new());
+        state.set_blocks(Vec::new());
         assert_eq!(state.scroll(), FILE_HEIGHT + 4.0 * LINE);
     }
 
@@ -768,14 +843,14 @@ mod tests {
     fn a_change_thread_sits_above_the_first_file() {
         let mut state = state(three_files());
         let full = state.tops.total();
-        state.set_threads(vec![slot(1, ThreadAnchor::Change)]);
+        state.set_blocks(vec![slot(1, ThreadAnchor::Change)]);
         assert_eq!(state.tops.total(), full + THREAD);
         assert_eq!(state.visible_path(), Some("f0.ts"));
-        assert_eq!(state.thread_top(ThreadId(1)), Some(0.0));
+        assert_eq!(state.block_top(BlockId::Thread(ThreadId(1))), Some(0.0));
         state.scroll_to(30.0);
         state.toggle_collapsed("f1.ts");
         assert_eq!(state.scroll(), 30.0);
-        state.set_thread_height(ThreadId(1), 300.0);
+        state.set_block_height(BlockId::Thread(ThreadId(1)), 300.0);
         assert_eq!(state.scroll(), 30.0);
         assert_eq!(state.visible_path(), Some("f0.ts"));
     }
@@ -783,21 +858,21 @@ mod tests {
     #[test]
     fn revealing_a_thread_scrolls_only_when_it_is_not_fully_shown() {
         let mut state = state(three_files());
-        state.set_threads(vec![line_thread(1, "f2.ts", 9)]);
-        let top = state.thread_top(ThreadId(1)).unwrap();
-        assert!(state.reveal_thread(ThreadId(1), 66.0));
+        state.set_blocks(vec![line_thread(1, "f2.ts", 9)]);
+        let top = state.block_top(BlockId::Thread(ThreadId(1))).unwrap();
+        assert!(state.reveal_block(BlockId::Thread(ThreadId(1)), 66.0));
         assert_eq!(state.scroll(), (top - 66.0).min(state.max_scroll()));
         let shown = state.scroll();
-        assert!(state.reveal_thread(ThreadId(1), 66.0));
+        assert!(state.reveal_block(BlockId::Thread(ThreadId(1)), 66.0));
         assert_eq!(state.scroll(), shown);
-        assert!(!state.reveal_thread(ThreadId(9), 66.0));
+        assert!(!state.reveal_block(BlockId::Thread(ThreadId(9)), 66.0));
     }
 
     #[test]
     fn collapsing_the_file_that_holds_the_top_thread_scrolls_to_its_header() {
         let mut state = state(three_files());
-        state.set_threads(vec![line_thread(1, "f1.ts", 5)]);
-        let top = state.thread_top(ThreadId(1)).unwrap();
+        state.set_blocks(vec![line_thread(1, "f1.ts", 5)]);
+        let top = state.block_top(BlockId::Thread(ThreadId(1))).unwrap();
         state.scroll_to(top + 10.0);
         assert_eq!(state.visible_path(), Some("f1.ts"));
         state.toggle_collapsed("f1.ts");
@@ -888,7 +963,7 @@ mod tests {
     fn toggling_keeps_the_line_at_the_top_and_how_far_into_it_the_view_is() {
         let mut state = PaneState::new(WIDE);
         state.replace_files(two_changed_files());
-        let third_added = state.rows.find(0, RowRef::Line(0, 8), &state.threads).unwrap();
+        let third_added = state.rows.find(0, RowRef::Line(0, 8), &state.blocks).unwrap();
         state.scroll_to(state.tops.top(third_added) + 5.0);
         assert!(top_shows(&state, 0, 8));
         state.set_mode(DiffMode::Split);
@@ -906,7 +981,7 @@ mod tests {
     fn toggling_twice_returns_to_a_context_line_exactly() {
         let mut state = PaneState::new(WIDE);
         state.replace_files(two_changed_files());
-        let context = state.rows.find(1, RowRef::Line(0, 12), &state.threads).unwrap();
+        let context = state.rows.find(1, RowRef::Line(0, 12), &state.blocks).unwrap();
         state.scroll_to(state.tops.top(context) + 7.0);
         let before = state.scroll();
         state.set_mode(DiffMode::Split);
@@ -921,7 +996,7 @@ mod tests {
     fn toggling_keeps_a_header_and_a_thread_where_they_are() {
         let mut state = PaneState::new(WIDE);
         state.replace_files(two_changed_files());
-        state.set_threads(vec![line_thread(1, "a.ts", 4)]);
+        state.set_blocks(vec![line_thread(1, "a.ts", 4)]);
         state.reveal("b.ts");
         let header = state.rows.header_index(1).unwrap();
         state.set_mode(DiffMode::Split);
@@ -929,11 +1004,14 @@ mod tests {
         assert_eq!(state.visible_path(), Some("b.ts"));
         assert_ne!(header, state.rows.header_index(1).unwrap());
 
-        let top = state.thread_top(ThreadId(1)).unwrap();
+        let top = state.block_top(BlockId::Thread(ThreadId(1))).unwrap();
         state.scroll_to(top + 30.0);
         state.set_mode(DiffMode::Unified);
         let (row, offset) = content_at_top(&state);
-        assert_eq!(state.rows.row_ref(row, &state.threads), RowRef::Thread(ThreadId(1)));
+        assert_eq!(
+            state.rows.row_ref(row, &state.blocks),
+            RowRef::Block(BlockId::Thread(ThreadId(1)))
+        );
         assert_eq!(offset, 30.0);
     }
 
@@ -941,16 +1019,22 @@ mod tests {
     fn a_line_thread_follows_its_line_into_the_split_rows() {
         let mut state = PaneState::new(WIDE);
         state.replace_files(vec![changes("a.ts", "cddaa", "x")]);
-        state.set_threads(vec![
+        state.set_blocks(vec![
             slot(1, ThreadAnchor::line("a.ts", Side::New, 3)),
             slot(2, ThreadAnchor::line("a.ts", Side::Old, 2)),
         ]);
         let body = FILE_HEADER + HUNK;
-        assert_eq!(state.thread_top(ThreadId(1)), Some(body + 5.0 * LINE + THREAD));
-        assert_eq!(state.thread_top(ThreadId(2)), Some(body + 2.0 * LINE));
+        assert_eq!(
+            state.block_top(BlockId::Thread(ThreadId(1))),
+            Some(body + 5.0 * LINE + THREAD)
+        );
+        assert_eq!(state.block_top(BlockId::Thread(ThreadId(2))), Some(body + 2.0 * LINE));
         state.set_mode(DiffMode::Split);
-        assert_eq!(state.thread_top(ThreadId(1)), Some(body + 3.0 * LINE + THREAD));
-        assert_eq!(state.thread_top(ThreadId(2)), Some(body + 2.0 * LINE));
+        assert_eq!(
+            state.block_top(BlockId::Thread(ThreadId(1))),
+            Some(body + 3.0 * LINE + THREAD)
+        );
+        assert_eq!(state.block_top(BlockId::Thread(ThreadId(2))), Some(body + 2.0 * LINE));
     }
 
     #[test]
@@ -1019,5 +1103,55 @@ mod tests {
             state.rows.rows[binary_rows.start + 1].kind,
             crate::diff_pane::rows::RowKind::Notice(_)
         ));
+    }
+
+    #[test]
+    fn a_filter_shows_only_its_files_in_its_order_and_clearing_it_restores_the_diff() {
+        let mut state = state(three_files());
+        let reused = state.set_filter(Some(vec!["f2.ts".into(), "f0.ts".into()]));
+        assert_eq!(paths(&state), ["f2.ts", "f0.ts"]);
+        assert_eq!(reused, [Some(2), Some(0)]);
+        assert_eq!(state.all_files().len(), 3);
+        assert!(!state.reveal("f1.ts"));
+        state.set_filter(None);
+        assert_eq!(paths(&state), ["f0.ts", "f1.ts", "f2.ts"]);
+    }
+
+    #[test]
+    fn new_files_keep_the_filter() {
+        let mut state = state(three_files());
+        state.set_filter(Some(vec!["f1.ts".into()]));
+        state.replace_files(three_files());
+        assert_eq!(paths(&state), ["f1.ts"]);
+    }
+
+    #[test]
+    fn a_note_row_sits_under_its_line_and_keeps_its_height() {
+        let mut state = state(three_files());
+        let note = |index| BlockId::Note(index);
+        state.set_blocks(vec![BlockSlot {
+            id: note(0),
+            anchor: ThreadAnchor::line("f1.ts", Side::New, 4),
+        }]);
+        assert_eq!(state.block_height(note(0)), Some(THREAD));
+        assert!(state.set_block_height(note(0), 60.0));
+        let row = state.rows.block_row(0).unwrap();
+        assert_eq!(state.rows.rows[row - 1].file, 1);
+        assert_eq!(state.tops.height(row), 60.0);
+    }
+
+    #[test]
+    fn reveal_line_puts_the_line_under_the_pinned_header() {
+        let mut state = state(three_files());
+        let inset = FILE_HEADER + HUNK;
+        assert!(state.reveal_line("f1.ts", Side::New, 5, inset));
+        let line = state.rows.find(1, RowRef::Line(0, 4), &state.blocks).unwrap();
+        assert_eq!(state.scroll(), state.tops.top(line) - inset);
+        assert!(
+            state.reveal_line("f2.ts", Side::New, 99, inset),
+            "a missing line shows the file header"
+        );
+        assert_eq!(state.visible_path(), Some("f2.ts"));
+        assert!(!state.reveal_line("none.ts", Side::New, 1, inset));
     }
 }

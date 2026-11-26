@@ -547,7 +547,10 @@ fn run_window(repo: PathBuf, launch: Instant, bench: Option<Drive>) {
                         start_bench(&pane, repo.clone(), launch, Drive::Vsync, handle, cx);
                     }
                 }
-                DiffPaneEvent::VisibleFile(_) | DiffPaneEvent::ShownMode(_) | DiffPaneEvent::OpenInEditor { .. } => {}
+                DiffPaneEvent::VisibleFile(_)
+                | DiffPaneEvent::ShownMode(_)
+                | DiffPaneEvent::OpenInEditor { .. }
+                | DiffPaneEvent::OpenRef(_) => {}
                 DiffPaneEvent::ToggleViewed(path) => {
                     let mut viewed = viewed.borrow_mut();
                     if !viewed.remove(path) {

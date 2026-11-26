@@ -10,4 +10,4 @@ mod word;
 #[cfg(test)]
 mod testing;
 
-pub use view::{DiffPane, DiffPaneEvent, Probe};
+pub use view::{DiffPane, DiffPaneEvent, PaneNote, Probe};
