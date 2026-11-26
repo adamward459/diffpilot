@@ -457,7 +457,6 @@ impl FakeGithub {
         Arc::new(Self { seen: Mutex::default() })
     }
 
-    /// The URLs of the POST requests so far, such as a re-run.
     pub fn posts(&self) -> Vec<String> {
         let seen = self.seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         seen.iter()
@@ -494,7 +493,6 @@ impl Http for FakeGithub {
     }
 }
 
-/// Signs in and installs `http` as the way the app reaches GitHub. Call it before opening a repository.
 pub fn install_github(cx: &mut TestAppContext, http: Arc<dyn Http>) {
     ready(cx);
     let services = Services {

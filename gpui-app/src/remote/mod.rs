@@ -1,6 +1,3 @@
-//! Git remote and GitHub state of one repository: ahead and behind counts, fetch, pull and push, the open pull
-//! requests, and the checks of the checked-out branch's pull request.
-
 mod capsule;
 mod checks_popover;
 mod menu;
@@ -66,9 +63,7 @@ pub enum ReviewState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RemoteEvent {
-    /// A fetch, pull or push finished. The refs may have changed.
     Synced,
-    /// A pull request is fetched and ready to compare with its base.
     Review(Comparison),
 }
 
@@ -163,7 +158,6 @@ impl RemoteStatus {
         self.checks.as_ref()
     }
 
-    /// The open pull request whose head is the checked-out branch.
     pub fn branch_pr(&self) -> Option<&PullRequest> {
         let link = self.link.as_ref()?;
         let branch = self.branch.as_ref()?.branch.as_deref()?;
@@ -236,7 +230,6 @@ impl RemoteStatus {
         }));
     }
 
-    /// Runs one operation at a time. A second request while one runs is ignored.
     pub fn run(&mut self, kind: SyncKind, cx: &mut Context<Self>) {
         if matches!(self.sync, SyncState::Running(_)) {
             return;
@@ -353,7 +346,6 @@ impl RemoteStatus {
         }));
     }
 
-    /// Follows the head of the branch's pull request. A new head starts a new poll.
     fn sync_checks(&mut self, cx: &mut Context<Self>) {
         let wanted = self.branch_pr().map(|pr| pr.head_sha.clone());
         if self.poll.as_ref().map(|poll| &poll.sha) == wanted.as_ref() {

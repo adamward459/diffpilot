@@ -57,7 +57,6 @@ pub fn init(settings: Arc<Settings>, services: Services, cx: &mut App) {
     });
 }
 
-/// What the app talks to outside the settings file. `None` when no settings were installed.
 pub fn services(cx: &App) -> Option<Services> {
     cx.try_global::<Registry>().map(|registry| registry.services.clone())
 }

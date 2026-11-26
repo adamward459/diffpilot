@@ -16,8 +16,6 @@ enum Open {
     Checks,
 }
 
-/// The toolbar capsule: ahead and behind counts, and the checks and review state of the branch's pull request.
-/// Each part opens a popover.
 pub struct RemoteCapsule {
     status: Entity<RemoteStatus>,
     sync: Entity<SyncPopover>,

@@ -1,4 +1,5 @@
 use diffpilot_core::comparison::Comparison;
+use diffpilot_core::github::pr_git;
 use diffpilot_core::refs::Refs;
 use diffpilot_ui_kit::Glyph;
 
@@ -33,6 +34,9 @@ fn item(title: &str, detail: Option<&str>, checked: bool, target: Comparison) ->
 }
 
 pub fn branch_title(refs: &Refs, comparison: &Comparison) -> String {
+    if let Some(number) = comparison.branch_name().and_then(pr_git::pr_number) {
+        return format!("PR #{number}");
+    }
     comparison
         .branch_name()
         .or(refs.checked_out.as_deref())
@@ -266,6 +270,9 @@ mod tests {
         assert_eq!(branch_glyph(&other), Glyph::Eye);
         assert_eq!(branch_tooltip(&other), "Read only. This branch is not checked out.");
         assert_eq!(base_title(&other), "main");
+
+        let pull_request = Comparison::branch(&pr_git::pr_ref(479), "origin/main");
+        assert_eq!(branch_title(&refs, &pull_request), "PR #479");
 
         assert_eq!(
             base_title(&Comparison::checked_out("main", false)),

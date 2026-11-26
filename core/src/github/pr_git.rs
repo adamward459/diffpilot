@@ -6,8 +6,14 @@ use crate::exec;
 use crate::worktree::{self, Checkout, TempWorktree};
 use std::path::Path;
 
+const PR_REF_PREFIX: &str = "refs/diffpilot/pr/";
+
 pub fn pr_ref(number: u64) -> String {
-    format!("refs/diffpilot/pr/{number}")
+    format!("{PR_REF_PREFIX}{number}")
+}
+
+pub fn pr_number(reference: &str) -> Option<u64> {
+    reference.strip_prefix(PR_REF_PREFIX)?.parse().ok()
 }
 
 pub fn pr_remote(repo: &Path) -> Result<(String, String), GithubError> {

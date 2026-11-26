@@ -973,7 +973,7 @@ impl RepoView {
             view.update(cx, |this, cx| this.select_comparison(next, window, cx))
                 .ok();
         });
-        let remote_menu = RemoteMenu::new(&self.remote, cx);
+        let remote_menu = RemoteMenu::new(&self.remote, self.comparison.as_ref(), cx);
         let control = match (&self.refs, &self.comparison) {
             (Some(refs), Some(comparison)) => Some(
                 comparison_control(refs, comparison, self.compact_toolbar, select, remote_menu, &tokens)

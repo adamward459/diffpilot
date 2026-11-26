@@ -1,18 +1,18 @@
 use super::RemoteStatus;
 use super::rows::{PrRow, Tone, overall_tone, pr_rows, rollup_tone};
+use diffpilot_core::comparison::Comparison;
+use diffpilot_core::github::pr_git;
 use diffpilot_ui_kit::components::menu::{MenuItem, MenuRow, MenuSection};
 use diffpilot_ui_kit::components::{ChipTone, chip_label, status_dot, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::{App, Div, Entity, ParentElement, Window};
 
-/// The pull request of the checked-out branch, shown beside the branch name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrChip {
     pub number: u64,
     pub tone: Option<Tone>,
 }
 
-/// What the branch menu and the branch segment show of the remote. Empty when the repository is not on GitHub.
 #[derive(Clone)]
 pub struct RemoteMenu {
     pub chip: Option<PrChip>,
@@ -22,7 +22,7 @@ pub struct RemoteMenu {
 }
 
 impl RemoteMenu {
-    pub fn new(status: &Entity<RemoteStatus>, cx: &App) -> Self {
+    pub fn new(status: &Entity<RemoteStatus>, comparison: Option<&Comparison>, cx: &App) -> Self {
         let remote = status.read(cx);
         let branch_pr = remote.branch_pr();
         let chip = branch_pr.map(|pr| PrChip {
@@ -34,7 +34,13 @@ impl RemoteMenu {
         });
         Self {
             chip,
-            rows: pr_rows(remote.pull_requests(), branch_pr.map(|pr| pr.number)),
+            rows: pr_rows(
+                remote.pull_requests(),
+                match comparison.and_then(Comparison::branch_name) {
+                    Some(branch) => pr_git::pr_number(branch),
+                    None => branch_pr.map(|pr| pr.number),
+                },
+            ),
             linked: remote.is_github(),
             status: status.clone(),
         }
