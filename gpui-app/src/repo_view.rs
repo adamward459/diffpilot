@@ -849,7 +849,6 @@ impl RepoView {
         self.sync_guide(window, cx);
     }
 
-    /// Shows the pane the way the guide asks: only the open chapter's files, with its notes under their lines.
     fn sync_guide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = &self.session else { return };
         let (filter, notes) = if self.chapter_open(cx) {

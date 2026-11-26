@@ -1,0 +1,283 @@
+use diffpilot::diff_pane::rows::{BlockId, RowKind};
+use diffpilot::guide::session::{GuideRun, Step};
+use diffpilot::repo_view::{Nav, RepoView};
+use diffpilot::runs::Runs;
+use diffpilot::testing::{canned_claude, demo_guide, fixture, open_repo_in};
+use diffpilot_core::diff::FileDiff;
+use diffpilot_core::mcp::McpBridge;
+use diffpilot_core::review::ReviewModel;
+use diffpilot_core::run::RunKind;
+use diffpilot_core::runner::{EngineConfig, McpLaunch, RunEngine};
+use diffpilot_core::settings::Settings;
+use diffpilot_core::store::{RunId, Store};
+use diffpilot_core::viewed::ViewedStore;
+use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext};
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+struct World {
+    view: Entity<RepoView>,
+    store: Arc<Store>,
+    repo: tempfile::TempDir,
+    work: tempfile::TempDir,
+}
+
+fn script(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {
+    let path = dir.join(name);
+    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
+fn gated_claude(work: &Path) -> std::path::PathBuf {
+    let out = work.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    script(
+        work,
+        "claude",
+        &format!(
+            r#"
+echo '{{"type":"system","subtype":"init","session_id":"s-1","model":"m","tools":[],"mcp_servers":[]}}'
+touch '{out}/started'
+while [ ! -f '{out}/go' ]; do sleep 0.05; done
+echo '{{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"Done."}}'
+"#,
+            out = out.display()
+        ),
+    )
+}
+
+fn open(cx: &mut TestAppContext, with_runs: bool) -> (World, &'static mut VisualTestContext) {
+    let repo = fixture();
+    let work = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    if with_runs {
+        let guard = script(
+            work.path(),
+            "guard",
+            "cat > /dev/null\necho '[diffpilot guard] blocked' >&2\nexit 2",
+        );
+        let bridge = McpBridge::start(work.path().join("mcp.sock"), store.clone()).unwrap();
+        let mut config = EngineConfig::new(store.clone());
+        config.claude_binary = Some(gated_claude(work.path()));
+        config.guard_binary = guard;
+        config.run_dir = work.path().join("runs");
+        config.keep_snapshots = 0;
+        config.mcp = Some(McpLaunch::new(bridge));
+        let engine = RunEngine::new(config);
+        cx.update(|cx| cx.set_global(Runs::with_engine(engine)));
+    }
+    let (view, vcx) = open_repo_in(
+        cx,
+        repo.path(),
+        Arc::new(Settings::in_memory()),
+        Arc::new(ViewedStore::in_memory()),
+        store.clone(),
+        canned_claude(),
+    );
+    (
+        World {
+            view,
+            store,
+            repo,
+            work,
+        },
+        vcx,
+    )
+}
+
+fn diff_files(world: &World, cx: &mut VisualTestContext) -> Vec<FileDiff> {
+    let review = world.view.read_with(cx, |view, _| view.review());
+    review.read_with(cx, |review, _| {
+        review.host().files.iter().map(|file| (**file).clone()).collect()
+    })
+}
+
+fn store_guide(world: &World, cx: &mut VisualTestContext) {
+    let files = diff_files(world, cx);
+    let guide = demo_guide(world.repo.path(), &files);
+    let (review, guide_session) = world.view.read_with(cx, |view, _| (view.review(), view.guide()));
+    let session = review.read_with(cx, |review, _| review.session_id());
+    world
+        .store
+        .save_draft(session, RunId(1), ReviewModel::STANDARD, &guide)
+        .unwrap();
+    world.store.complete_draft(RunId(1), &guide).unwrap();
+    guide_session.update(cx, |guide, cx| guide.reload(cx));
+    cx.run_until_parked();
+}
+
+fn show_guide(world: &World, cx: &mut VisualTestContext) {
+    world
+        .view
+        .update_in(cx, |view, window, cx| view.show_nav(Nav::Guide, window, cx));
+    cx.run_until_parked();
+}
+
+fn click(cx: &mut VisualTestContext, selector: &'static str) {
+    let bounds = cx
+        .debug_bounds(selector)
+        .unwrap_or_else(|| panic!("{selector} is not on screen"));
+    cx.simulate_click(bounds.center(), Modifiers::default());
+    cx.run_until_parked();
+}
+
+fn pane_paths(world: &World, cx: &mut VisualTestContext) -> Vec<String> {
+    let pane = world.view.read_with(cx, |view, _| view.pane());
+    pane.read_with(cx, |pane, _| {
+        pane.state().files.iter().map(|file| file.path.clone()).collect()
+    })
+}
+
+fn wait_until(cx: &mut VisualTestContext, what: &str, mut done: impl FnMut(&mut VisualTestContext) -> bool) {
+    cx.executor().allow_parking();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        cx.run_until_parked();
+        if done(cx) {
+            return;
+        }
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[gpui::test]
+fn the_guide_switch_without_a_guide_shows_the_start_card(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    show_guide(&world, cx);
+    assert_eq!(world.view.read_with(cx, |view, _| view.nav()), Nav::Guide);
+    assert!(cx.debug_bounds("guide-write").is_some(), "the Write Guide button");
+    assert_eq!(pane_paths(&world, cx).len(), 3, "the file pane is untouched");
+
+    world
+        .view
+        .update_in(cx, |view, window, cx| view.show_nav(Nav::Files, window, cx));
+    cx.run_until_parked();
+    assert_eq!(world.view.read_with(cx, |view, _| view.nav()), Nav::Files);
+}
+
+#[gpui::test]
+fn write_guide_submits_a_guide_run_and_reports_a_run_that_wrote_nothing(app: &mut TestAppContext) {
+    let (world, cx) = open(app, true);
+    show_guide(&world, cx);
+    click(cx, "guide-write");
+
+    let guide = world.view.read_with(cx, |view, _| view.guide());
+    let GuideRun::Writing { run, .. } = guide.read_with(cx, |guide, _| guide.run().clone()) else {
+        panic!("a run is writing");
+    };
+    let kind = cx.update(|_, cx| cx.global::<Runs>().engine().run(run).map(|run| run.kind));
+    assert_eq!(kind, Some(RunKind::Guide));
+    assert!(
+        cx.debug_bounds("guide-stop").is_some(),
+        "the Stop button shows while writing"
+    );
+
+    std::fs::write(world.work.path().join("out/go"), "").unwrap();
+    wait_until(cx, "the run to end", |cx| {
+        !matches!(
+            guide.read_with(cx, |guide, _| guide.run().clone()),
+            GuideRun::Writing { .. }
+        )
+    });
+    let run = guide.read_with(cx, |guide, _| guide.run().clone());
+    assert!(
+        matches!(&run, GuideRun::Failed(message) if !message.is_empty()),
+        "{run:?}"
+    );
+    assert!(cx.debug_bounds("guide-write").is_some(), "Try Again is offered");
+}
+
+#[gpui::test]
+fn a_stored_guide_opens_on_the_overview_and_start_reading_shows_chapter_one(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    store_guide(&world, cx);
+    show_guide(&world, cx);
+    let guide = world.view.read_with(cx, |view, _| view.guide());
+    assert_eq!(guide.read_with(cx, |guide, _| guide.step()), Step::Overview);
+    assert!(cx.debug_bounds("guide-start-reading").is_some());
+    assert_eq!(pane_paths(&world, cx).len(), 3);
+
+    click(cx, "guide-start-reading");
+    assert_eq!(guide.read_with(cx, |guide, _| guide.step()), Step::Chapter(0));
+    assert_eq!(pane_paths(&world, cx), ["src/staged.rs"]);
+
+    let pane = world.view.read_with(cx, |view, _| view.pane());
+    pane.read_with(cx, |pane, _| {
+        let state = pane.state();
+        assert_eq!(state.blocks.len(), 2);
+        for (slot, line) in [(0u32, 5u32), (1, 7)] {
+            assert_eq!(state.blocks[slot as usize].id, BlockId::Note(slot));
+            let row = state.rows.block_row(slot).expect("the note is placed");
+            let RowKind::Line { hunk, line: at } = state.rows.rows[row - 1].kind else {
+                panic!("a note sits under a line");
+            };
+            assert_eq!(state.files[0].hunks[hunk as usize].lines[at as usize].new, Some(line));
+        }
+    });
+    assert!(
+        cx.debug_bounds("guide-mark-continue").is_some(),
+        "the inspector shows in a chapter"
+    );
+}
+
+#[gpui::test]
+fn mark_viewed_and_continue_marks_the_chapter_and_opens_the_next(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    store_guide(&world, cx);
+    show_guide(&world, cx);
+    click(cx, "guide-start-reading");
+    click(cx, "guide-mark-continue");
+    cx.run_until_parked();
+
+    let guide = world.view.read_with(cx, |view, _| view.guide());
+    assert_eq!(guide.read_with(cx, |guide, _| guide.step()), Step::Chapter(1));
+    assert_eq!(pane_paths(&world, cx), ["base.txt", "docs/committed.md"]);
+    let viewed = guide.read_with(cx, |guide, _| guide.viewed().clone());
+    assert!(viewed.contains("src/staged.rs"), "{viewed:?}");
+    assert_eq!(guide.read_with(cx, |guide, _| guide.read_count()), 1);
+    assert_eq!(guide.read_with(cx, |guide, _| guide.first_unread()), 1);
+}
+
+#[gpui::test]
+fn a_changed_diff_shows_the_out_of_date_banner_until_the_reader_keeps_reading(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    store_guide(&world, cx);
+    show_guide(&world, cx);
+    assert!(cx.debug_bounds("guide-out-of-date").is_none());
+
+    let mut files = diff_files(&world, cx);
+    let changed = files.iter_mut().find(|file| file.path == "base.txt").unwrap();
+    changed.hunks[0].lines[0].text.push_str(" edited");
+    let pane = world.view.read_with(cx, |view, _| view.pane());
+    pane.update(cx, |pane, cx| pane.set_files(files, cx));
+    cx.run_until_parked();
+
+    let guide = world.view.read_with(cx, |view, _| view.guide());
+    assert!(guide.read_with(cx, |guide, _| guide.out_of_date()));
+    assert!(cx.debug_bounds("guide-out-of-date").is_some());
+
+    click(cx, "guide-keep-reading");
+    assert!(!guide.read_with(cx, |guide, _| guide.out_of_date()), "kept");
+}
+
+#[gpui::test]
+fn the_chapter_keys_step_through_the_chapters_and_back_to_the_overview(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    store_guide(&world, cx);
+    show_guide(&world, cx);
+    click(cx, "guide-start-reading");
+    let guide = world.view.read_with(cx, |view, _| view.guide());
+    let step = |cx: &mut VisualTestContext| guide.read_with(cx, |guide, _| guide.step());
+
+    world.view.update(cx, |view, cx| view.step_chapter(1, cx));
+    assert_eq!(step(cx), Step::Chapter(1));
+    world.view.update(cx, |view, cx| view.step_chapter(1, cx));
+    assert_eq!(step(cx), Step::Overview, "past the last chapter is the overview");
+
+    world.view.update(cx, |view, cx| view.step_chapter(-1, cx));
+    assert_eq!(step(cx), Step::Overview, "the keys do nothing outside a chapter");
+}

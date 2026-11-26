@@ -7,10 +7,15 @@ use diffpilot_core::claude::{ReviewError, Reviewer, ScriptedReplier};
 use diffpilot_core::github::auth::{Credentials, GhCli, MemoryStore};
 use diffpilot_core::github::http::{Http, HttpError, Request, Response};
 use diffpilot_core::mcp::McpBridge;
+use diffpilot_core::comparison::Comparison;
+use diffpilot_core::diff::FileDiff;
+use diffpilot_core::guide::stale::{self, file_fingerprints};
+use diffpilot_core::guide::{Attention, Chapter, ChapterFile, Guide, Note, Overview, Span, fingerprint};
 use diffpilot_core::review::{Finding, ReviewRequest, ReviewResult, Severity};
 use diffpilot_core::runner::{EngineConfig, McpLaunch, RunEngine};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::Store;
+use diffpilot_core::threads::Side;
 use diffpilot_core::viewed::ViewedStore;
 use gpui::{AppContext as _, Bounds, Entity, Global, Modifiers, Pixels, TestAppContext, VisualTestContext};
 use std::path::{Path, PathBuf};
@@ -134,11 +139,22 @@ pub fn open_repo(
     store: Arc<ViewedStore>,
     claude: Claude,
 ) -> (Entity<RepoView>, &'static mut VisualTestContext) {
+    let review_store = Arc::new(Store::open_in_memory().expect("an in-memory store opens"));
+    open_repo_in(cx, repo, settings, store, review_store, claude)
+}
+
+pub fn open_repo_in(
+    cx: &mut TestAppContext,
+    repo: &Path,
+    settings: Arc<Settings>,
+    store: Arc<ViewedStore>,
+    review_store: Arc<Store>,
+    claude: Claude,
+) -> (Entity<RepoView>, &'static mut VisualTestContext) {
     ready(cx);
     let repo = repo.to_path_buf();
     let mut view = None;
     let handle = cx.add_window(|window, cx| {
-        let review_store = Arc::new(Store::open_in_memory().expect("an in-memory store opens"));
         let entity = cx.new(|cx| RepoView::new(repo, settings, store, review_store, claude, window, cx));
         view = Some(entity.clone());
         gpui_component::Root::new(entity, window, cx)
@@ -339,4 +355,71 @@ echo '{{"type":"result","subtype":"success","is_error":false,"num_turns":1,"resu
     config.mcp = Some(McpLaunch::new(bridge.clone()));
     cx.update(|cx| cx.set_global(Runs::with_engine(RunEngine::new(config))));
     FakeClaude { work, _bridge: bridge }
+}
+
+fn demo_chapter(title: &str, phase: &str, attention: Attention, files: &[&str], notes: Vec<Note>) -> Chapter {
+    Chapter {
+        title: title.into(),
+        summary: format!("{title} summary with `code`."),
+        phase: Some(phase.into()),
+        attention,
+        points: vec!["First point.".into()],
+        focus: vec!["Check the loop.".into()],
+        files: files
+            .iter()
+            .map(|path| ChapterFile {
+                path: (*path).into(),
+                spans: vec![],
+            })
+            .collect(),
+        notes,
+        diagrams: vec![],
+        impact: vec![],
+    }
+}
+
+fn demo_note(line: u32, critical: bool, text: &str) -> Note {
+    Note {
+        path: "src/staged.rs".into(),
+        span: Some(Span {
+            side: Side::New,
+            line,
+            end_line: None,
+            anchor_text: Some("let value = 1;".into()),
+        }),
+        text: text.into(),
+        critical,
+    }
+}
+
+/// A two-chapter guide over the files of `fixture()`: the staged file with two notes, then the small edits.
+pub fn demo_guide(repo: &Path, files: &[FileDiff]) -> Guide {
+    Guide {
+        overview: Overview {
+            title: "What this change does".into(),
+            summary: "It adds a staged file and edits the base.".into(),
+            before: Some("Nothing was staged.".into()),
+            after: Some("A staged file exists.".into()),
+        },
+        diagrams: vec![],
+        chapters: vec![
+            demo_chapter(
+                "The staged file",
+                "Core",
+                Attention::High,
+                &["src/staged.rs"],
+                vec![demo_note(5, false, "Plain note."), demo_note(7, true, "Risky spot.")],
+            ),
+            demo_chapter(
+                "The small edits",
+                "Skim",
+                Attention::Low,
+                &["base.txt", "docs/committed.md"],
+                vec![],
+            ),
+        ],
+        fingerprint: fingerprint(files),
+        file_fingerprints: file_fingerprints(files),
+        head: stale::head(repo),
+    }
 }

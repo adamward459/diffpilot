@@ -139,7 +139,7 @@ mod tests {
         let picks = select(&ws, &usage(), &["gpui-app/src/settings/appearance.rs".to_owned()]);
         let names: BTreeSet<_> = picks.iter().map(|p| p.feature.name).collect();
         assert!(names.contains("settings"));
-        assert!(!names.contains("github") && !names.contains("guide"), "{names:?}");
+        assert!(!names.contains("github"), "{names:?}");
     }
 
     fn names(file: &str) -> BTreeSet<&'static str> {

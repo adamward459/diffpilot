@@ -12,7 +12,6 @@ pub const NOT_IN_GUIDE_TITLE: &str = "Not in the guide";
 pub enum ChapterKey {
     /// Index into `Guide::chapters`.
     Guide(usize),
-    /// The files the guide never saw.
     Extra,
 }
 
@@ -25,7 +24,6 @@ pub struct ReadingChapter {
     pub attention: Attention,
     /// In reading order, each path once. Only paths still in the diff.
     pub files: Vec<String>,
-    /// Only the notes on kept files.
     pub notes: Vec<Note>,
     pub additions: u32,
     pub deletions: u32,

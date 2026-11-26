@@ -45,7 +45,6 @@ pub enum DiffPaneEvent {
     },
     /// The mode the rows are drawn in changed. A split pane that is too narrow draws unified rows.
     ShownMode(DiffMode),
-    /// A `[[path#L12]]` ref in a guide note was clicked.
     OpenRef(CodeRef),
 }
 
