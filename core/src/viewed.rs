@@ -1,9 +1,9 @@
 use crate::comparison::Comparison;
 use crate::paths::standardized;
 use crate::refs::Refs;
-use crate::settings::{app_support_dir, write_atomically};
+use crate::store::Store;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 /// Stored in place of a fingerprint when the diff was not known at mark time.
@@ -32,53 +32,42 @@ impl ViewedKey {
             .unwrap_or("HEAD");
         Self::new(&standardized(repo).to_string_lossy(), branch)
     }
-
-    fn storage_key(&self) -> String {
-        format!("{}\n{}", self.repo, self.branch)
-    }
 }
 
-pub struct ViewedStore {
-    file: Option<PathBuf>,
-    memory: Mutex<HashMap<String, Marks>>,
-    seed: BTreeSet<String>,
+pub struct ViewedStore(Backing);
+
+enum Backing {
+    Memory {
+        marks: Mutex<HashMap<ViewedKey, Marks>>,
+        seed: BTreeSet<String>,
+    },
+    Database(Arc<Store>),
 }
 
 impl ViewedStore {
     pub fn in_memory() -> Self {
-        Self {
-            file: None,
-            memory: Mutex::default(),
-            seed: BTreeSet::new(),
-        }
-    }
-
-    pub fn at(file: PathBuf) -> Self {
-        Self {
-            file: Some(file),
-            ..Self::in_memory()
-        }
+        Self::seeded(BTreeSet::new())
     }
 
     pub fn seeded(seed: BTreeSet<String>) -> Self {
-        Self {
+        Self(Backing::Memory {
+            marks: Mutex::default(),
             seed,
-            ..Self::in_memory()
-        }
+        })
     }
 
-    pub fn default_path() -> Option<PathBuf> {
-        app_support_dir().map(|dir| dir.join("viewed.json"))
+    pub fn in_database(store: Arc<Store>) -> Self {
+        Self(Backing::Database(store))
     }
 
     /// `DIFFPILOT_VIEWED_SEED` names a JSON array of paths that start as viewed, kept in memory only.
-    pub fn from_env() -> Self {
-        Self::from_seed_file(std::env::var("DIFFPILOT_VIEWED_SEED").ok().as_deref())
+    pub fn from_env(store: Arc<Store>) -> Self {
+        Self::from_seed_file(std::env::var("DIFFPILOT_VIEWED_SEED").ok().as_deref(), store)
     }
 
-    pub fn from_seed_file(seed_file: Option<&str>) -> Self {
+    pub fn from_seed_file(seed_file: Option<&str>, store: Arc<Store>) -> Self {
         let Some(path) = seed_file.filter(|path| !path.is_empty()) else {
-            return Self::default_path().map_or_else(Self::in_memory, Self::at);
+            return Self::in_database(store);
         };
         let paths: Vec<String> = std::fs::read(path)
             .ok()
@@ -87,46 +76,30 @@ impl ViewedStore {
         Self::seeded(paths.into_iter().collect())
     }
 
-    pub fn file(&self) -> Option<&Path> {
-        self.file.as_deref()
-    }
-
     pub fn load(&self, key: &ViewedKey) -> Marks {
-        let memory = self.memory.lock().unwrap();
-        match &self.file {
-            None => memory.get(&key.storage_key()).cloned().unwrap_or_else(|| {
-                self.seed
-                    .iter()
-                    .map(|path| (path.clone(), UNKNOWN.to_string()))
-                    .collect()
-            }),
-            Some(file) => read_file(file).remove(&key.storage_key()).unwrap_or_default(),
+        match &self.0 {
+            Backing::Memory { marks, seed } => marks
+                .lock()
+                .unwrap()
+                .get(key)
+                .cloned()
+                .unwrap_or_else(|| seed.iter().map(|path| (path.clone(), UNKNOWN.to_string())).collect()),
+            Backing::Database(store) => store.viewed(key).unwrap_or_default(),
         }
     }
 
     pub fn save(&self, key: &ViewedKey, marks: &Marks) {
-        let mut memory = self.memory.lock().unwrap();
-        let Some(file) = &self.file else {
-            memory.insert(key.storage_key(), marks.clone());
-            return;
-        };
-        let mut all = read_file(file);
-        if marks.is_empty() {
-            all.remove(&key.storage_key());
-        } else {
-            all.insert(key.storage_key(), marks.clone());
-        }
-        if let Ok(bytes) = serde_json::to_vec_pretty(&all) {
-            let _ = write_atomically(file, &bytes);
+        match &self.0 {
+            Backing::Memory { marks: memory, .. } => {
+                memory.lock().unwrap().insert(key.clone(), marks.clone());
+            }
+            Backing::Database(store) => {
+                if let Err(error) = store.set_viewed(key, marks) {
+                    eprintln!("diffpilot: {error}. Viewed files were not saved.");
+                }
+            }
         }
     }
-}
-
-fn read_file(file: &Path) -> BTreeMap<String, Marks> {
-    std::fs::read(file)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
 }
 
 pub struct ViewedFiles {
@@ -199,35 +172,23 @@ mod tests {
         ViewedKey::new(repo, branch)
     }
 
-    fn raw(file: &Path) -> BTreeMap<String, Marks> {
-        serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap()
-    }
-
-    fn temp_store() -> (tempfile::TempDir, PathBuf) {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("viewed").join("viewed.json");
-        (dir, file)
+    fn database() -> Arc<Store> {
+        Arc::new(Store::open_in_memory().unwrap())
     }
 
     #[test]
-    fn round_trips_through_one_file_and_creates_the_folder() {
-        let (_dir, file) = temp_store();
+    fn marks_survive_reopening_the_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("review.sqlite3");
         let k = key("/r", "main");
-        ViewedStore::at(file.clone()).save(&k, &marks(&[("b.ts", "2"), ("a.ts", "1")]));
-        assert_eq!(
-            ViewedStore::at(file.clone()).load(&k),
-            marks(&[("a.ts", "1"), ("b.ts", "2")])
-        );
-        assert_eq!(
-            raw(&file),
-            BTreeMap::from([("/r\nmain".to_string(), marks(&[("a.ts", "1"), ("b.ts", "2")]))])
-        );
+        let open = || ViewedStore::in_database(Arc::new(Store::open(&path).unwrap()));
+        open().save(&k, &marks(&[("b.ts", "2"), ("a.ts", "1")]));
+        assert_eq!(open().load(&k), marks(&[("a.ts", "1"), ("b.ts", "2")]));
     }
 
     #[test]
     fn keeps_branches_of_one_repo_separate() {
-        let (_dir, file) = temp_store();
-        let store = ViewedStore::at(file);
+        let store = ViewedStore::in_database(database());
         let (main, feature, other) = (key("/r", "main"), key("/r", "feature"), key("/other", "main"));
         store.save(&main, &marks(&[("a.ts", "1")]));
         store.save(&feature, &marks(&[("b.ts", "2")]));
@@ -238,28 +199,16 @@ mod tests {
     }
 
     #[test]
-    fn saving_an_empty_set_removes_only_that_entry() {
-        let (_dir, file) = temp_store();
-        let store = ViewedStore::at(file.clone());
+    fn saving_replaces_the_set_for_that_key_only() {
+        let store = ViewedStore::in_database(database());
         let (main, feature) = (key("/r", "main"), key("/r", "feature"));
-        store.save(&main, &marks(&[("a.ts", "1")]));
+        store.save(&main, &marks(&[("a.ts", "1"), ("b.ts", "1")]));
         store.save(&feature, &marks(&[("b.ts", "2")]));
+        store.save(&main, &marks(&[("b.ts", "3")]));
+        assert_eq!(store.load(&main), marks(&[("b.ts", "3")]));
         store.save(&main, &marks(&[]));
-        assert_eq!(
-            raw(&file),
-            BTreeMap::from([("/r\nfeature".to_string(), marks(&[("b.ts", "2")]))])
-        );
         assert!(store.load(&main).is_empty());
-    }
-
-    #[test]
-    fn a_missing_or_broken_file_loads_as_empty() {
-        let (_dir, file) = temp_store();
-        let k = key("/r", "main");
-        assert!(ViewedStore::at(file.clone()).load(&k).is_empty());
-        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(&file, "not json").unwrap();
-        assert!(ViewedStore::at(file).load(&k).is_empty());
+        assert_eq!(store.load(&feature), marks(&[("b.ts", "2")]));
     }
 
     #[test]
@@ -283,25 +232,26 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_seed_from_the_environment_without_touching_disk() {
+    fn a_seed_file_keeps_marks_out_of_the_database() {
         let dir = tempfile::tempdir().unwrap();
         let seed = dir.path().join("seed.json");
         std::fs::write(&seed, r#"["a.ts"]"#).unwrap();
-        let store = ViewedStore::from_seed_file(seed.to_str());
-        assert_eq!(store.file(), None);
-        assert_eq!(store.load(&key("/r", "main")), marks(&[("a.ts", "")]));
+        let db = database();
+        let store = ViewedStore::from_seed_file(seed.to_str(), db.clone());
+        let k = key("/r", "main");
+        assert_eq!(store.load(&k), marks(&[("a.ts", "")]));
+        store.save(&k, &marks(&[("b.ts", "1")]));
+        assert!(db.viewed(&k).unwrap().is_empty());
     }
 
     #[test]
-    fn without_a_seed_the_store_uses_the_default_file() {
-        assert_eq!(
-            ViewedStore::from_seed_file(None).file(),
-            ViewedStore::default_path().as_deref()
-        );
-        assert_eq!(
-            ViewedStore::from_seed_file(Some("")).file(),
-            ViewedStore::default_path().as_deref()
-        );
+    fn without_a_seed_the_store_uses_the_database() {
+        for seed in [None, Some("")] {
+            let db = database();
+            let k = key("/r", "main");
+            ViewedStore::from_seed_file(seed, db.clone()).save(&k, &marks(&[("a.ts", "1")]));
+            assert_eq!(db.viewed(&k).unwrap(), marks(&[("a.ts", "1")]));
+        }
     }
 
     #[test]

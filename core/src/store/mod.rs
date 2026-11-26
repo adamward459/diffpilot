@@ -1,4 +1,4 @@
-//! The review database: threads, comments and runs, in one sqlite file under Application Support.
+//! The review database: threads, comments, runs, guides and viewed files, in one sqlite file under Application Support.
 //!
 //! The schema follows diffity's `review_sessions`, `threads` and `comments` tables (MIT, see
 //! THIRD_PARTY_NOTICES). A session is one review: repo + branch + base.
@@ -7,6 +7,7 @@ mod guides;
 mod rows;
 mod runs;
 mod schema;
+mod viewed;
 
 pub use guides::{GuideSummary, StoredGuide};
 pub use rows::{NewComment, NewThread, Written};
@@ -27,8 +28,6 @@ pub enum StoreError {
     Io { path: PathBuf, source: std::io::Error },
     #[error("{0} is inside a .git folder. diffpilot keeps its data outside the repo.")]
     InsideGit(PathBuf),
-    #[error("The review database was written by a newer diffpilot.")]
-    TooNew,
     #[error("{0}")]
     Invalid(String),
 }
@@ -126,7 +125,7 @@ impl Store {
     fn prepare(conn: Connection, path: Option<PathBuf>) -> Result<Self> {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
-        schema::migrate(&conn)?;
+        schema::create(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
             path,

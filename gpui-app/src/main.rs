@@ -37,19 +37,9 @@ fn main() {
         } else {
             Settings::open_default()
         };
-        let viewed_store = if bench.is_some() {
-            let seeded = std::env::var_os("DIFFPILOT_VIEWED_SEED").is_some_and(|path| !path.is_empty());
-            if seeded {
-                ViewedStore::from_env()
-            } else {
-                ViewedStore::in_memory()
-            }
-        } else {
-            ViewedStore::from_env()
-        };
         let settings = Arc::new(settings);
         let review_store = Arc::new(open_review_store(scripted));
-        let viewed_store = Arc::new(viewed_store);
+        let viewed_store = Arc::new(ViewedStore::from_env(review_store.clone()));
         settings::init(settings.clone(), settings::Services::system(), cx);
         if bench.is_none() {
             cx.set_global(Runs::start(review_store.clone(), &settings));

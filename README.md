@@ -62,7 +62,7 @@ diffpilot opens the last repository you used. It reloads by itself when files or
 
 ## Where data lives
 
-Settings and viewed files are in `~/Library/Application Support/diffpilot/`: `settings.json` and `viewed.json`. Delete that folder to reset diffpilot. diffpilot never writes into your repository's `.git` folder.
+Settings and review data are in `~/Library/Application Support/diffpilot/`: `settings.json`, and `review.sqlite3` for threads, runs, and viewed files. Delete that folder to reset diffpilot. diffpilot never writes into your repository's `.git` folder.
 
 ## Develop
 

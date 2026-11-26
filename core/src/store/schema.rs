@@ -1,9 +1,8 @@
-use super::{Result, StoreError};
+use super::Result;
 use rusqlite::Connection;
 
-const MIGRATIONS: &[&str] = &[
-    "
-    CREATE TABLE sessions (
+const SCHEMA: &str = "
+    CREATE TABLE IF NOT EXISTS sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       repo TEXT NOT NULL,
       branch TEXT NOT NULL,
@@ -13,7 +12,7 @@ const MIGRATIONS: &[&str] = &[
       UNIQUE (repo, branch, base)
     );
 
-    CREATE TABLE threads (
+    CREATE TABLE IF NOT EXISTS threads (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id INTEGER NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
       kind TEXT NOT NULL CHECK (kind IN ('file', 'line', 'change')),
@@ -32,9 +31,9 @@ const MIGRATIONS: &[&str] = &[
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
-    CREATE INDEX idx_threads_session ON threads (session_id);
+    CREATE INDEX IF NOT EXISTS idx_threads_session ON threads (session_id);
 
-    CREATE TABLE comments (
+    CREATE TABLE IF NOT EXISTS comments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       thread_id INTEGER NOT NULL REFERENCES threads (id) ON DELETE CASCADE,
       seq INTEGER NOT NULL,
@@ -45,10 +44,7 @@ const MIGRATIONS: &[&str] = &[
       pending INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       UNIQUE (thread_id, seq)
-    );
-    ",
-    "
-    CREATE TABLE runs (
+    );    CREATE TABLE IF NOT EXISTS runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id INTEGER NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
       kind TEXT NOT NULL,
@@ -60,10 +56,7 @@ const MIGRATIONS: &[&str] = &[
       finished_at INTEGER,
       data TEXT NOT NULL
     );
-    CREATE INDEX idx_runs_session ON runs (session_id);
-    ",
-    "
-    CREATE TABLE guides (
+    CREATE INDEX IF NOT EXISTS idx_runs_session ON runs (session_id);    CREATE TABLE IF NOT EXISTS guides (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id INTEGER NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
       run_id INTEGER,
@@ -74,25 +67,18 @@ const MIGRATIONS: &[&str] = &[
       finished_at INTEGER,
       data TEXT NOT NULL
     );
-    CREATE INDEX idx_guides_session ON guides (session_id, state, id);
-    CREATE UNIQUE INDEX idx_guides_run ON guides (run_id) WHERE run_id IS NOT NULL;
-    ",
-];
+    CREATE INDEX IF NOT EXISTS idx_guides_session ON guides (session_id, state, id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_guides_run ON guides (run_id) WHERE run_id IS NOT NULL;    CREATE TABLE IF NOT EXISTS viewed (
+      repo TEXT NOT NULL,
+      branch TEXT NOT NULL,
+      path TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      PRIMARY KEY (repo, branch, path)
+    ) WITHOUT ROWID;
+";
 
-/// Each entry of `MIGRATIONS` runs once, in order, and `user_version` counts the ones done.
-pub(super) fn migrate(conn: &Connection) -> Result<()> {
-    migrate_to(conn, MIGRATIONS.len())
-}
-
-fn migrate_to(conn: &Connection, count: usize) -> Result<()> {
-    let done: usize = conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))? as usize;
-    if done > MIGRATIONS.len() {
-        return Err(StoreError::TooNew);
-    }
-    for (index, sql) in MIGRATIONS.iter().enumerate().take(count).skip(done) {
-        conn.execute_batch(&format!("BEGIN;\n{sql}\nPRAGMA user_version = {};\nCOMMIT;", index + 1))?;
-    }
-    Ok(())
+pub(super) fn create(conn: &Connection) -> Result<()> {
+    Ok(conn.execute_batch(SCHEMA)?)
 }
 
 #[cfg(test)]
@@ -100,51 +86,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn migrating_twice_changes_nothing() {
+    fn creating_twice_keeps_the_rows() {
         let conn = Connection::open_in_memory().unwrap();
-        migrate(&conn).unwrap();
-        migrate(&conn).unwrap();
-        let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version as usize, MIGRATIONS.len());
-    }
-
-    #[test]
-    fn a_database_from_before_guides_keeps_its_rows_and_gains_the_guides_table() {
-        let conn = Connection::open_in_memory().unwrap();
-        migrate_to(&conn, 2).unwrap();
-        conn.execute_batch(
-            "INSERT INTO sessions (repo, branch, base, created_at) VALUES ('/r', 'topic', 'main', 1);
-             INSERT INTO threads (session_id, kind, path, created_at, updated_at) VALUES (1, 'file', 'a.ts', 1, 1);
-             INSERT INTO runs (session_id, kind, title, state, model, queued_at, data)
-               VALUES (1, 'review', 'Review', 'done', 'opus high', 1, '{}');",
-        )
-        .unwrap();
-        let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 2);
-        assert!(conn.prepare("SELECT * FROM guides").is_err());
-
-        migrate(&conn).unwrap();
-
-        let count = |table: &str| -> i64 {
-            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
-                .unwrap()
-        };
-        assert_eq!(
-            (count("sessions"), count("threads"), count("runs"), count("guides")),
-            (1, 1, 1, 0)
-        );
-        conn.execute(
-            "INSERT INTO guides (session_id, state, fingerprint, created_at, data) VALUES (1, 'draft', 'f', 1, '{}')",
-            [],
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn a_newer_database_is_refused() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "user_version", MIGRATIONS.len() as i64 + 1)
+        create(&conn).unwrap();
+        conn.execute_batch("INSERT INTO sessions (repo, branch, base, created_at) VALUES ('/r', 'topic', 'main', 1);")
             .unwrap();
-        assert!(matches!(migrate(&conn), Err(StoreError::TooNew)));
+        create(&conn).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }
