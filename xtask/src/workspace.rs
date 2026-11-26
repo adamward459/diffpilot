@@ -16,6 +16,7 @@ pub const ROOT_FILES: [&str; 6] = [
 pub struct Crate {
     pub package: String,
     pub folder: String,
+    pub has_lib: bool,
     pub deps: Vec<String>,
 }
 
@@ -60,6 +61,11 @@ impl Workspace {
                 Crate {
                     package: p["name"].as_str().unwrap_or_default().to_owned(),
                     folder: folder.map(|f| f.to_string_lossy().into_owned()).unwrap_or_default(),
+                    has_lib: p["targets"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|t| t["kind"].as_array().is_some_and(|k| k.iter().any(|k| k == "lib"))),
                     deps: p["dependencies"]
                         .as_array()
                         .into_iter()

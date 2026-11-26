@@ -62,11 +62,6 @@ const APP: &str = "diffpilot";
 const UI: &str = "diffpilot-ui-kit";
 const XTASK: &str = "xtask";
 
-/// Cargo refuses `--lib` when no selected package has a library, and xtask is only a binary.
-pub fn has_lib(package: &str) -> bool {
-    package != XTASK
-}
-
 use TestSel::{Lib, Target};
 
 pub const FEATURES: &[Feature] = &[

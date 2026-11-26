@@ -1,4 +1,4 @@
-use crate::features::{FEATURES, Feature, TestSel, Usage, has_lib, listed, resolve};
+use crate::features::{FEATURES, Feature, TestSel, Usage, listed, resolve};
 use crate::select::select;
 use crate::workspace::{Crate, ROOT_FILES, Workspace};
 use crate::{Result, git, root, run};
@@ -182,8 +182,13 @@ impl Plan {
         out
     }
 
-    fn lib_targets(&self) -> Vec<String> {
-        if self.packages.iter().any(|package| has_lib(package)) {
+    // Cargo refuses --lib when none of the -p packages has a library, as with xtask alone.
+    fn lib_targets(&self, ws: &Workspace) -> Vec<String> {
+        let has_lib = ws
+            .crates
+            .iter()
+            .any(|c| c.has_lib && self.packages.contains(c.package.as_str()));
+        if has_lib {
             args(&["--lib", "--bins"])
         } else {
             args(&["--bins"])
@@ -195,7 +200,7 @@ impl Plan {
     }
 
     fn build(&self, ws: &Workspace) -> Result<Vec<Exe>> {
-        let mut targets = self.lib_targets();
+        let mut targets = self.lib_targets(ws);
         targets.extend(self.test_targets());
         let build = self.command(
             &["test", "--no-run", "--message-format=json-render-diagnostics"],
@@ -242,7 +247,7 @@ impl Plan {
 
     // A libtest filter matches anywhere in a test name, so `review::` would also pick `github::review::...`.
     // Listing the names first lets a module match only at the start.
-    fn runs(&self, exes: &[Exe]) -> Result<Vec<Vec<String>>> {
+    fn runs(&self, ws: &Workspace, exes: &[Exe]) -> Result<Vec<Vec<String>>> {
         let mut names = vec![];
         for exe in exes {
             let Some(modules) = self.modules.get(exe.package.as_str()) else {
@@ -261,7 +266,7 @@ impl Plan {
         }
         let mut out = vec![];
         if !names.is_empty() {
-            let mut lib = self.command(&["test", "--no-fail-fast"], &self.lib_targets());
+            let mut lib = self.command(&["test", "--no-fail-fast"], &self.lib_targets(ws));
             lib.extend(args(&["--", "--exact"]));
             lib.extend(names);
             out.push(lib);
@@ -303,7 +308,7 @@ pub fn unit(rest: &[String]) -> Result {
     let _lock = build_dir_lock(&ws)?;
     let exes = plan.build(&ws)?;
     let mut ok = true;
-    for command in plan.runs(&exes)? {
+    for command in plan.runs(&ws, &exes)? {
         ok &= cargo(&command)?;
     }
     if !ok {
