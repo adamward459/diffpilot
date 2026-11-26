@@ -136,6 +136,7 @@ pub struct DiffPane {
     fonts: Fonts,
     theme: Theme,
     highlights: Vec<Highlight>,
+    parked: HashMap<String, (Arc<FileDiff>, Highlight)>,
     running: usize,
     lines: LineCache,
     first_paint: FirstPaint,
@@ -195,6 +196,7 @@ impl DiffPane {
             fonts,
             theme: Theme::new(false),
             highlights: Vec::new(),
+            parked: HashMap::new(),
             running: 0,
             lines: LineCache::default(),
             first_paint: FirstPaint::Waiting,
@@ -206,38 +208,56 @@ impl DiffPane {
     }
 
     pub fn set_files(&mut self, files: Vec<FileDiff>, cx: &mut Context<Self>) {
+        let before = self.state.files.clone();
         let reused = self.state.replace_files(files);
-        let old = std::mem::take(&mut self.highlights);
-        self.highlights = reused
-            .iter()
-            .map(|from| {
-                from.and_then(|index| old.get(index).cloned())
-                    .unwrap_or(Highlight::Missing)
-            })
-            .collect();
+        self.carry_highlights(before, &reused);
         self.lines.clear();
         self.share_files(cx);
         self.sync(cx);
     }
 
-    /// Shows only these files, in this order, or every file again with `None`. The pane scrolls to the top.
     pub fn set_filter(&mut self, filter: Option<Vec<String>>, cx: &mut Context<Self>) {
         if self.state.filter() == filter.as_deref() {
             return;
         }
+        let before = self.state.files.clone();
         let reused = self.state.set_filter(filter);
-        let old = std::mem::take(&mut self.highlights);
-        self.highlights = reused
-            .iter()
-            .map(|from| {
-                from.and_then(|index| old.get(index).cloned())
-                    .unwrap_or(Highlight::Missing)
-            })
-            .collect();
+        self.carry_highlights(before, &reused);
         self.lines.clear();
         self.state.scroll_to(0.0);
         self.remeasure = true;
         self.sync(cx);
+    }
+
+    fn carry_highlights(&mut self, before: Vec<Arc<FileDiff>>, reused: &[Option<usize>]) {
+        let old = std::mem::take(&mut self.highlights);
+        let mut kept = vec![false; old.len()];
+        for index in reused.iter().flatten() {
+            kept[*index] = true;
+        }
+        for (index, file) in before.into_iter().enumerate() {
+            if let (false, Some(highlight @ (Highlight::Plain | Highlight::Ready(_)))) = (kept[index], old.get(index)) {
+                self.parked.insert(file.path.clone(), (file, highlight.clone()));
+            }
+        }
+        self.highlights = self
+            .state
+            .files
+            .iter()
+            .zip(reused)
+            .map(|(file, from)| match from {
+                Some(index) => old[*index].clone(),
+                None => match self.parked.remove(&file.path) {
+                    Some((parked, highlight)) if Arc::ptr_eq(&parked, file) => highlight,
+                    _ => Highlight::Missing,
+                },
+            })
+            .collect();
+        let all = self.state.all_files();
+        self.parked.retain(|path, (file, _)| {
+            all.iter()
+                .any(|current| current.path == *path && Arc::ptr_eq(current, file))
+        });
     }
 
     pub fn set_notes(&mut self, notes: Vec<PaneNote>, window: &mut Window, cx: &mut Context<Self>) {
