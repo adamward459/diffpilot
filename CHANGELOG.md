@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - Compare a branch with its base: another branch, a tag, a recent commit, only the working tree, or only the staged changes.
 - Mark files as viewed. The mark is kept per repository and branch, and it clears when the file changes again.
 - A sidebar that shows the changed files as a tree or a list, with a name filter and filters for uncommitted and viewed files.
+- Image and Markdown files show a preview in the diff, side by side for before and after, with image size and file size. Use the Preview and Diff switch in the file header to see the text diff.
 - Comment threads on diff lines. Type `@claude` in a comment to get a reply from Claude.
 - Ask Claude to review the change, with focus areas, extra instructions, and a model choice. Findings appear as threads on their lines.
 - Guide mode (⌘2): Claude writes a guide to the change, and you read it chapter by chapter, with notes under the lines they explain and a panel that lists what to check.

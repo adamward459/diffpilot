@@ -443,10 +443,11 @@ impl RepoView {
         self.next_session_id += 1;
         let sidebar = cx.new(|cx| Sidebar::new(window, cx));
         let pane = cx.new(|cx| DiffPane::new(window, cx));
-        let (wrap, mode) = (self.wrap, self.mode);
+        let (wrap, mode, repo) = (self.wrap, self.mode, self.repo.clone());
         pane.update(cx, |pane, cx| {
             pane.set_wrap(wrap, cx);
             pane.set_mode(mode, cx);
+            pane.set_preview_source(Some((repo.clone(), comparison.clone())), cx);
         });
         let mut host = ReviewHost::new(Some(self.repo.clone()), comparison);
         host.branch_name = branch_name;

@@ -237,3 +237,38 @@ pub fn label_segment(theme: &Theme, id: &'static str, items: &[(&'static str, bo
             .child(*label)
     }))
 }
+
+/// Like `label_segment` with every label clickable. `name` gives each label the name tests find it by.
+pub fn label_switch(
+    theme: &Theme,
+    id: &'static str,
+    labels: &[&'static str],
+    selected: usize,
+    name: impl Fn(usize) -> String,
+    on_select: OnSelect,
+) -> Div {
+    let thumb = theme.chrome.segment;
+    let hover = theme.hover;
+    glass_surface(h_flex().h(px(28.)).p(px(3.)).gap(px(2.)).rounded_full(), theme).children(
+        labels.iter().enumerate().map(|(index, label)| {
+            let on_select = on_select.clone();
+            let chosen = index == selected;
+            tag(
+                h_flex()
+                    .id((id, index))
+                    .h_full()
+                    .px(px(10.))
+                    .rounded_full()
+                    .text_size(px(13.))
+                    .text_color(theme.chrome.label)
+                    .when(chosen, |this| this.bg(thumb))
+                    .when(!chosen, |this| {
+                        this.cursor_pointer().hover(move |style| style.bg(hover))
+                    })
+                    .on_click(move |_, window, cx| on_select(index, window, cx))
+                    .child(*label),
+                || name(index),
+            )
+        }),
+    )
+}

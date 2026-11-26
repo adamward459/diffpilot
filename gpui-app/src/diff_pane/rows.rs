@@ -47,6 +47,7 @@ fn group_thousands(value: u32) -> String {
 pub enum RowKind {
     FileHeader,
     Notice(Notice),
+    Preview,
     Hunk {
         hunk: u32,
     },
@@ -113,6 +114,7 @@ pub struct BlockSlot {
 pub enum RowRef {
     Header,
     Notice,
+    Preview,
     Gap,
     Hunk(u32),
     Line(u32, u32),
@@ -144,6 +146,7 @@ impl Rows {
         match self.rows[index].kind {
             RowKind::FileHeader => RowRef::Header,
             RowKind::Notice(_) => RowRef::Notice,
+            RowKind::Preview => RowRef::Preview,
             RowKind::Gap => RowRef::Gap,
             RowKind::Hunk { hunk } => RowRef::Hunk(hunk),
             RowKind::Line { hunk, line } => RowRef::Line(hunk, line),
@@ -172,6 +175,7 @@ impl Rows {
 pub struct Visibility<'a> {
     pub collapsed: &'a HashSet<String>,
     pub loaded: &'a HashSet<String>,
+    pub previews: &'a HashSet<String>,
 }
 
 pub fn is_generated(path: &str) -> bool {
@@ -256,6 +260,7 @@ pub fn build(files: &[Arc<FileDiff>], visibility: Visibility, threads: &[BlockSl
                 &mut out.rows,
                 f,
                 file,
+                visibility.previews.contains(&file.path),
                 visibility.loaded.contains(&file.path),
                 file_threads,
                 mode,
@@ -279,10 +284,18 @@ fn push_body(
     rows: &mut Vec<Row>,
     f: u32,
     file: &FileDiff,
+    previews: bool,
     loaded: bool,
     threads: &[(u32, &BlockSlot)],
     mode: DiffMode,
 ) {
+    if previews {
+        rows.push(Row {
+            file: f,
+            kind: RowKind::Preview,
+        });
+        return;
+    }
     if let Some(notice) = body_notice(file, loaded) {
         rows.push(Row {
             file: f,
@@ -420,6 +433,7 @@ mod tests {
             Visibility {
                 collapsed: &collapsed,
                 loaded: &loaded,
+                previews: &loaded,
             },
             &[],
             DiffMode::Unified,
@@ -496,6 +510,7 @@ mod tests {
             Visibility {
                 collapsed: &none,
                 loaded: &none,
+                previews: &none,
             },
             &[],
             DiffMode::Unified,
@@ -508,11 +523,63 @@ mod tests {
             Visibility {
                 collapsed: &none,
                 loaded: &loaded,
+                previews: &none,
             },
             &[],
             DiffMode::Unified,
         );
         assert_eq!(rows.rows[1].kind, RowKind::Hunk { hunk: 0 });
+    }
+
+    #[test]
+    fn a_previewed_file_shows_one_preview_row_instead_of_its_diff() {
+        let files = vec![
+            file("a.md", vec![vec![line(LineKind::Added, None, Some(1), "x")]]),
+            file("b.ts", vec![vec![line(LineKind::Added, None, Some(1), "x")]]),
+        ];
+        let none = HashSet::new();
+        let previews: HashSet<String> = ["a.md".into()].into();
+        let rows = build(
+            &files,
+            Visibility {
+                collapsed: &none,
+                loaded: &none,
+                previews: &previews,
+            },
+            &[],
+            DiffMode::Unified,
+        );
+        let kinds: Vec<RowKind> = rows.rows.iter().map(|row| row.kind).collect();
+        assert_eq!(
+            kinds[..3],
+            [RowKind::FileHeader, RowKind::Preview, RowKind::Gap],
+            "{kinds:?}"
+        );
+        assert_eq!(kinds[3], RowKind::FileHeader);
+        assert_eq!(kinds[4], RowKind::Hunk { hunk: 0 });
+    }
+
+    #[test]
+    fn a_previewed_binary_file_shows_the_preview_and_not_the_binary_notice() {
+        let mut image = (*file("logo.png", vec![])).clone();
+        image.is_binary = true;
+        let files = vec![Arc::new(image)];
+        let none = HashSet::new();
+        let previews: HashSet<String> = ["logo.png".into()].into();
+        let with = |previews: &HashSet<String>| {
+            build(
+                &files,
+                Visibility {
+                    collapsed: &none,
+                    loaded: &none,
+                    previews,
+                },
+                &[],
+                DiffMode::Unified,
+            )
+        };
+        assert_eq!(with(&previews).rows[1].kind, RowKind::Preview);
+        assert_eq!(with(&none).rows[1].kind, RowKind::Notice(Notice::Binary));
     }
 
     #[test]
@@ -580,6 +647,7 @@ mod tests {
             Visibility {
                 collapsed: &none,
                 loaded: &none,
+                previews: &none,
             },
             &threads,
             DiffMode::Unified,
@@ -620,6 +688,7 @@ mod tests {
             Visibility {
                 collapsed: &none,
                 loaded: &none,
+                previews: &none,
             },
             &threads,
             DiffMode::Unified,
@@ -650,6 +719,7 @@ mod tests {
             Visibility {
                 collapsed: &none,
                 loaded: &none,
+                previews: &none,
             },
             &threads,
             DiffMode::Unified,
@@ -665,6 +735,7 @@ mod tests {
             Visibility {
                 collapsed: &none,
                 loaded: &none,
+                previews: &none,
             },
             threads,
             DiffMode::Split,

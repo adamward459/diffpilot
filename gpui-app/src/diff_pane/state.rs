@@ -4,6 +4,7 @@ use crate::diff_pane::layout::{
 };
 use crate::diff_pane::rows::{BlockId, BlockSlot, RowKind, RowRef, Rows, Visibility, body_notice, build};
 use diffpilot_core::diff::{DiffMode, FileDiff};
+use diffpilot_core::preview::preview_kind;
 use diffpilot_core::threads::Side;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -39,6 +40,10 @@ pub struct PaneState {
     pub collapsed: HashSet<String>,
     pub viewed: HashSet<String>,
     pub loaded: HashSet<String>,
+    previews: HashSet<String>,
+    preview_off: HashSet<String>,
+    preview_heights: HashMap<String, f32>,
+    preview_source: bool,
     pub blocks: Vec<BlockSlot>,
     block_heights: Vec<f32>,
     wrap: bool,
@@ -63,6 +68,10 @@ impl PaneState {
             collapsed: HashSet::new(),
             viewed: HashSet::new(),
             loaded: HashSet::new(),
+            previews: HashSet::new(),
+            preview_off: HashSet::new(),
+            preview_heights: HashMap::new(),
+            preview_source: false,
             blocks: Vec::new(),
             block_heights: Vec::new(),
             wrap: true,
@@ -184,25 +193,39 @@ impl PaneState {
         self.tops.window(self.scroll, self.geometry.height)
     }
 
-    /// Files whose highlights are worth having now, nearest first: the ones in view, then a few below.
-    /// Files whose lines are not shown (collapsed, binary, hidden as large or generated) are left out.
-    pub fn files_to_highlight(&self) -> Vec<usize> {
+    fn nearby_files(&self) -> Range<usize> {
         let window = self.visible_rows();
         let (Some(first), Some(last)) = (
             self.rows.rows.get(window.start),
             self.rows.rows.get(window.end.saturating_sub(1)),
         ) else {
-            return Vec::new();
+            return 0..0;
         };
         let (first, last) = (first.file as usize, last.file as usize);
-        (first..=(last + LOOKAHEAD_FILES).min(self.files.len().saturating_sub(1)))
-            .filter(|&index| self.shows_lines(index))
+        first..(last + LOOKAHEAD_FILES + 1).min(self.files.len())
+    }
+
+    /// Files whose highlights are worth having now, nearest first: the ones in view, then a few below.
+    /// Files whose lines are not shown (collapsed, binary, hidden as large or generated) are left out.
+    pub fn files_to_highlight(&self) -> Vec<usize> {
+        self.nearby_files().filter(|&index| self.shows_lines(index)).collect()
+    }
+
+    /// Files that show a preview and are in view or just below it.
+    pub fn previews_to_load(&self) -> Vec<usize> {
+        self.nearby_files()
+            .filter(|&index| {
+                let path = &self.files[index].path;
+                self.previews.contains(path) && !self.collapsed.contains(path)
+            })
             .collect()
     }
 
     fn shows_lines(&self, index: usize) -> bool {
         let file = &self.files[index];
-        !self.collapsed.contains(&file.path) && body_notice(file, self.loaded.contains(&file.path)).is_none()
+        !self.collapsed.contains(&file.path)
+            && !self.previews.contains(&file.path)
+            && body_notice(file, self.loaded.contains(&file.path)).is_none()
     }
 
     pub fn all_files(&self) -> &[Arc<FileDiff>] {
@@ -287,6 +310,66 @@ impl PaneState {
             self.collapsed.insert(path.to_owned());
         }
         self.relayout(anchor);
+    }
+
+    /// Files with an image or Markdown extension show a preview while the pane has a source to read them from.
+    pub fn set_preview_source(&mut self, on: bool) {
+        if on == self.preview_source {
+            return;
+        }
+        let anchor = self.anchor();
+        self.preview_source = on;
+        if !on {
+            self.preview_heights.clear();
+        }
+        self.relayout(anchor);
+    }
+
+    pub fn previewable(&self, path: &str) -> bool {
+        self.preview_source && preview_kind(path).is_some()
+    }
+
+    pub fn shows_preview(&self, path: &str) -> bool {
+        self.previews.contains(path)
+    }
+
+    pub fn previews(&self) -> &HashSet<String> {
+        &self.previews
+    }
+
+    pub fn toggle_preview(&mut self, path: &str) {
+        if !self.previewable(path) {
+            return;
+        }
+        let anchor = self.anchor();
+        if !self.preview_off.remove(path) {
+            self.preview_off.insert(path.to_owned());
+        }
+        self.relayout(anchor);
+    }
+
+    /// Sets the row height of a file's preview. Rows below it move, and a row above the viewport keeps the
+    /// content in view where it is.
+    pub fn set_preview_height(&mut self, path: &str, height: f32) -> bool {
+        if self.preview_heights.get(path) == Some(&height) {
+            return false;
+        }
+        self.preview_heights.insert(path.to_owned(), height);
+        let row = self.file_index(path).and_then(|file| {
+            let range = self.rows.file_range(file)?;
+            range
+                .into_iter()
+                .find(|&index| self.rows.rows[index].kind == RowKind::Preview)
+        });
+        if let Some(row) = row {
+            let (top, old) = (self.tops.top(row), self.tops.height(row));
+            self.tops.set_height(row, height);
+            if top + old <= self.scroll {
+                self.scroll += height - old;
+            }
+            self.scroll_to(self.scroll);
+        }
+        true
     }
 
     pub fn load_diff(&mut self, path: &str) {
@@ -416,11 +499,13 @@ impl PaneState {
     }
 
     fn relayout(&mut self, anchor: Option<Anchor>) {
+        self.refresh_previews();
         self.rows = build(
             &self.files,
             Visibility {
                 collapsed: &self.collapsed,
                 loaded: &self.loaded,
+                previews: &self.previews,
             },
             &self.blocks,
             self.shown_mode(),
@@ -428,8 +513,26 @@ impl PaneState {
         self.retop(anchor);
     }
 
+    fn refresh_previews(&mut self) {
+        self.previews = if self.preview_source {
+            self.files
+                .iter()
+                .filter(|file| preview_kind(&file.path).is_some() && !self.preview_off.contains(&file.path))
+                .map(|file| file.path.clone())
+                .collect()
+        } else {
+            HashSet::new()
+        };
+    }
+
     fn retop(&mut self, anchor: Option<Anchor>) {
-        self.tops = Tops::with_threads(&self.rows.rows, &self.files, self.wrap_cols(), &self.block_heights);
+        self.tops = Tops::with_heights(
+            &self.rows.rows,
+            &self.files,
+            self.wrap_cols(),
+            &self.block_heights,
+            &self.preview_heights,
+        );
         self.restore(anchor);
     }
 
@@ -1153,5 +1256,49 @@ mod tests {
         );
         assert_eq!(state.visible_path(), Some("f2.ts"));
         assert!(!state.reveal_line("none.ts", Side::New, 1, inset));
+    }
+
+    fn with_preview_source(files: Vec<FileDiff>) -> PaneState {
+        let mut state = state(files);
+        state.set_preview_source(true);
+        state
+    }
+
+    #[test]
+    fn previews_need_a_source_and_can_be_switched_off_per_file() {
+        let files = || vec![diff("a.md", vec![added(1, "x")]), diff("b.ts", vec![added(1, "x")])];
+        let state = state(files());
+        assert!(!state.previewable("a.md"));
+        assert!(!state.shows_preview("a.md"));
+
+        let mut state = with_preview_source(files());
+        assert!(state.shows_preview("a.md"));
+        assert!(!state.shows_preview("b.ts"), "only images and Markdown preview");
+        assert_eq!(state.tops.height(1), crate::diff_pane::layout::PREVIEW);
+
+        state.toggle_preview("a.md");
+        assert!(!state.shows_preview("a.md"));
+        assert_eq!(state.rows.rows[1].kind, RowKind::Hunk { hunk: 0 });
+
+        state.replace_files(files());
+        assert!(!state.shows_preview("a.md"), "new files keep the choice");
+        state.toggle_preview("a.md");
+        assert!(state.shows_preview("a.md"));
+    }
+
+    #[test]
+    fn a_measured_preview_sets_its_row_height_and_moves_the_rows_below() {
+        let mut state = with_preview_source(vec![
+            diff("a.md", vec![added(1, "x")]),
+            diff("b.ts", vec![added(1, "x")]),
+        ]);
+        let below = state.tops.top(3);
+        assert!(state.set_preview_height("a.md", 301.0));
+        assert_eq!(state.tops.height(1), 301.0);
+        assert_eq!(state.tops.top(3), below + 301.0 - crate::diff_pane::layout::PREVIEW);
+        assert!(!state.set_preview_height("a.md", 301.0));
+        state.toggle_preview("a.md");
+        state.toggle_preview("a.md");
+        assert_eq!(state.tops.height(1), 301.0, "the height survives a switch");
     }
 }

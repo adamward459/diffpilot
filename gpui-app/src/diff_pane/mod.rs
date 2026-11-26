@@ -2,6 +2,8 @@ mod chrome;
 pub mod highlight;
 pub mod layout;
 mod lines;
+mod markdown;
+mod preview;
 pub mod rows;
 pub mod state;
 mod view;

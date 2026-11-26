@@ -104,6 +104,46 @@ fn build_fixture(repo: &Path) {
     git(repo, &["add", "src/staged.rs"]);
 }
 
+pub fn write_png(dir: &Path, path: &str, width: u32, height: u32, color: [u8; 4]) {
+    let file = dir.join(path);
+    std::fs::create_dir_all(file.parent().expect("parent")).expect("mkdir");
+    image::RgbaImage::from_pixel(width, height, image::Rgba(color))
+        .save(file)
+        .expect("write png");
+}
+
+/// A feature branch that changes a PNG and adds a Markdown file.
+pub fn preview_fixture() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repo = dir.path();
+    git(repo, &["init", "-q", "-b", "main"]);
+    write_png(repo, "assets/logo.png", 16, 12, [200, 40, 40, 255]);
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "-q", "-m", "base"]);
+    git(repo, &["checkout", "-q", "-b", "feature"]);
+    write_png(repo, "assets/logo.png", 20, 10, [40, 40, 200, 255]);
+    write(repo, "notes.md", "# Notes\n\nSome **bold** words.\n\n- one\n- two\n");
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "-q", "-m", "feature"]);
+    dir
+}
+
+pub fn open_preview(cx: &mut TestAppContext) -> (Opened, &'static mut VisualTestContext) {
+    let dir = preview_fixture();
+    let settings = Arc::new(Settings::in_memory());
+    let store = Arc::new(ViewedStore::in_memory());
+    let (view, vcx) = open_repo(cx, dir.path(), settings.clone(), store.clone(), canned_claude());
+    (
+        Opened {
+            view,
+            store,
+            settings,
+            dir,
+        },
+        vcx,
+    )
+}
+
 pub struct Opened {
     pub view: Entity<RepoView>,
     pub store: Arc<ViewedStore>,

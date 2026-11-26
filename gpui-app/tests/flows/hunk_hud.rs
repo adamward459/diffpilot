@@ -4,6 +4,8 @@ use gpui::TestAppContext;
 #[gpui::test]
 fn the_hunk_hud_copies_the_hunk(app: &mut TestAppContext) {
     let (_opened, cx) = open(app);
+    wait_until_shows(cx, "pane:preview-switch:docs/committed.md:Diff");
+    click(cx, "pane:preview-switch:docs/committed.md:Diff");
     wait_until_shows(cx, "pane:hunk:docs/committed.md:0");
     hover(cx, "pane:hunk:docs/committed.md:0");
     click(cx, "pane:hunk-copy:docs/committed.md:0");

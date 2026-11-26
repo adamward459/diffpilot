@@ -6,19 +6,22 @@ use crate::diff_pane::layout::{
 use crate::diff_pane::lines::{
     self, CODE_SIZE, Column, Fonts, Frame, LineCache, LineKey, LineRequest, PaintFiller, Style, Thumb,
 };
+use crate::diff_pane::preview::{self, PreviewCard};
 use crate::diff_pane::rows::{BlockId, BlockSlot, Notice, RowKind};
 use crate::diff_pane::state::{Geometry, PaneState};
 use crate::guide::note::{NoteCard, NoteEvent};
 use crate::guide::text::CodeRef;
 use crate::review::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange};
 use diffpilot_core::changes::FileStatus;
+use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{DiffMode, FileDiff, LineKind};
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use diffpilot_ui_kit::Glyph;
 use diffpilot_ui_kit::components::menu::{MenuAt, MenuItem, MenuSection, menu_at, menu_button};
 use diffpilot_ui_kit::components::{
-    BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, label_segment, status_badge, tag, viewed_toggle,
+    BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, label_segment, label_switch, status_badge, tag,
+    viewed_toggle,
 };
 use diffpilot_ui_kit::{Theme, painted};
 use gpui::{
@@ -29,6 +32,8 @@ use gpui::{
 };
 use gpui::{ClipboardItem, Point};
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -119,6 +124,18 @@ struct Card {
     _resized: Subscription,
 }
 
+#[derive(Clone, PartialEq)]
+struct PreviewSource {
+    repo: PathBuf,
+    comparison: Comparison,
+}
+
+struct Preview {
+    file: Arc<FileDiff>,
+    card: Option<Entity<PreviewCard>>,
+    measured: Option<f32>,
+}
+
 struct Review {
     session: Entity<ReviewSession>,
     cards: HashMap<ThreadId, Card>,
@@ -144,6 +161,8 @@ pub struct DiffPane {
     uncommitted: HashSet<String>,
     last_scroll: Option<Instant>,
     line_menu: Option<LineMenu>,
+    preview_source: Option<PreviewSource>,
+    previews: HashMap<String, Preview>,
     pub probe: Probe,
 }
 
@@ -204,6 +223,8 @@ impl DiffPane {
             uncommitted: HashSet::new(),
             last_scroll: None,
             line_menu: None,
+            preview_source: None,
+            previews: HashMap::new(),
             probe: Probe::default(),
         }
     }
@@ -215,6 +236,28 @@ impl DiffPane {
         self.lines.clear();
         self.share_files(cx);
         self.sync(cx);
+    }
+
+    /// Files with an image or Markdown extension show a preview of what is in `repo` for `comparison`.
+    /// Without a source every file shows its diff.
+    pub fn set_preview_source(&mut self, source: Option<(PathBuf, Comparison)>, cx: &mut Context<Self>) {
+        let source = source.map(|(repo, comparison)| PreviewSource { repo, comparison });
+        if source == self.preview_source {
+            return;
+        }
+        self.state.set_preview_source(source.is_some());
+        self.preview_source = source;
+        self.previews.clear();
+        self.lines.clear();
+        self.sync(cx);
+    }
+
+    fn set_preview(&mut self, path: &str, on: bool, cx: &mut Context<Self>) {
+        if self.state.shows_preview(path) != on {
+            self.state.toggle_preview(path);
+            self.lines.clear();
+            self.sync(cx);
+        }
     }
 
     pub fn set_filter(&mut self, filter: Option<Vec<String>>, cx: &mut Context<Self>) {
@@ -648,6 +691,7 @@ impl DiffPane {
             cx.emit(DiffPaneEvent::ShownMode(mode));
         }
         self.pump_highlights(cx);
+        self.pump_previews(cx);
         cx.notify();
     }
 
@@ -673,6 +717,74 @@ impl DiffPane {
             })
             .detach();
         }
+    }
+
+    fn pump_previews(&mut self, cx: &mut Context<Self>) {
+        let Some(source) = self.preview_source.clone() else {
+            return;
+        };
+        for index in self.state.previews_to_load() {
+            let file = Arc::clone(&self.state.files[index]);
+            if self
+                .previews
+                .get(&file.path)
+                .is_some_and(|known| Arc::ptr_eq(&known.file, &file))
+            {
+                continue;
+            }
+            self.previews.insert(
+                file.path.clone(),
+                Preview {
+                    file: Arc::clone(&file),
+                    card: None,
+                    measured: None,
+                },
+            );
+            let task = cx.background_spawn({
+                let (source, file) = (source.clone(), Arc::clone(&file));
+                async move { preview::load(&source.repo, &source.comparison, &file) }
+            });
+            cx.spawn(async move |this, cx| {
+                let loaded = task.await;
+                this.update(cx, |this, cx| this.finish_preview(&file, loaded, cx)).ok();
+            })
+            .detach();
+        }
+    }
+
+    fn finish_preview(&mut self, file: &Arc<FileDiff>, loaded: Option<preview::Loaded>, cx: &mut Context<Self>) {
+        let width = self.state.geometry().width;
+        let Some(entry) = self.previews.get_mut(&file.path) else {
+            return;
+        };
+        if !Arc::ptr_eq(&entry.file, file) {
+            return;
+        }
+        if let Some(loaded) = loaded {
+            entry.card = Some(cx.new(|_| PreviewCard::new(Arc::new(loaded), width)));
+        }
+        cx.notify();
+    }
+
+    fn measure_previews(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let width = self.state.geometry().width;
+        let stale: Vec<(String, Entity<PreviewCard>)> = self
+            .previews
+            .iter()
+            .filter(|(path, entry)| entry.measured != Some(width) && self.state.shows_preview(path))
+            .filter_map(|(path, entry)| Some((path.clone(), entry.card.clone()?)))
+            .collect();
+        let mut changed = false;
+        for (path, card) in stale {
+            card.update(cx, |card, _| card.set_width(width));
+            let loaded = card.read(cx).loaded();
+            let height = preview::height(&loaded, width, window, cx);
+            changed |= self.state.set_preview_height(&path, height + 1.0);
+            if let Some(entry) = self.previews.get_mut(&path) {
+                entry.measured = Some(width);
+            }
+        }
+        changed
     }
 
     fn finish_highlight(&mut self, file: &Arc<FileDiff>, tokens: Option<FileTokens>, cx: &mut Context<Self>) {
@@ -718,6 +830,9 @@ impl DiffPane {
                 self.remeasure = false;
                 self.measure_all(window, cx);
             }
+            self.sync(cx);
+        }
+        if self.measure_previews(window, cx) {
             self.sync(cx);
         }
         let style = Style {
@@ -881,12 +996,7 @@ impl DiffPane {
                     .contains(&diff.path)
                     .then(|| chip_label(theme, "Uncommitted", ChipTone::Amber).mr(px(10.0))),
             )
-            .child(label_segment(
-                theme,
-                if pinned { "pinned-edit-mode" } else { "edit-mode" },
-                &[("Diff", true), ("Edit", false)],
-                0,
-            ))
+            .child(self.view_switch(file, pinned, cx))
             .child(div().w(px(6.0)))
             .child(tag(
                 bar_button(
@@ -937,6 +1047,59 @@ impl DiffPane {
             Some(glass) => bar.border_b_1().border_color(theme.diff.line).bg(glass),
             None => bar.border_y_1().border_color(theme.diff.line).bg(theme.background),
         }
+    }
+
+    fn view_switch(&self, file: usize, pinned: bool, cx: &mut Context<Self>) -> Div {
+        let theme = &self.theme;
+        let path = self.state.files[file].path.clone();
+        if !self.state.previewable(&path) {
+            return label_segment(
+                theme,
+                if pinned { "pinned-edit-mode" } else { "edit-mode" },
+                &[("Diff", true), ("Edit", false)],
+                0,
+            );
+        }
+        const LABELS: [&str; 2] = ["Preview", "Diff"];
+        let selected = if self.state.shows_preview(&path) { 0 } else { 1 };
+        let pane = cx.entity();
+        let target = path.clone();
+        label_switch(
+            theme,
+            if pinned {
+                "pinned-preview-switch"
+            } else {
+                "preview-switch"
+            },
+            &LABELS,
+            selected,
+            move |index| format!("pane:preview-switch:{path}:{}", LABELS[index]),
+            Rc::new(move |index, _, cx| {
+                pane.update(cx, |pane, cx| pane.set_preview(&target, index == 0, cx));
+            }),
+        )
+    }
+
+    fn preview_row(&self, file: usize, height: f32) -> impl IntoElement {
+        let theme = &self.theme;
+        let path = &self.state.files[file].path;
+        let body = match self.previews.get(path).and_then(|entry| entry.card.clone()) {
+            Some(card) => tag(div().size_full(), || format!("pane:preview-card:{path}")).child(card),
+            None => div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .size_full()
+                .text_size(px(12.5))
+                .text_color(theme.diff.muted)
+                .child("Loading preview\u{2026}"),
+        };
+        tag(div().w_full().h(px(height)).overflow_hidden(), || {
+            format!("pane:preview:{path}")
+        })
+        .border_b_1()
+        .border_color(theme.diff.line)
+        .child(body)
     }
 
     fn more_menu(&self, file: usize, pinned: bool, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1221,8 +1384,9 @@ impl DiffPane {
 }
 
 impl Render for DiffPane {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.probe.begin();
+        self.measure_previews(window, cx);
         let current = Theme::of(cx);
         if self.theme.dark != current.dark {
             self.lines.clear();
@@ -1304,6 +1468,7 @@ impl Render for DiffPane {
                 RowKind::FileHeader => Self::placed(y, height).child(self.file_header(file, None, cx)),
                 RowKind::Hunk { hunk } => Self::placed(y, height).child(self.hunk_bar(file, hunk as usize, None, cx)),
                 RowKind::Notice(notice) => Self::placed(y, height).child(self.notice(file, notice, cx)),
+                RowKind::Preview => Self::placed(y, height).child(self.preview_row(file, height)),
             };
             root = root.child(element);
         }

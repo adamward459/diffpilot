@@ -68,7 +68,7 @@ pub const FEATURES: &[Feature] = &[
     Feature {
         name: "diff-pane",
         paths: &[
-            "core/src/{diff,file_kind,anchor,editor}.rs",
+            "core/src/{diff,file_kind,anchor,editor,preview}.rs",
             "gpui-app/src/diff_pane/**",
             "gpui-app/src/pane.rs",
             "gpui-app/examples/diff_pane.rs",
@@ -90,6 +90,10 @@ pub const FEATURES: &[Feature] = &[
             Lib {
                 package: CORE,
                 module: "editor::",
+            },
+            Lib {
+                package: CORE,
+                module: "preview::",
             },
             Lib {
                 package: APP,
@@ -157,6 +161,24 @@ pub const FEATURES: &[Feature] = &[
                 name: "unified-light",
                 target: Binary::app_example("diff_pane"),
                 env: &[("DIFFPILOT_DIFF_MODE", "unified"), ("DIFFPILOT_APPEARANCE", "light")],
+            },
+            Scene {
+                name: "preview-light",
+                target: Binary::app_example("diff_pane"),
+                env: &[
+                    ("DIFFPILOT_DIFF_MODE", "split"),
+                    ("DIFFPILOT_PREVIEW", "1"),
+                    ("DIFFPILOT_APPEARANCE", "light"),
+                ],
+            },
+            Scene {
+                name: "preview-dark",
+                target: Binary::app_example("diff_pane"),
+                env: &[
+                    ("DIFFPILOT_DIFF_MODE", "split"),
+                    ("DIFFPILOT_PREVIEW", "1"),
+                    ("DIFFPILOT_APPEARANCE", "dark"),
+                ],
             },
         ],
     },

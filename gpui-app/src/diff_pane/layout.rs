@@ -1,6 +1,7 @@
 use crate::diff_pane::rows::{Row, RowKind, Rows};
 use diffpilot_core::diff::{DiffMode, FileDiff};
 use diffpilot_core::threads::{Side, ThreadAnchor};
+use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 use unicode_width::UnicodeWidthChar;
@@ -11,6 +12,7 @@ pub const HUD: f32 = 34.0;
 pub const LINE: f32 = 20.0;
 pub const GAP: f32 = 12.0;
 pub const NOTICE: f32 = 96.0;
+pub const PREVIEW: f32 = 220.0;
 pub const THREAD: f32 = 150.0;
 pub const LINE_THREAD_LEFT: f32 = 86.0;
 pub const THREAD_RIGHT: f32 = 16.0;
@@ -150,12 +152,19 @@ impl ThreadFrame {
     }
 }
 
-pub fn row_height(row: Row, files: &[Arc<FileDiff>], wrap: Option<usize>, threads: &[f32]) -> f32 {
+pub fn row_height(
+    row: Row,
+    files: &[Arc<FileDiff>],
+    wrap: Option<usize>,
+    threads: &[f32],
+    previews: &HashMap<String, f32>,
+) -> f32 {
     match row.kind {
         RowKind::FileHeader => FILE_HEADER,
         RowKind::Hunk { .. } => HUNK,
         RowKind::Gap => GAP,
         RowKind::Notice(_) => NOTICE,
+        RowKind::Preview => previews.get(&files[row.file as usize].path).copied().unwrap_or(PREVIEW),
         RowKind::Block { slot } => threads.get(slot as usize).copied().unwrap_or(THREAD),
         RowKind::Line { hunk, line } => {
             let Some(cols) = wrap else { return LINE };
@@ -186,11 +195,22 @@ impl Tops {
 
     /// `threads` holds the row height of each thread slot. A slot without one takes `THREAD`.
     pub fn with_threads(rows: &[Row], files: &[Arc<FileDiff>], wrap: Option<usize>, threads: &[f32]) -> Self {
+        Self::with_heights(rows, files, wrap, threads, &HashMap::new())
+    }
+
+    /// `previews` holds the row height of each previewed file by path. A file without one takes `PREVIEW`.
+    pub fn with_heights(
+        rows: &[Row],
+        files: &[Arc<FileDiff>],
+        wrap: Option<usize>,
+        threads: &[f32],
+        previews: &HashMap<String, f32>,
+    ) -> Self {
         let mut tops = Vec::with_capacity(rows.len() + 1);
         let mut y = 0.0;
         tops.push(y);
         for &row in rows {
-            y += row_height(row, files, wrap, threads);
+            y += row_height(row, files, wrap, threads, previews);
             tops.push(y);
         }
         Self(tops)
@@ -317,6 +337,7 @@ mod tests {
             Visibility {
                 collapsed: &none,
                 loaded: &none,
+                previews: &none,
             },
             &[],
             DiffMode::Unified,
@@ -401,6 +422,7 @@ mod tests {
             Visibility {
                 collapsed: &none,
                 loaded: &none,
+                previews: &none,
             },
             &[],
             DiffMode::Unified,
@@ -497,6 +519,7 @@ mod tests {
             Visibility {
                 collapsed: &none,
                 loaded: &none,
+                previews: &none,
             },
             &threads,
             DiffMode::Unified,
@@ -520,6 +543,7 @@ mod tests {
             Visibility {
                 collapsed: &none,
                 loaded: &none,
+                previews: &none,
             },
             &threads,
             DiffMode::Unified,
@@ -556,6 +580,7 @@ mod tests {
             Visibility {
                 collapsed: &none,
                 loaded: &none,
+                previews: &none,
             },
             &threads,
             DiffMode::Unified,
@@ -577,6 +602,7 @@ mod tests {
             Visibility {
                 collapsed: &none,
                 loaded: &none,
+                previews: &none,
             },
             &[],
             DiffMode::Split,
@@ -612,6 +638,7 @@ mod tests {
             Visibility {
                 collapsed: &none,
                 loaded: &none,
+                previews: &none,
             },
             &[],
             DiffMode::Split,
@@ -649,7 +676,7 @@ mod tests {
                     };
                     let painted = wrap_ranges(left, cols).len().max(wrap_ranges(right, cols).len());
                     assert_eq!(
-                        row_height(pair, &files, Some(cols), &[]),
+                        row_height(pair, &files, Some(cols), &[], &HashMap::new()),
                         painted as f32 * LINE,
                         "{left:?} | {right:?} at {cols}"
                     );

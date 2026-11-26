@@ -46,6 +46,74 @@ fn repo_path() -> PathBuf {
         .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../.fixtures/large"))
 }
 
+fn preview_enabled() -> bool {
+    std::env::var("DIFFPILOT_PREVIEW").is_ok_and(|value| value == "1")
+}
+
+fn gradient(width: u32, height: u32, from: [u8; 3], to: [u8; 3]) -> image::RgbaImage {
+    image::RgbaImage::from_fn(width, height, |x, y| {
+        let t = (x + y) as f32 / (width + height) as f32;
+        let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t) as u8;
+        image::Rgba([mix(from[0], to[0]), mix(from[1], to[1]), mix(from[2], to[2]), 255])
+    })
+}
+
+/// A repo whose feature branch changes a PNG and a Markdown file and adds one of each.
+fn preview_repo() -> PathBuf {
+    let repo = std::env::temp_dir().join(format!("diffpilot-preview-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&repo);
+    std::fs::create_dir_all(repo.join("assets")).expect("mkdir");
+    std::fs::create_dir_all(repo.join("docs")).expect("mkdir");
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .status()
+            .expect("git runs");
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    gradient(64, 48, [250, 160, 80], [240, 80, 120])
+        .save(repo.join("assets/logo.png"))
+        .expect("png");
+    std::fs::write(
+        repo.join("docs/guide.md"),
+        "# Guide\n\nRun the **app** with `cargo run`.\n\n- build it\n- open a repo\n",
+    )
+    .expect("md");
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "base"]);
+    git(&["checkout", "-q", "-b", "feature"]);
+    gradient(96, 64, [60, 120, 250], [120, 220, 180])
+        .save(repo.join("assets/logo.png"))
+        .expect("png");
+    gradient(32, 32, [90, 90, 90], [220, 220, 220])
+        .save(repo.join("assets/icon.png"))
+        .expect("png");
+    std::fs::write(
+        repo.join("docs/guide.md"),
+        "# Guide\n\nRun the **app** with `cargo run`, then open a repo.\n\n1. build it\n2. open a repo\n3. review the diff\n\n> Previews show up for images and Markdown.\n\n| Key | Action |\n| --- | --- |\n| `j` | next file |\n| `k` | previous file |\n\n```rust\nfn main() {}\n```\n",
+    )
+    .expect("md");
+    std::fs::write(
+        repo.join("docs/new.md"),
+        "## Release notes\n\nA *new* page with a [link](https://example.com) and ~~old~~ text.\n",
+    )
+    .expect("md");
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "feature"]);
+    repo
+}
+
 fn viewed_seed(repo: &Path) -> HashSet<String> {
     let path = std::env::var_os("DIFFPILOT_VIEWED_SEED")
         .map(PathBuf::from)
@@ -580,6 +648,9 @@ fn run_window(repo: PathBuf, launch: Instant, bench: Option<Drive>) {
             pane.update(cx, |pane, cx| {
                 let started = Instant::now();
                 pane.set_files(files, cx);
+                if preview_enabled() {
+                    pane.set_preview_source(Some((repo.clone(), Comparison::checked_out("main", true))), cx);
+                }
                 pane.set_viewed(viewed.borrow().clone(), cx);
                 if std::env::var("DIFFPILOT_WRAP").is_ok_and(|value| value == "0") {
                     pane.set_wrap(false, cx);
@@ -622,7 +693,7 @@ fn run_window(repo: PathBuf, launch: Instant, bench: Option<Drive>) {
 
 fn main() {
     let launch = Instant::now();
-    let repo = repo_path();
+    let repo = if preview_enabled() { preview_repo() } else { repo_path() };
     if std::env::var_os("DIFFPILOT_BENCH").is_some() {
         Counting::enable();
     }

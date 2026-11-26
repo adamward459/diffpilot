@@ -9,6 +9,7 @@ mod flows {
     mod fix;
     mod folders;
     mod hunk_hud;
+    mod preview;
     mod remote;
     mod review;
     mod sidebar_keys;
