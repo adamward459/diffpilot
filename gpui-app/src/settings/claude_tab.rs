@@ -1,15 +1,15 @@
-use super::window::{Load, Menu, SettingsWindow};
+use super::window::{Load, SettingsWindow};
 use diffpilot_core::connection::{ClaudeStatus, Login, McpState};
 use diffpilot_core::policy::EditPermission;
 use diffpilot_core::review::{Effort, ModelName, ReviewModel};
+use diffpilot_core::settings::Settings;
+use diffpilot_ui_kit::components::menu::{MenuItem, MenuRow, MenuSection, menu_button};
 use diffpilot_ui_kit::components::{
-    Button, MenuEntry, MenuItem, Row, Select, caption, glyph_icon, grouped, menu as dropdown, mono_text, note, picker,
-    section, spinner, switch, tag,
+    Button, Row, caption, glyph_icon, grouped, mono_text, note, picker, section, spinner, switch, tag,
 };
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
-use gpui::{AnyElement, Context, Div, HighlightStyle, Hsla, IntoElement, SharedString, StyledText, div, px};
-use std::rc::Rc;
+use gpui::{AnyElement, Context, Corner, Div, HighlightStyle, Hsla, IntoElement, SharedString, StyledText, div, px};
 
 pub fn render(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
     div()
@@ -165,52 +165,44 @@ fn connection(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
 }
 
 fn model_picker(
-    window: &SettingsWindow,
     t: &Theme,
     cx: &mut Context<SettingsWindow>,
-    menu: Menu,
     id: &'static str,
     model: ReviewModel,
+    save: fn(&Settings, ReviewModel),
 ) -> impl IntoElement {
-    let open = window.menu == Some(menu);
     let this = cx.entity();
-    let set = move |model: ReviewModel| -> Select {
-        let this = this.clone();
-        Rc::new(move |_, cx| {
-            this.update(cx, |this, cx| {
-                match menu {
-                    Menu::Reviews => this.settings.set_reviews_model(model),
-                    Menu::Fixes => this.settings.set_fixes_model(model),
-                    Menu::EditPermission | Menu::Editor => {}
-                }
-                this.close_menu(cx);
+    menu_button(id, tag(picker(t, id, model.title(), true), id), move |_, _| {
+        let set = |label: &str, next: ReviewModel, checked: bool| -> MenuRow {
+            let this = this.clone();
+            MenuItem::new(title_case(label), move |_, cx| {
+                this.update(cx, |this, cx| {
+                    save(&this.settings, next);
+                    cx.notify();
+                })
             })
-        })
-    };
-    let mut entries = vec![MenuEntry::Heading("Model")];
-    entries.extend(ModelName::ALL.map(|name| {
-        MenuEntry::Item(MenuItem {
-            label: title_case(name.as_str()).into(),
-            checked: name == model.name,
-            on_select: set(ReviewModel::new(name, model.effort)),
-        })
-    }));
-    entries.push(MenuEntry::Separator);
-    entries.push(MenuEntry::Heading("Effort"));
-    entries.extend(Effort::ALL.map(|effort| {
-        MenuEntry::Item(MenuItem {
-            label: title_case(effort.as_str()).into(),
-            checked: effort == model.effort,
-            on_select: set(ReviewModel::new(model.name, effort)),
-        })
-    }));
-    div()
-        .relative()
-        .child(
-            tag(picker(t, id, model.title(), true), id)
-                .on_click(cx.listener(move |this, _, _, cx| this.toggle_menu(menu, cx))),
-        )
-        .when(open, |this| this.child(dropdown(t, id, entries)))
+            .checked(checked)
+            .into()
+        };
+        let names = ModelName::ALL
+            .map(|name| set(name.as_str(), ReviewModel::new(name, model.effort), name == model.name))
+            .into();
+        let efforts = Effort::ALL
+            .map(|effort| {
+                set(
+                    effort.as_str(),
+                    ReviewModel::new(model.name, effort),
+                    effort == model.effort,
+                )
+            })
+            .into();
+        vec![
+            MenuSection::titled("Model", names),
+            MenuSection::titled("Effort", efforts),
+        ]
+    })
+    .anchor(Corner::TopRight)
+    .min_width(150.)
 }
 
 fn models(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> Div {
@@ -221,14 +213,20 @@ fn models(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) 
         vec![
             Row::new(t, "Reviews and guides")
                 .subtitle(caption(t, "Review, Guide"))
-                .control(model_picker(window, t, cx, Menu::Reviews, "model-reviews", reviews))
+                .control(model_picker(
+                    t,
+                    cx,
+                    "model-reviews",
+                    reviews,
+                    Settings::set_reviews_model,
+                ))
                 .into_any_element(),
             Row::new(t, "Fixes and replies")
                 .subtitle(caption(
                     t,
                     "Fix Comments, Make Changes, Ask Claude, @claude, Finish Review",
                 ))
-                .control(model_picker(window, t, cx, Menu::Fixes, "model-fixes", fixes))
+                .control(model_picker(t, cx, "model-fixes", fixes, Settings::set_fixes_model))
                 .into_any_element(),
         ],
     )
@@ -236,31 +234,29 @@ fn models(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) 
 
 fn editing(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> Div {
     let current = window.settings.edit_permission();
-    let open = window.menu == Some(Menu::EditPermission);
     let this = cx.entity();
-    let entries: Vec<MenuEntry> = EditPermission::ALL
-        .into_iter()
-        .map(|permission| {
-            let this = this.clone();
-            MenuEntry::Item(MenuItem {
-                label: permission.title().into(),
-                checked: permission == current,
-                on_select: Rc::new(move |_, cx| {
-                    this.update(cx, |this, cx| {
-                        this.settings.set_edit_permission(permission);
-                        this.close_menu(cx);
+    let picker = menu_button(
+        "edit-permission",
+        tag(picker(t, "edit-permission", current.title(), true), "edit-permission"),
+        move |_, _| {
+            let rows = EditPermission::ALL
+                .into_iter()
+                .map(|permission| {
+                    let this = this.clone();
+                    MenuItem::new(permission.title(), move |_, cx| {
+                        this.update(cx, |this, cx| {
+                            this.settings.set_edit_permission(permission);
+                            cx.notify();
+                        })
                     })
-                }),
-            })
-        })
-        .collect();
-    let picker = div()
-        .relative()
-        .child(
-            tag(picker(t, "edit-permission", current.title(), true), "edit-permission")
-                .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(Menu::EditPermission, cx))),
-        )
-        .when(open, |this| this.child(dropdown(t, "edit-permission", entries)));
+                    .checked(permission == current)
+                    .into()
+                })
+                .collect();
+            vec![MenuSection::new(rows)]
+        },
+    )
+    .anchor(Corner::TopRight);
     grouped(
         t,
         vec![

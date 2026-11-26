@@ -2,8 +2,8 @@ use crate::icons::Glyph;
 use crate::theme::Theme;
 use gpui::prelude::*;
 use gpui::{
-    Animation, AnimationExt, AnyElement, App, Div, ElementId, FontWeight, Hsla, MouseButton, SharedString, Stateful,
-    Transformation, Window, deferred, div, percentage, px,
+    Animation, AnimationExt, AnyElement, App, Div, ElementId, FontWeight, Hsla, SharedString, Stateful, Transformation,
+    Window, div, percentage, px,
 };
 use gpui_component::{ActiveTheme, Icon};
 use std::rc::Rc;
@@ -254,86 +254,4 @@ pub fn segmented_control(
                 format!("{id}:{label}"),
             )
         }))
-}
-
-pub type Select = Rc<dyn Fn(&mut Window, &mut App)>;
-
-pub struct MenuItem {
-    pub label: SharedString,
-    pub checked: bool,
-    pub on_select: Select,
-}
-
-pub enum MenuEntry {
-    Heading(&'static str),
-    Item(MenuItem),
-    Separator,
-}
-
-/// Covers the window under an open menu, so a click anywhere else closes it and reaches nothing below.
-pub fn backdrop(on_dismiss: impl Fn(&mut Window, &mut App) + 'static) -> impl IntoElement {
-    deferred(
-        div()
-            .absolute()
-            .inset_0()
-            .occlude()
-            .on_mouse_down(MouseButton::Left, move |_, window, cx| on_dismiss(window, cx)),
-    )
-    .with_priority(1)
-}
-
-/// Opens under its parent, which must be `relative`.
-pub fn menu(theme: &Theme, id: &'static str, entries: Vec<MenuEntry>) -> impl IntoElement {
-    let hover = theme.pressed(theme.ui.pop);
-    let items = entries.into_iter().enumerate().map(|(ix, entry)| -> AnyElement {
-        match entry {
-            MenuEntry::Heading(text) => div()
-                .px(px(10.))
-                .pt(px(4.))
-                .text_size(px(11.))
-                .text_color(theme.ui.muted)
-                .child(text)
-                .into_any_element(),
-            MenuEntry::Separator => div().h(px(1.)).my(px(4.)).bg(theme.ui.line).into_any_element(),
-            MenuEntry::Item(item) => {
-                let on_select = item.on_select;
-                let name = format!("{id}:{}", item.label);
-                tag(
-                    div()
-                        .id(ElementId::NamedInteger(id.into(), ix as u64))
-                        .flex()
-                        .items_center()
-                        .gap(px(6.))
-                        .h(px(24.))
-                        .px(px(8.))
-                        .rounded(px(4.))
-                        .text_size(px(12.))
-                        .text_color(theme.ui.text)
-                        .cursor_pointer()
-                        .hover(move |style| style.bg(hover))
-                        .on_click(move |_, window, cx| on_select(window, cx))
-                        .child(div().w(px(12.)).when(item.checked, |this| this.child("✓")))
-                        .child(item.label),
-                    name,
-                )
-                .into_any_element()
-            }
-        }
-    });
-    deferred(
-        div()
-            .absolute()
-            .top(px(26.))
-            .right_0()
-            .occlude()
-            .min_w(px(150.))
-            .p(px(4.))
-            .rounded(px(10.))
-            .border_1()
-            .border_color(theme.ui.line2)
-            .bg(theme.ui.pop)
-            .shadow_lg()
-            .children(items),
-    )
-    .with_priority(2)
 }

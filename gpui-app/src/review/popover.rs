@@ -1,5 +1,6 @@
 use crate::review::session::ReviewSession;
 use diffpilot_core::review::{Effort, ModelName, ReviewModel, ReviewRun, ReviewScope, focus};
+use diffpilot_ui_kit::components::menu::{MenuItem, MenuSection, menu_button};
 use diffpilot_ui_kit::components::{Button, Look, chip};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
@@ -8,7 +9,6 @@ use gpui::{
     SharedString, Styled, Subscription, Window, div, px,
 };
 use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_component::radio::{Radio, RadioGroup};
 use gpui_component::{Icon, h_flex, v_flex};
 
@@ -68,36 +68,37 @@ impl ReviewPopover {
 
     fn model_menu(&self, model: ReviewModel) -> AnyElement {
         let session = self.session.clone();
-        Button::new("review-model")
+        let trigger = Button::new("review-model")
             .icon(Glyph::Sparkles, 12.)
             .label(model.title())
-            .regular()
-            .dropdown_menu(move |menu, _, _| {
-                let pick = |model: ReviewModel| {
-                    let session = session.clone();
-                    move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut gpui::App| {
-                        session.update(cx, |session, cx| session.update_setup(|s| s.model = Some(model), cx));
-                    }
-                };
-                let names = ModelName::ALL.map(|name| {
-                    let next = ReviewModel::new(name, model.effort);
-                    PopupMenuItem::new(title_case(name.as_str()))
-                        .checked(name == model.name)
-                        .on_click(pick(next))
-                });
-                let efforts = Effort::ALL.map(|effort| {
-                    let next = ReviewModel::new(model.name, effort);
-                    PopupMenuItem::new(title_case(effort.as_str()))
-                        .checked(effort == model.effort)
-                        .on_click(pick(next))
-                });
-                let menu = menu.label("Model");
-                let menu = names.into_iter().fold(menu, |menu, item| menu.item(item));
-                efforts
-                    .into_iter()
-                    .fold(menu.separator().label("Effort"), |menu, item| menu.item(item))
-            })
-            .into_any_element()
+            .regular();
+        menu_button("review-model", trigger, move |_, _| {
+            let pick = |label: &str, next: ReviewModel, checked: bool| {
+                let session = session.clone();
+                MenuItem::new(title_case(label), move |_, cx| {
+                    session.update(cx, |session, cx| session.update_setup(|s| s.model = Some(next), cx));
+                })
+                .checked(checked)
+                .into()
+            };
+            let names = ModelName::ALL
+                .map(|name| pick(name.as_str(), ReviewModel::new(name, model.effort), name == model.name))
+                .into();
+            let efforts = Effort::ALL
+                .map(|effort| {
+                    pick(
+                        effort.as_str(),
+                        ReviewModel::new(model.name, effort),
+                        effort == model.effort,
+                    )
+                })
+                .into();
+            vec![
+                MenuSection::titled("Model", names),
+                MenuSection::titled("Effort", efforts),
+            ]
+        })
+        .into_any_element()
     }
 }
 

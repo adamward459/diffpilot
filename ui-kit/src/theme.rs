@@ -302,6 +302,23 @@ impl Theme {
         composite(fill, if pressed { self.lift_press } else { self.lift_hover })
     }
 
+    pub fn menu_shadow(&self) -> Vec<BoxShadow> {
+        vec![
+            BoxShadow {
+                color: self.chrome.glass_shadow,
+                offset: point(px(0.), px(8.)),
+                blur_radius: px(24.),
+                spread_radius: px(0.),
+            },
+            BoxShadow {
+                color: self.chrome.glass_shadow,
+                offset: point(px(0.), px(1.)),
+                blur_radius: px(3.),
+                spread_radius: px(0.),
+            },
+        ]
+    }
+
     pub fn glass_shadow(&self) -> Vec<BoxShadow> {
         vec![BoxShadow {
             color: self.chrome.glass_shadow,

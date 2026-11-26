@@ -244,9 +244,14 @@ async fn a_model_picker_changes_the_name_and_the_effort_in_settings(cx: &mut Tes
     let (rig, cx) = rig(cx, Options::default());
     assert_eq!(rig.settings.reviews_model().title(), "Opus · High");
     rig.click(cx, "model-reviews");
-    assert_eq!(rig.state(cx, |view| view.menu), Some(window::Menu::Reviews));
     rig.click(cx, "model-reviews:Sonnet");
-    assert_eq!(rig.state(cx, |view| view.menu), None);
+    assert_eq!(rig.settings.reviews_model().title(), "Sonnet · High");
+    rig.click(cx, "model-reviews:Haiku");
+    assert_eq!(
+        rig.settings.reviews_model().name,
+        ModelName::Sonnet,
+        "picking closes the menu"
+    );
     rig.click(cx, "model-reviews");
     rig.click(cx, "model-reviews:Low");
     assert_eq!(
@@ -276,10 +281,9 @@ async fn the_edit_permission_picker_writes_the_setting(cx: &mut TestAppContext) 
 async fn clicking_outside_an_open_menu_closes_it_without_changing_anything(cx: &mut TestAppContext) {
     let (rig, cx) = rig(cx, Options::default());
     rig.click(cx, "model-reviews");
-    assert!(rig.state(cx, |view| view.menu.is_some()));
     cx.simulate_click(point(px(5.), px(780.)), Modifiers::default());
     rig.settle(cx);
-    assert_eq!(rig.state(cx, |view| view.menu), None);
+    rig.click(cx, "model-reviews:Sonnet");
     assert_eq!(rig.settings.reviews_model().title(), "Opus · High");
 }
 

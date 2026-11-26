@@ -1,16 +1,14 @@
-use super::window::{Menu, SettingsWindow};
+use super::window::SettingsWindow;
 use diffpilot_core::diff::DiffMode;
 use diffpilot_core::editor::Editor;
 use diffpilot_core::settings::AppearanceChoice;
 use diffpilot_ui_kit::Theme;
-use diffpilot_ui_kit::components::{
-    MenuEntry, MenuItem, Row, caption, grouped, menu as dropdown, picker, section, segmented_control, switch, tag,
-};
+use diffpilot_ui_kit::components::menu::{MenuItem, MenuRow, MenuSection, menu_button};
+use diffpilot_ui_kit::components::{Row, caption, grouped, picker, section, segmented_control, switch, tag};
 use gpui::prelude::*;
-use gpui::{App, Context, Div, IntoElement, Keystroke, SharedString, div, px};
+use gpui::{App, Context, Corner, Div, IntoElement, Keystroke, SharedString, div, px};
 use gpui_component::input::Input;
 use gpui_component::{ActiveTheme, Sizable};
-use std::rc::Rc;
 
 pub fn general(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
     div()
@@ -57,49 +55,45 @@ fn editor(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) 
     };
     let this = cx.entity();
     let template = window.custom_editor.clone();
-    let choose = move |choice: Option<Editor>| -> diffpilot_ui_kit::components::Select {
-        let this = this.clone();
-        let template = template.clone();
-        Rc::new(move |_, cx| {
-            let choice = match &choice {
-                Some(Editor::Custom(_)) => Some(Editor::Custom(template.read(cx).value().to_string())),
-                other => other.clone(),
+    let automatic = format!("Automatic ({})", detected.title());
+    let current = saved.clone();
+    let control = menu_button(
+        "editor",
+        tag(picker(t, "editor", label, true), "editor"),
+        move |_, _| {
+            let choose = |title: SharedString, choice: Option<Editor>, checked: bool| -> MenuRow {
+                let (this, template) = (this.clone(), template.clone());
+                MenuItem::new(title, move |_, cx| {
+                    let choice = match &choice {
+                        Some(Editor::Custom(_)) => Some(Editor::Custom(template.read(cx).value().to_string())),
+                        other => other.clone(),
+                    };
+                    this.update(cx, |this, cx| {
+                        this.settings.set_editor(choice);
+                        cx.notify();
+                    })
+                })
+                .checked(checked)
+                .into()
             };
-            this.update(cx, |this, cx| {
-                this.settings.set_editor(choice.clone());
-                this.close_menu(cx);
-            })
-        })
-    };
-    let mut entries = vec![MenuEntry::Item(MenuItem {
-        label: format!("Automatic ({})", detected.title()).into(),
-        checked: saved.is_none(),
-        on_select: choose(None),
-    })];
-    let presets = Editor::PRESETS
-        .into_iter()
-        .chain([Editor::Custom(String::new())])
-        .map(|editor| {
-            let checked = match (&saved, &editor) {
-                (Some(Editor::Custom(_)), Editor::Custom(_)) => true,
-                (Some(current), editor) => current == editor,
-                (None, _) => false,
-            };
-            MenuEntry::Item(MenuItem {
-                label: editor.title().into(),
-                checked,
-                on_select: choose(Some(editor)),
-            })
-        });
-    entries.extend(presets);
-    let open = window.menu == Some(Menu::Editor);
-    let control = div()
-        .relative()
-        .child(
-            tag(picker(t, "editor", label, true), "editor")
-                .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(Menu::Editor, cx))),
-        )
-        .when(open, |this| this.child(dropdown(t, "editor", entries)));
+            let mut rows = vec![choose(automatic.clone().into(), None, current.is_none())];
+            rows.extend(
+                Editor::PRESETS
+                    .into_iter()
+                    .chain([Editor::Custom(String::new())])
+                    .map(|editor| {
+                        let checked = match (&current, &editor) {
+                            (Some(Editor::Custom(_)), Editor::Custom(_)) => true,
+                            (Some(current), editor) => current == editor,
+                            (None, _) => false,
+                        };
+                        choose(editor.title().into(), Some(editor), checked)
+                    }),
+            );
+            vec![MenuSection::new(rows)]
+        },
+    )
+    .anchor(Corner::TopRight);
     let mut rows = vec![
         Row::new(t, "Open files in")
             .subtitle(caption(t, "Used by Open in Editor in the diff."))

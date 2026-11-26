@@ -14,20 +14,19 @@ use diffpilot_core::diff::{DiffMode, FileDiff, LineKind};
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use diffpilot_ui_kit::Glyph;
+use diffpilot_ui_kit::components::menu::{MenuAt, MenuItem, MenuSection, menu_at};
 use diffpilot_ui_kit::components::{
-    BadgeTone, Button, ChipTone, Look, MenuEntry, MenuItem, State, backdrop, bar_button, chip_label, label_segment,
-    menu, status_badge, viewed_toggle,
+    BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, label_segment, status_badge, viewed_toggle,
 };
 use diffpilot_ui_kit::{Theme, painted};
-use gpui::ClipboardItem;
 use gpui::{
     AnyView, App, AppContext as _, ClickEvent, Context, Div, Entity, EventEmitter, FontWeight, Hsla,
     InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _, Pixels,
     Render, ScrollWheelEvent, SharedString, Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled as _,
     Subscription, Window, canvas, div, font, px,
 };
+use gpui::{ClipboardItem, Point};
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -47,8 +46,7 @@ pub enum DiffPaneEvent {
 }
 
 struct LineMenu {
-    x: Pixels,
-    y: Pixels,
+    at: Point<Pixels>,
     path: String,
     line: Option<u32>,
 }
@@ -433,7 +431,11 @@ impl DiffPane {
             return;
         }
         let target = self.line_at(x, y).and_then(|hovered| self.open_line(hovered));
-        self.line_menu = target.map(|(path, line)| LineMenu { x, y, path, line });
+        self.line_menu = target.map(|(path, line)| LineMenu {
+            at: event.position,
+            path,
+            line,
+        });
         cx.notify();
     }
 
@@ -453,51 +455,39 @@ impl DiffPane {
         }
     }
 
-    fn line_menu(&self, menu_state: &LineMenu, cx: &mut Context<Self>) -> Div {
-        const WIDTH: f32 = 200.0;
-        let theme = &self.theme;
+    fn line_menu(&self, menu_state: &LineMenu, cx: &mut Context<Self>) -> MenuAt {
         let label = match menu_state.line {
             Some(line) => format!("Open in Editor at Line {line}"),
             None => "Open in Editor".to_string(),
         };
         let pane = cx.entity();
         let (path, line) = (menu_state.path.clone(), menu_state.line);
-        let select = {
+        let close = {
             let pane = pane.clone();
-            Rc::new(move |_: &mut Window, cx: &mut App| {
+            move |_: &mut Window, cx: &mut App| {
                 pane.update(cx, |pane, cx| {
                     pane.line_menu = None;
-                    cx.emit(DiffPaneEvent::OpenInEditor {
-                        path: path.clone(),
-                        line,
-                    });
                     cx.notify();
                 })
-            })
+            }
         };
-        let entries = vec![MenuEntry::Item(MenuItem {
-            label: label.into(),
-            checked: false,
-            on_select: select,
-        })];
-        let width = self.state.geometry().width;
-        let left = f32::from(menu_state.x).min(width - WIDTH).max(0.0);
-        div()
-            .child(backdrop(move |_, cx| {
-                pane.update(cx, |pane, cx| {
-                    pane.line_menu = None;
-                    cx.notify();
-                })
-            }))
-            .child(
-                div()
-                    .absolute()
-                    .left(px(left))
-                    .top(px(f32::from(menu_state.y) - 22.0))
-                    .w(px(WIDTH))
-                    .h(px(0.0))
-                    .child(menu(theme, "line-menu", entries)),
-            )
+        menu_at(
+            "line-menu",
+            menu_state.at,
+            move |_, _| {
+                let (pane, path) = (pane.clone(), path.clone());
+                let open = MenuItem::new(label.clone(), move |_, cx| {
+                    pane.update(cx, |_, cx| {
+                        cx.emit(DiffPaneEvent::OpenInEditor {
+                            path: path.clone(),
+                            line,
+                        })
+                    })
+                });
+                vec![MenuSection::new(vec![open.into()])]
+            },
+            close,
+        )
     }
 
     fn add_comment(&mut self, hovered: Hovered, window: &mut Window, cx: &mut Context<Self>) {

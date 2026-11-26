@@ -6,7 +6,7 @@ use diffpilot_core::github::client::AuthStatus;
 use diffpilot_core::github::http::{Http, UreqHttp};
 use diffpilot_core::github::{Github, GithubError};
 use diffpilot_core::settings::Settings;
-use diffpilot_ui_kit::components::{backdrop, glyph_icon, tag};
+use diffpilot_ui_kit::components::{glyph_icon, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{
@@ -103,14 +103,6 @@ impl Op {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Menu {
-    Reviews,
-    Fixes,
-    EditPermission,
-    Editor,
-}
-
 /// What the window talks to outside the settings file. Tests pass fakes.
 #[derive(Clone)]
 pub struct Services {
@@ -145,7 +137,6 @@ pub struct SettingsWindow {
     pub(super) install_op: Op,
     pub(super) github: Load<AuthStatus>,
     pub(super) github_op: Op,
-    pub(super) menu: Option<Menu>,
     pub(super) token: Entity<InputState>,
     pub(super) custom_editor: Entity<InputState>,
     pub(super) detected_editor: Editor,
@@ -199,7 +190,6 @@ impl SettingsWindow {
             install_op: Op::Idle,
             github: Load::Idle,
             github_op: Op::Idle,
-            menu: None,
             token,
             custom_editor,
             detected_editor: editor::detect(),
@@ -219,7 +209,6 @@ impl SettingsWindow {
             return;
         }
         self.tab = tab;
-        self.menu = None;
         window.set_window_title(tab.title());
         self.load_for_tab(cx);
         cx.notify();
@@ -228,17 +217,6 @@ impl SettingsWindow {
     fn load_for_tab(&mut self, cx: &mut Context<Self>) {
         if self.tab == Tab::Accounts && self.github == Load::Idle {
             self.refresh_github(cx);
-        }
-    }
-
-    pub(super) fn toggle_menu(&mut self, menu: Menu, cx: &mut Context<Self>) {
-        self.menu = if self.menu == Some(menu) { None } else { Some(menu) };
-        cx.notify();
-    }
-
-    pub(super) fn close_menu(&mut self, cx: &mut Context<Self>) {
-        if self.menu.take().is_some() {
-            cx.notify();
         }
     }
 
@@ -442,7 +420,6 @@ impl SettingsWindow {
 impl Render for SettingsWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = Theme::of(cx);
-        let this = cx.entity();
         let body = match self.tab {
             Tab::General => general::general(self, &t, cx).into_any_element(),
             Tab::Appearance => general::appearance(self, &t, cx).into_any_element(),
@@ -474,9 +451,6 @@ impl Render for SettingsWindow {
                         .child(body),
                 ),
             )
-            .when(self.menu.is_some(), |this_el| {
-                this_el.child(backdrop(move |_, cx| this.update(cx, |this, cx| this.close_menu(cx))))
-            })
     }
 }
 
