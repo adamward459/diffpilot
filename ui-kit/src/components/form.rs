@@ -34,7 +34,7 @@ pub fn section(theme: &Theme, title: &'static str, content: impl IntoElement) ->
         .gap(px(8.))
         .child(
             div()
-                .text_size(px(13.))
+                .text_size(px(14.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme.ui.text)
                 .child(title),
@@ -62,8 +62,8 @@ pub fn note(theme: &Theme, color: Hsla, text: impl Into<SharedString>) -> Div {
     div()
         .px(px(13.))
         .py(px(8.))
-        .text_size(px(12.))
-        .line_height(px(17.))
+        .text_size(px(13.))
+        .line_height(px(18.))
         .text_color(color)
         .bg(theme.ui.raised)
         .child(text.into())
@@ -71,8 +71,8 @@ pub fn note(theme: &Theme, color: Hsla, text: impl Into<SharedString>) -> Div {
 
 pub fn caption(theme: &Theme, text: impl Into<SharedString>) -> Div {
     div()
-        .text_size(px(11.5))
-        .line_height(px(15.))
+        .text_size(px(12.5))
+        .line_height(px(16.))
         .text_color(theme.ui.muted)
         .child(text.into())
 }
@@ -80,7 +80,7 @@ pub fn caption(theme: &Theme, text: impl Into<SharedString>) -> Div {
 pub fn mono_text(theme: &Theme, cx: &App, text: impl Into<SharedString>) -> Div {
     div()
         .font_family(cx.theme().mono_font_family.clone())
-        .text_size(px(11.))
+        .text_size(px(12.))
         .text_color(theme.ui.text2)
         .child(text.into())
 }
@@ -137,7 +137,7 @@ impl RenderOnce for Row {
             .gap(px(12.))
             .px(px(12.))
             .py(px(9.))
-            .min_h(px(if self.sub.is_some() { 52. } else { 40. }))
+            .min_h(px(if self.sub.is_some() { 56. } else { 44. }))
             .when(self.dim, |this| this.opacity(0.55))
             .when_some(self.leading, |this, glyph| {
                 this.child(glyph_icon(glyph, 14., t.ui.muted))
@@ -150,8 +150,8 @@ impl RenderOnce for Row {
                     .min_w_0()
                     .child(
                         div()
-                            .text_size(px(13.))
-                            .line_height(px(18.))
+                            .text_size(px(14.))
+                            .line_height(px(19.))
                             .text_color(t.ui.text)
                             .child(self.title),
                     )
@@ -189,14 +189,14 @@ pub fn picker(theme: &Theme, id: impl Into<ElementId>, label: impl Into<SharedSt
         .flex()
         .items_center()
         .gap(px(6.))
-        .h(px(24.))
-        .pl(px(9.))
+        .h(px(28.))
+        .pl(px(10.))
         .pr(px(6.))
         .rounded(px(6.))
         .border_1()
         .border_color(theme.ui.cap_border)
         .bg(theme.ui.cap)
-        .text_size(px(12.5))
+        .text_size(px(13.))
         .text_color(theme.ui.text)
         .whitespace_nowrap()
         .child(label.into())

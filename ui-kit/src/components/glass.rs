@@ -34,7 +34,7 @@ pub fn filter_field(theme: &Theme, input: impl IntoElement) -> Div {
         h_flex()
             .flex_1()
             .min_w_0()
-            .h(px(24.))
+            .h(px(28.))
             .px(px(10.))
             .gap(px(6.))
             .rounded_full(),
@@ -68,7 +68,7 @@ pub fn glass_button(
     };
     interactive(
         glass_surface(
-            h_flex().size(px(24.)).flex_shrink_0().justify_center().rounded_full(),
+            h_flex().size(px(28.)).flex_shrink_0().justify_center().rounded_full(),
             theme,
         )
         .id(id)
@@ -110,7 +110,7 @@ pub fn segmented(
                 .flex()
                 .items_center()
                 .rounded_full()
-                .text_size(px(12.))
+                .text_size(px(13.))
                 .text_color(theme.chrome.label)
                 .cursor_pointer(),
             fills,

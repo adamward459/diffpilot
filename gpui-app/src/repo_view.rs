@@ -43,7 +43,7 @@ const MIN_SIDEBAR: f32 = 240.0 + PANEL_INSET;
 const IDEAL_SIDEBAR: f32 = 272.0 + PANEL_INSET;
 const MAX_SIDEBAR: f32 = 480.0 + PANEL_INSET;
 const TOOLBAR_HEIGHT: f32 = 52.0;
-const GLASS_HEIGHT: f32 = 28.0;
+const GLASS_HEIGHT: f32 = 35.0;
 const NAV_TABS: [SwitchItem; 2] = [
     SwitchItem {
         glyph: Glyph::File,
@@ -826,11 +826,11 @@ impl RepoView {
                 h_flex()
                     .gap(px(3.))
                     .flex_none()
-                    .text_size(px(12.))
+                    .text_size(px(13.))
                     .text_color(tokens.ui.text2)
                     .child(
                         Icon::new(Glyph::MessageSquare)
-                            .size(px(12.))
+                            .size(px(14.))
                             .text_color(tokens.ui.muted),
                     )
                     .child(threads.to_string()),
@@ -869,7 +869,7 @@ impl RepoView {
                 h_flex()
                     .gap(px(6.))
                     .opacity(0.6)
-                    .child(glyph_icon(Glyph::SquareTerminal, 12., tokens.ui.muted))
+                    .child(glyph_icon(Glyph::SquareTerminal, 14., tokens.ui.muted))
                     .child("Claude \u{b7} no review yet"),
             )
             .child(div().flex_1())
@@ -878,7 +878,7 @@ impl RepoView {
                     h_flex()
                         .gap(px(5.))
                         .text_color(tokens.chrome.uncommitted)
-                        .child(glyph_icon(Glyph::Pencil, 11., tokens.chrome.uncommitted))
+                        .child(glyph_icon(Glyph::Pencil, 13., tokens.chrome.uncommitted))
                         .child(format!("{uncommitted} uncommitted")),
                 )
             })
@@ -886,7 +886,7 @@ impl RepoView {
                 h_flex()
                     .gap(px(4.))
                     .opacity(0.45)
-                    .child(glyph_icon(Glyph::GitCommit, 12., tokens.ui.muted))
+                    .child(glyph_icon(Glyph::GitCommit, 14., tokens.ui.muted))
                     .child("Commit\u{2026}"),
             )
             .into_any_element()
@@ -941,7 +941,7 @@ impl RepoView {
                 .min_w(px(110.))
                 .max_w(px(220.))
                 .flex_shrink()
-                .pl(px(if self.sidebar_open { 14. } else { TRAFFIC_LIGHTS }))
+                .pl(px(if self.sidebar_open { 20. } else { TRAFFIC_LIGHTS }))
                 .gap_2()
                 .children(leading)
                 .child(
@@ -949,7 +949,7 @@ impl RepoView {
                         .min_w_0()
                         .child(
                             div()
-                                .text_size(px(13.))
+                                .text_size(px(15.))
                                 .font_semibold()
                                 .text_color(tokens.ui.text)
                                 .whitespace_nowrap()
@@ -957,7 +957,7 @@ impl RepoView {
                         )
                         .child(
                             div()
-                                .text_size(px(11.))
+                                .text_size(px(12.))
                                 .text_color(tokens.ui.muted)
                                 .whitespace_nowrap()
                                 .overflow_hidden()

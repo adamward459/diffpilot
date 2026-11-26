@@ -273,7 +273,7 @@ impl Sidebar {
                 )
                 .child("·")
                 .child(format!(
-                    "{} of {} viewed",
+                    "{}/{} viewed",
                     grouped(summary.viewed),
                     grouped(summary.file_count)
                 ))
@@ -283,11 +283,11 @@ impl Sidebar {
             .id("summary")
             .gap(px(7.))
             .px_3()
-            .pt(px(2.))
+            .pt(px(5.))
             .pb(px(10.))
             .child(
                 div()
-                    .text_size(px(11.))
+                    .text_size(px(12.))
                     .text_color(muted)
                     .whitespace_nowrap()
                     .overflow_hidden()
@@ -310,7 +310,7 @@ impl Sidebar {
         let uncommitted = self.filter.only_uncommitted;
         let hide_viewed = self.filter.hide_viewed;
         h_flex()
-            .h(px(38.))
+            .h(px(44.))
             .gap(px(6.))
             .px(px(10.))
             .border_y_1()
