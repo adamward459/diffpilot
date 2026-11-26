@@ -89,8 +89,33 @@ impl GuideSession {
             _review: observed,
         };
         this.stored = this.store.current_guide(session).ok().flatten();
+        this.adopt_live_run(cx);
         this.files_may_have_changed(cx);
         this
+    }
+
+    fn adopt_live_run(&mut self, cx: &mut Context<Self>) {
+        let Some(repo) = self.review.read(cx).host().repo.clone() else {
+            return;
+        };
+        let Some(engine) = cx.try_global::<Runs>().map(|runs| runs.engine().clone()) else {
+            return;
+        };
+        self.watch(&engine, cx);
+        let live = engine
+            .active(&repo)
+            .into_iter()
+            .chain(engine.queued(&repo))
+            .find(|run| run.kind == RunKind::Guide && run.session == self.session);
+        if let Some(run) = live {
+            let chapters = self
+                .store
+                .load_draft(run.id)
+                .ok()
+                .flatten()
+                .map_or(0, |draft| draft.guide.chapters.len());
+            self.run = GuideRun::Writing { run: run.id, chapters };
+        }
     }
 
     pub fn reload(&mut self, cx: &mut Context<Self>) {

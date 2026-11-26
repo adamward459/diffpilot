@@ -384,3 +384,49 @@ fn a_second_write_while_writing_leaves_the_live_run_alone(app: &mut TestAppConte
     guide.update(cx, |guide, cx| guide.write(cx));
     assert_eq!(guide.read_with(cx, |guide, _| guide.run().clone()), before);
 }
+
+#[gpui::test]
+fn a_rebuilt_session_adopts_the_run_that_is_still_writing(app: &mut TestAppContext) {
+    let (world, cx) = open(app, true);
+    show_guide(&world, cx);
+    click(cx, "guide-write");
+    let first = world.view.read_with(cx, |view, _| view.guide());
+    let GuideRun::Writing { run, .. } = first.read_with(cx, |guide, _| guide.run().clone()) else {
+        panic!("a run is writing");
+    };
+    wait_until(cx, "the run to start", |_| {
+        world.work.path().join("out/started").exists()
+    });
+
+    let review = world.view.read_with(cx, |view, _| view.review());
+    let original = review.read_with(cx, |review, _| review.host().comparison.clone());
+    pick_comparison(&world.view, Comparison::Staged, cx);
+    pick_comparison(&world.view, original, cx);
+
+    let guide = world.view.read_with(cx, |view, _| view.guide());
+    assert_ne!(guide.entity_id(), first.entity_id(), "the session was rebuilt");
+    assert!(
+        matches!(guide.read_with(cx, |guide, _| guide.run().clone()), GuideRun::Writing { run: adopted, .. } if adopted == run),
+        "the new session shows the live run"
+    );
+    guide.update(cx, |guide, cx| guide.write(cx));
+    assert!(
+        matches!(guide.read_with(cx, |guide, _| guide.run().clone()), GuideRun::Writing { run: same, .. } if same == run),
+        "a second write is refused while writing"
+    );
+
+    let files = diff_files(&world, cx);
+    let written = demo_guide(world.repo.path(), &files);
+    let review = world.view.read_with(cx, |view, _| view.review());
+    let session = review.read_with(cx, |review, _| review.session_id());
+    world
+        .store
+        .save_draft(session, run, ReviewModel::STANDARD, &written)
+        .unwrap();
+    world.store.complete_draft(run, &written).unwrap();
+    std::fs::write(world.work.path().join("out/go"), "").unwrap();
+    wait_until(cx, "the guide to load", |cx| {
+        guide.read_with(cx, |guide, _| guide.stored().is_some())
+    });
+    assert_eq!(guide.read_with(cx, |guide, _| guide.run().clone()), GuideRun::Idle);
+}
