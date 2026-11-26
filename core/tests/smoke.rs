@@ -198,7 +198,7 @@ fn a_real_guide_run_writes_a_guide_for_a_multi_file_change_and_edits_nothing() {
     let status_before = git(&smoke.repo, &["status", "--short"]);
 
     let target = smoke.target(ReviewModel::new(ModelName::Sonnet, Effort::Medium));
-    let run = smoke.run(diffpilot_core::guide::prompt::request(&target, ""));
+    let run = smoke.run(diffpilot_core::guide::prompt::request(&target, "", &[]));
     assert_eq!(run.state, RunState::Done, "{:?}", run.error);
     let stored = smoke
         .store

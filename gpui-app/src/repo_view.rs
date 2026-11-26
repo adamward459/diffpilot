@@ -157,10 +157,11 @@ impl Claude {
 }
 
 fn home_relative(path: &std::path::Path) -> String {
-    shorten(&relative_to(
-        path,
-        std::env::var_os("HOME").as_deref().map(std::path::Path::new),
-    ))
+    shorten(&tilde_path(path))
+}
+
+pub(crate) fn tilde_path(path: &std::path::Path) -> String {
+    relative_to(path, std::env::var_os("HOME").as_deref().map(std::path::Path::new))
 }
 
 fn shorten(path: &str) -> String {
@@ -913,6 +914,9 @@ impl RepoView {
 
     /// Jumps to a `[[path#L12]]` ref: into the chapter that holds the file when the open one does not.
     fn open_ref(&mut self, code: &CodeRef, window: &mut Window, cx: &mut Context<Self>) {
+        if std::path::Path::new(&code.path).is_absolute() {
+            return self.open_in_editor(&code.path, code.line, cx);
+        }
         let Some(session) = &self.session else { return };
         let guide = session.guide.read(cx);
         let here = guide

@@ -53,6 +53,7 @@ impl Fixture {
             repo: self.repo.path().to_path_buf(),
             kind,
             revisions: vec!["--cached".into()],
+            linked: Vec::new(),
             threads,
             permission: EditPermission::DontAsk,
             notify: Arc::new(move |notice| notices.lock().unwrap().push(notice)),

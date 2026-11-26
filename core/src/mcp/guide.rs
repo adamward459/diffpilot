@@ -78,8 +78,9 @@ pub fn definitions() -> Vec<ToolDef> {
                         "items": {
                             "type": "object",
                             "properties": {
+                                "folder": { "type": "string", "description": "The linked folder the file is in, exactly as the prompt lists it. Leave out for the repo." },
                                 "site": { "type": "string", "description": "For example `loadSettings()` or `GET /api/session`." },
-                                "path": { "type": "string" },
+                                "path": { "type": "string", "description": "Relative to the repo, or to `folder` when it is set." },
                                 "line": { "type": "integer", "minimum": 1 },
                                 "text": { "type": "string", "description": "One sentence: what changes for it." }
                             },
@@ -174,10 +175,11 @@ fn edit<T>(
     let files = files_of(binding)?;
     let (mut guide, model) = match store.load_draft(binding.run)? {
         Some(draft) => (draft.guide, draft.model.unwrap_or(ReviewModel::STANDARD)),
-        None => (
-            build::begin(&files, stale::head(&binding.repo)),
-            run_model(store, binding),
-        ),
+        None => {
+            let mut guide = build::begin(&files, stale::head(&binding.repo));
+            guide.context = binding.linked.clone();
+            (guide, run_model(store, binding))
+        }
     };
     let out = change(&mut guide, &files).map_err(problem)?;
     store.save_draft(binding.session, binding.run, model, &guide)?;

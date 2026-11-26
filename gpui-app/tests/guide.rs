@@ -2,7 +2,7 @@ use diffpilot::diff_pane::rows::{BlockId, RowKind};
 use diffpilot::guide::session::{GuideRun, Step};
 use diffpilot::repo_view::{Nav, RepoView};
 use diffpilot::runs::Runs;
-use diffpilot::testing::{canned_claude, demo_guide, fixture, open_repo_in};
+use diffpilot::testing::{self, canned_claude, demo_guide, fixture, open_repo_in};
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::FileDiff;
 use diffpilot_core::guide::{Diagram, DiagramKind, FlowStep, Guide};
@@ -42,6 +42,7 @@ fn gated_claude(work: &Path) -> std::path::PathBuf {
         &format!(
             r#"
 echo '{{"type":"system","subtype":"init","session_id":"s-1","model":"m","tools":[],"mcp_servers":[]}}'
+printf '%s\n' "$@" > '{out}/args'
 touch '{out}/started'
 while [ ! -f '{out}/go' ]; do sleep 0.05; done
 echo '{{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"Done."}}'
@@ -196,6 +197,40 @@ fn write_guide_submits_a_guide_run_and_reports_a_run_that_wrote_nothing(app: &mu
         "{run:?}"
     );
     assert!(cx.debug_bounds("guide-write").is_some(), "Try Again is offered");
+}
+
+#[gpui::test]
+fn a_folder_linked_by_path_is_passed_to_the_guide_run(app: &mut TestAppContext) {
+    let (world, cx) = open(app, true);
+    show_guide(&world, cx);
+    let shared = tempfile::tempdir().unwrap();
+    let folder = shared.path().canonicalize().unwrap();
+
+    testing::click(cx, "guide-link-folder");
+    testing::type_text(cx, &folder.display().to_string());
+    testing::click(cx, "guide-link-submit");
+    assert!(testing::shows(cx, &format!("guide-linked-folder:{}", folder.display())));
+
+    testing::click(cx, "guide-link-folder");
+    testing::type_text(cx, &world.repo.path().join("src").display().to_string());
+    testing::click(cx, "guide-link-submit");
+    assert!(
+        testing::shows(cx, "guide-link-error"),
+        "a folder inside the repo is refused"
+    );
+    testing::click(cx, "guide-link-cancel");
+
+    click(cx, "guide-write");
+    let started = world.work.path().join("out/started");
+    wait_until(cx, "the run to start", |_| started.exists());
+    let args = std::fs::read_to_string(world.work.path().join("out/args")).unwrap();
+    let args: Vec<&str> = args.lines().collect();
+    let at = args
+        .iter()
+        .position(|arg| *arg == "--add-dir")
+        .expect("--add-dir is passed");
+    assert_eq!(args[at + 1], folder.display().to_string());
+    std::fs::write(world.work.path().join("out/go"), "").unwrap();
 }
 
 #[gpui::test]

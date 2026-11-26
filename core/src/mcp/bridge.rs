@@ -52,6 +52,8 @@ pub struct Binding {
     pub kind: RunKind,
     /// The `git diff` revisions of the comparison under review.
     pub revisions: Vec<String>,
+    /// Folders outside the repo the run may read. A guide's impact may point into them.
+    pub linked: Vec<PathBuf>,
     /// The threads this run may read and answer. Empty means every thread of the review.
     pub threads: Vec<ThreadId>,
     pub permission: EditPermission,

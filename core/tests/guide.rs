@@ -159,7 +159,7 @@ impl World {
 
     fn write_guide(&self) -> (RunId, RunState, Vec<RunEvent>) {
         let rx = self.engine.subscribe();
-        let id = self.engine.submit(prompt::request(&self.target(), "")).unwrap();
+        let id = self.engine.submit(prompt::request(&self.target(), "", &[])).unwrap();
         let (state, events) = wait_finished(&rx, id, WITHIN);
         (id, state, events)
     }
@@ -388,6 +388,7 @@ fn the_guide_tools_belong_to_a_guide_run_and_stop_after_the_guide_is_saved() {
             repo: repo.path().to_path_buf(),
             kind,
             revisions: vec!["HEAD".into()],
+            linked: Vec::new(),
             threads: Vec::new(),
             permission: EditPermission::DontAsk,
             notify: Arc::new(move |notice| notices.lock().unwrap().push(notice)),
@@ -508,7 +509,7 @@ fn a_guide_run_needs_the_mcp_server() {
         edit_permission: EditPermission::DontAsk,
     };
     assert!(matches!(
-        engine.submit(prompt::request(&target, "")),
+        engine.submit(prompt::request(&target, "", &[])),
         Err(EngineError::GuideNeedsMcp)
     ));
 }

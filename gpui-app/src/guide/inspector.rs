@@ -2,10 +2,12 @@ use crate::guide::diagram::diagram_card;
 use crate::guide::rich::{self, Body, OnRef};
 use crate::guide::session::{GuideEvent, GuideSession, Step};
 use crate::guide::text::{CodeRef, Inline};
+use crate::repo_view::tilde_path;
 use diffpilot_core::guide::Attention;
 use diffpilot_core::guide::reading::ChapterKey;
 use diffpilot_ui_kit::components::{Button, ChipTone, Look, chip_label, glyph_icon, icon_button, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, FontWeight, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
@@ -214,7 +216,10 @@ impl Render for GuideInspector {
             column = column.child(heading(&tokens, "May break outside this diff"));
             for (position, impact) in written.impact.iter().enumerate() {
                 let target = CodeRef {
-                    path: impact.path.clone(),
+                    path: match &impact.folder {
+                        Some(folder) => folder.join(&impact.path).to_string_lossy().into_owned(),
+                        None => impact.path.clone(),
+                    },
                     line: impact.line,
                 };
                 let site = match impact.line {
@@ -229,11 +234,25 @@ impl Render for GuideInspector {
                         .on_click(move |_, _, cx| {
                             open.update(cx, |_, cx| cx.emit(InspectorEvent::Open(target.clone())))
                         })
+                        .when_some(impact.folder.as_deref(), |row, folder| {
+                            row.child(
+                                h_flex()
+                                    .gap(px(4.))
+                                    .text_size(px(11.))
+                                    .text_color(tokens.ui.muted)
+                                    .child(glyph_icon(Glyph::Folder, 11., tokens.ui.muted))
+                                    .child(SharedString::from(tilde_path(folder))),
+                            )
+                        })
                         .child(
-                            div()
+                            h_flex()
+                                .gap(px(4.))
                                 .font_family("Menlo")
                                 .text_size(px(11.5))
-                                .child(SharedString::from(site)),
+                                .child(SharedString::from(site))
+                                .when(impact.folder.is_some(), |row| {
+                                    row.child(glyph_icon(Glyph::ExternalLink, 11., tokens.ui.muted))
+                                }),
                         )
                         .child(Self::text(
                             ("guide-impact-text", position),

@@ -785,5 +785,6 @@ pub fn demo_guide(repo: &Path, files: &[FileDiff]) -> Guide {
         fingerprint: fingerprint(files),
         file_fingerprints: file_fingerprints(files),
         head: stale::head(repo),
+        context: vec![],
     }
 }

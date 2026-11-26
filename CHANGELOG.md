@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Link folders outside the repo to a guide by path. Claude reads them for context and can list code there that the change may break.
+
 ### Changed
 
 - Glass controls now look like real glass: a sheen lit from the top, a crisp rim, and a shadow that sinks when you hover or press. Buttons are now capsules, and controls, toolbars, and text are larger.

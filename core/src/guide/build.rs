@@ -11,6 +11,7 @@ use crate::anchor;
 use crate::diff::FileDiff;
 use crate::threads::Side;
 use serde::Deserialize;
+use std::path::{Path, PathBuf};
 
 pub const OVERVIEW_TITLE_WORDS: usize = 10;
 pub const SUMMARY_WORDS: usize = 50;
@@ -64,6 +65,8 @@ pub enum FileArg {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImpactArg {
+    #[serde(default)]
+    pub folder: Option<String>,
     pub site: String,
     pub path: String,
     #[serde(default)]
@@ -308,7 +311,7 @@ pub fn add_chapter(guide: &mut Guide, files: &[FileDiff], args: &ChapterArgs) ->
     if let Some(name) = &phase {
         problems.words(&format!("chapter \"{title}\" phase"), name, PHASE_WORDS);
     }
-    let impact = impact_of(&args.impact, &title, files, &mut problems);
+    let impact = impact_of(&args.impact, &title, files, &guide.context, &mut problems)?;
     problems.done()?;
     if let Some(name) = &phase {
         let last = guide.chapters.last().and_then(|chapter| chapter.phase.as_ref());
@@ -340,31 +343,79 @@ pub fn add_chapter(guide: &mut Guide, files: &[FileDiff], args: &ChapterArgs) ->
 }
 
 /// Code outside the diff. An item inside the diff is dropped, because the reviewer reads those files anyway.
-fn impact_of(args: &[ImpactArg], title: &str, files: &[FileDiff], problems: &mut Problems) -> Vec<Impact> {
-    let kept: Vec<&ImpactArg> = args
-        .iter()
-        .filter(|item| {
-            !item.site.trim().is_empty() && !item.path.trim().is_empty() && resolve(files, &item.path).is_none()
-        })
-        .collect();
+fn impact_of(
+    args: &[ImpactArg],
+    title: &str,
+    files: &[FileDiff],
+    context: &[PathBuf],
+    problems: &mut Problems,
+) -> Result<Vec<Impact>, String> {
+    let mut kept = Vec::new();
+    for item in args {
+        if item.site.trim().is_empty() || item.path.trim().is_empty() {
+            continue;
+        }
+        let (folder, path) = place(item, context)?;
+        if folder.is_none() && resolve(files, &path).is_some() {
+            continue;
+        }
+        kept.push((item, folder, path));
+    }
     if kept.len() > MAX_IMPACT {
         problems.0.push(format!(
             "chapter \"{title}\" impact has {} items (max {MAX_IMPACT}); keep the ones most likely to break",
             kept.len()
         ));
     }
-    kept.into_iter()
-        .map(|item| {
+    Ok(kept
+        .into_iter()
+        .map(|(item, folder, path)| {
             let (site, text) = (clean(&item.site), clean(&item.text));
             problems.words(&format!("chapter \"{title}\" impact `{site}`"), &text, IMPACT_WORDS);
             Impact {
+                folder,
                 site,
-                path: item.path.trim().trim_start_matches("./").to_string(),
+                path,
                 line: item.line.filter(|line| *line > 0),
                 text,
             }
         })
-        .collect()
+        .collect())
+}
+
+/// The linked folder an impact item is in, and its path inside that folder or the repo.
+fn place(item: &ImpactArg, context: &[PathBuf]) -> Result<(Option<PathBuf>, String), String> {
+    let path = Path::new(item.path.trim().trim_start_matches("./"));
+    let named = item.folder.as_deref().map(str::trim).filter(|name| !name.is_empty());
+    let folder = match named {
+        Some(name) => Some(
+            context
+                .iter()
+                .find(|folder| folder.as_path() == Path::new(name))
+                .ok_or_else(|| unknown_folder(name, context))?,
+        ),
+        None => context.iter().find(|folder| path.starts_with(folder)),
+    };
+    let Some(folder) = folder else {
+        return Ok((None, path.to_string_lossy().into_owned()));
+    };
+    let inside = path.strip_prefix(folder).unwrap_or(path);
+    if inside.as_os_str().is_empty() || !folder.join(inside).exists() {
+        return Err(format!(
+            "`{}` is not a file in the linked folder `{}`. Give its path inside that folder.",
+            inside.display(),
+            folder.display()
+        ));
+    }
+    Ok((Some(folder.clone()), inside.to_string_lossy().into_owned()))
+}
+
+fn unknown_folder(name: &str, context: &[PathBuf]) -> String {
+    if context.is_empty() {
+        return format!("`{name}` is not a linked folder, and none are linked. Leave out `folder`.");
+    }
+    let listed: Vec<String> = context.iter().map(|folder| folder.display().to_string()).collect();
+    format!("`{name}` is not a linked folder. Use one of: {}.", listed.join(", "))
 }
 
 pub fn add_note(guide: &mut Guide, files: &[FileDiff], args: &NoteArgs) -> Result<(), String> {
@@ -730,12 +781,58 @@ mod tests {
         assert_eq!(
             setup.guide.chapters[0].impact,
             [Impact {
+                folder: None,
                 site: "outbox.flush()".into(),
                 path: "src/outbox.ts".into(),
                 line: Some(9),
                 text: "Now waits for the timer.".into(),
             }]
         );
+    }
+
+    #[test]
+    fn impact_can_point_into_a_linked_folder() {
+        let linked = tempfile::tempdir().unwrap();
+        let folder = linked.path().to_path_buf();
+        std::fs::create_dir_all(folder.join("src")).unwrap();
+        std::fs::write(folder.join("src/client.ts"), "x").unwrap();
+        let mut setup = setup();
+        setup.guide.context = vec![folder.clone()];
+        let named = folder.display().to_string();
+        let mut args = chapter("Timer", json!(["src/timer.ts"]));
+        args.impact = serde_json::from_value(json!([
+            { "folder": named, "site": "send()", "path": "src/client.ts", "line": 3, "text": "Sends seconds." },
+            { "site": "flush()", "path": folder.join("src/client.ts"), "text": "Found by its full path." }
+        ]))
+        .unwrap();
+        add_chapter(&mut setup.guide, &setup.files, &args).unwrap();
+        let impact = &setup.guide.chapters[0].impact;
+        assert_eq!(impact.len(), 2);
+        for item in impact {
+            assert_eq!(
+                (item.folder.as_ref(), item.path.as_str()),
+                (Some(&folder), "src/client.ts")
+            );
+        }
+
+        let mut missing = chapter("Missing", json!(["src/send.ts"]));
+        missing.impact = serde_json::from_value(json!([
+            { "folder": named, "site": "x()", "path": "src/gone.ts", "text": "Gone." }
+        ]))
+        .unwrap();
+        let error = add_chapter(&mut setup.guide, &setup.files, &missing).unwrap_err();
+        assert!(
+            error.contains("`src/gone.ts` is not a file in the linked folder"),
+            "{error}"
+        );
+
+        let mut unknown = chapter("Unknown", json!(["src/send.ts"]));
+        unknown.impact = serde_json::from_value(json!([
+            { "folder": "/elsewhere", "site": "x()", "path": "a.ts", "text": "Where?" }
+        ]))
+        .unwrap();
+        let error = add_chapter(&mut setup.guide, &setup.files, &unknown).unwrap_err();
+        assert!(error.contains(&format!("Use one of: {named}")), "{error}");
     }
 
     #[test]

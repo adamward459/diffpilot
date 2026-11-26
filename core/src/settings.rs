@@ -21,6 +21,7 @@ struct Data {
     reviews_model: Option<ReviewModel>,
     fixes_model: Option<ReviewModel>,
     review_focuses: BTreeMap<String, Vec<String>>,
+    linked_folders: BTreeMap<String, Vec<PathBuf>>,
     diff_mode: Option<DiffMode>,
     edit_permission: Option<EditPermission>,
     claude_path: Option<PathBuf>,
@@ -174,6 +175,21 @@ impl Settings {
         });
     }
 
+    pub fn linked_folders(&self, repo: &Path) -> Vec<PathBuf> {
+        self.read(|data| data.linked_folders.get(&repo_key(repo)).cloned())
+            .unwrap_or_default()
+    }
+
+    pub fn set_linked_folders(&self, repo: &Path, folders: Vec<PathBuf>) {
+        self.write(|data| {
+            if folders.is_empty() {
+                data.linked_folders.remove(&repo_key(repo));
+            } else {
+                data.linked_folders.insert(repo_key(repo), folders);
+            }
+        });
+    }
+
     pub fn diff_mode(&self) -> DiffMode {
         self.read(|data| data.diff_mode).unwrap_or_default()
     }
@@ -297,6 +313,7 @@ impl Data {
             reviews_model: field(take("reviewsModel")).or_else(|| field(take("reviewModel"))),
             fixes_model: field(take("fixesModel")),
             review_focuses: entries(take("reviewFocuses")),
+            linked_folders: entries(take("linkedFolders")),
             diff_mode: serde_json::from_value(take("diffMode")).ok().flatten(),
             edit_permission: field(take("editPermission")),
             claude_path: field(take("claudePath")),
@@ -505,6 +522,7 @@ mod tests {
             crate::review::Effort::Low,
         ));
         settings.set_review_focuses(Path::new("/r"), vec!["Tests".into()]);
+        settings.set_linked_folders(Path::new("/r"), vec![PathBuf::from("/shared")]);
         settings.set_diff_mode(DiffMode::Split);
 
         let again = Settings::at(file);
@@ -513,6 +531,8 @@ mod tests {
         assert_eq!(again.reviews_model().name, crate::review::ModelName::Haiku);
         assert_eq!(again.review_focuses(Path::new("/r")), ["Tests"]);
         assert!(again.review_focuses(Path::new("/other")).is_empty());
+        assert_eq!(again.linked_folders(Path::new("/r")), [PathBuf::from("/shared")]);
+        assert!(again.linked_folders(Path::new("/other")).is_empty());
         assert_eq!(again.diff_mode(), DiffMode::Split);
     }
 

@@ -3,7 +3,7 @@
 A reviewer is about to read the change `git diff {{revisions}}` in diffpilot. In file order they jump between files and try to work out what it is for. Write a guide that tells the change as a short story: an overview, then chapters, each one idea, in the order that makes the change easiest to follow. You build it with the diffpilot MCP tools, one call at a time.
 
 **diffpilot tools only.** Read the diff and write the guide through the `diffpilot` MCP server (`mcp__diffpilot__get_diff`, `mcp__diffpilot__set_overview`, `mcp__diffpilot__add_chapter`, `mcp__diffpilot__add_note`, `mcp__diffpilot__add_diagram`, `mcp__diffpilot__finish_guide`). You explain; you do not review. Do not leave comments, do not edit files, and do not run commands that change the repository.
-{{instructions}}
+{{instructions}}{{linked}}
 ## Why over what
 
 The reviewer can read *what* the code does in the diff. Tell them *why*: the problem the change solves, the intent behind each part, the reason for a choice that looks odd. A sentence that only restates the code ("adds a `cache` map and a `getCached` function") wastes their time. Say what it is for ("repeat requests skip the disk"). Name real functions and files in `backticks`, as evidence for the why, not as a tour.

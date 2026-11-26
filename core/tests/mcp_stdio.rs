@@ -84,6 +84,7 @@ fn the_binary_speaks_mcp_over_stdio_and_forwards_to_the_app() {
         repo: repo.path().to_path_buf(),
         kind: RunKind::FixComments,
         revisions: vec!["HEAD".into()],
+        linked: Vec::new(),
         threads: vec![thread],
         permission: EditPermission::DontAsk,
         notify: Arc::new(|_| {}),

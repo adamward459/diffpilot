@@ -2,17 +2,20 @@ use crate::guide::diagram::diagram_card;
 use crate::guide::rich::{self, Body, OnRef};
 use crate::guide::session::{GuideEvent, GuideRun, GuideSession, Step};
 use crate::guide::text::{CodeRef, Inline};
+use crate::repo_view::tilde_path;
 use diffpilot_core::guide::Attention;
+use diffpilot_core::guide::linked::LinkError;
 use diffpilot_core::guide::reading::{ChapterKey, ReadingChapter, phase_groups};
 use diffpilot_core::settings::Settings;
 use diffpilot_ui_kit::components::{Button, ChipTone, Look, card_shell, chip_label, glyph_icon, spinner, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, ClickEvent, Context, Entity, EventEmitter, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
-    px,
+    AnyElement, App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FontWeight, InteractiveElement as _,
+    IntoElement, ParentElement as _, PathPromptOptions, Render, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Window, div, px,
 };
+use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::{ActiveTheme, h_flex, v_flex};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -27,7 +30,14 @@ pub enum StageEvent {
 pub struct GuideStage {
     guide: Entity<GuideSession>,
     settings: Arc<Settings>,
+    link_form: Option<LinkForm>,
     _guide: Subscription,
+}
+
+struct LinkForm {
+    input: Entity<InputState>,
+    error: Option<LinkError>,
+    _input: Subscription,
 }
 
 impl EventEmitter<StageEvent> for GuideStage {}
@@ -38,8 +48,178 @@ impl GuideStage {
         Self {
             guide,
             settings,
+            link_form: None,
             _guide: subscription,
         }
+    }
+
+    fn open_link_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder("~/Developer/shared-lib"));
+        let subscription = cx.subscribe_in(&input, window, |this, _, event: &InputEvent, _, cx| match event {
+            InputEvent::PressEnter { .. } => this.submit_link(cx),
+            InputEvent::Change => {
+                if let Some(form) = this.link_form.as_mut() {
+                    form.error = None;
+                }
+                cx.notify();
+            }
+            _ => {}
+        });
+        input.update(cx, |input, cx| input.focus(window, cx));
+        self.link_form = Some(LinkForm {
+            input,
+            error: None,
+            _input: subscription,
+        });
+        cx.notify();
+    }
+
+    fn submit_link(&mut self, cx: &mut Context<Self>) {
+        let Some(form) = self.link_form.as_mut() else { return };
+        let text = form.input.read(cx).value().to_string();
+        match self.guide.update(cx, |guide, cx| guide.link(&text, cx)) {
+            Ok(()) => self.link_form = None,
+            Err(error) => form.error = Some(error),
+        }
+        cx.notify();
+    }
+
+    fn browse(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let picked = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: None,
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = picked.await else { return };
+            let Some(folder) = paths.into_iter().next() else { return };
+            this.update_in(cx, |this, window, cx| {
+                if let Some(form) = this.link_form.as_mut() {
+                    form.error = None;
+                    form.input
+                        .update(cx, |input, cx| input.set_value(tilde_path(&folder), window, cx));
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn linked_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tokens = Theme::of(cx);
+        let folders = self.guide.read(cx).linked(cx);
+        let mut section = v_flex()
+            .id("guide-linked")
+            .gap(px(6.))
+            .child(
+                div()
+                    .text_size(px(11.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(tokens.ui.muted)
+                    .child("LINKED FOLDERS"),
+            )
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(tokens.ui.text2)
+                    .child("Claude can read these for context. They are not reviewed."),
+            );
+        for (position, folder) in folders.into_iter().enumerate() {
+            let missing = !folder.is_dir();
+            let color = if missing { tokens.amber } else { tokens.ui.text2 };
+            let guide = self.guide.clone();
+            let shown = tilde_path(&folder);
+            section = section.child(
+                tag(h_flex(), || format!("guide-linked-folder:{shown}"))
+                    .gap(px(6.))
+                    .text_size(px(12.5))
+                    .child(glyph_icon(
+                        if missing { Glyph::TriangleAlert } else { Glyph::Folder },
+                        13.,
+                        color,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .font_family("Menlo")
+                            .text_size(px(11.5))
+                            .text_color(color)
+                            .child(SharedString::from(shown.clone())),
+                    )
+                    .when(missing, |row| {
+                        row.child(div().text_color(tokens.amber).child("Not found. Skipped."))
+                    })
+                    .child(
+                        Button::new(("guide-unlink", position))
+                            .look(Look::Ghost)
+                            .label("Unlink")
+                            .tooltip(format!("Unlink {shown}"))
+                            .on_click(move |_, _, cx| guide.update(cx, |guide, cx| guide.unlink(&folder, cx))),
+                    ),
+            );
+        }
+        let Some(form) = &self.link_form else {
+            return section
+                .child(
+                    h_flex().child(tag(
+                        Button::new("guide-link-folder")
+                            .label("+ Link Folder…")
+                            .on_click(cx.listener(|this, _, window, cx| this.open_link_form(window, cx))),
+                        || "guide-link-folder",
+                    )),
+                )
+                .into_any_element();
+        };
+        let empty = form.input.read(cx).value().trim().is_empty();
+        section
+            .child(
+                h_flex()
+                    .gap(px(6.))
+                    .child(div().flex_1().child(Input::new(&form.input).text_size(px(12.5))))
+                    .child(tag(
+                        Button::new("guide-link-browse")
+                            .label("Browse…")
+                            .on_click(cx.listener(|this, _, window, cx| this.browse(window, cx))),
+                        || "guide-link-browse",
+                    )),
+            )
+            .when_some(form.error, |section, error| {
+                section.child(
+                    tag(h_flex(), || "guide-link-error")
+                        .gap(px(6.))
+                        .text_size(px(12.))
+                        .text_color(tokens.amber)
+                        .child(glyph_icon(Glyph::TriangleAlert, 13., tokens.amber))
+                        .child(SharedString::from(error.to_string())),
+                )
+            })
+            .child(
+                h_flex()
+                    .gap(px(6.))
+                    .justify_end()
+                    .child(tag(
+                        Button::new("guide-link-cancel")
+                            .label("Cancel")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.link_form = None;
+                                cx.notify();
+                            })),
+                        || "guide-link-cancel",
+                    ))
+                    .child(tag(
+                        Button::new("guide-link-submit")
+                            .look(Look::Primary)
+                            .label("Link")
+                            .disabled(empty || form.error.is_some())
+                            .on_click(cx.listener(|this, _, _, cx| this.submit_link(cx))),
+                        || "guide-link-submit",
+                    )),
+            )
+            .into_any_element()
     }
 
     fn write(&self) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
@@ -79,6 +259,7 @@ impl GuideStage {
                         .text_color(tokens.ui.text2)
                         .child("Claude explains what this change does, then splits it into chapters in the order to read them, with notes under the lines that matter."),
                 )
+                .child(self.linked_section(cx))
                 .when_some(failure.map(str::to_owned), |card, message| {
                     card.child(
                         h_flex()

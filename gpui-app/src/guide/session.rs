@@ -4,6 +4,7 @@ use crate::review::session::NO_REPO_MESSAGE;
 use crate::runs::Runs;
 use diffpilot_core::diff::FileDiff;
 use diffpilot_core::fix::Target;
+use diffpilot_core::guide::linked::{self, LinkError};
 use diffpilot_core::guide::reading::{ChapterKey, Reading, ReadingChapter, reading};
 use diffpilot_core::guide::stale::{self, Staleness};
 use diffpilot_core::guide::{Diagram, prompt};
@@ -12,8 +13,9 @@ use diffpilot_core::run::{RunKind, RunState};
 use diffpilot_core::runner::{RunEngine, RunEvent};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::{GuideId, RunId, SessionId, Store, StoredGuide};
-use gpui::{App, AppContext as _, Context, Entity, EventEmitter, Subscription, Task};
+use gpui::{App, AppContext as _, Context, Entity, EventEmitter, PathPromptOptions, Subscription, Task};
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 pub const NOT_FINISHED_MESSAGE: &str = "Claude stopped before the guide was done. Try again.";
@@ -365,6 +367,61 @@ impl GuideSession {
         cx.notify();
     }
 
+    pub fn linked(&self, cx: &App) -> Vec<PathBuf> {
+        self.review
+            .read(cx)
+            .host()
+            .repo
+            .as_ref()
+            .map(|repo| self.settings.linked_folders(repo))
+            .unwrap_or_default()
+    }
+
+    /// The linked folders differ from the ones the stored guide could read.
+    pub fn linked_changed(&self, cx: &App) -> bool {
+        self.stored
+            .as_ref()
+            .is_some_and(|stored| stored.guide.context != linked::readable(&self.linked(cx)))
+    }
+
+    pub fn link(&mut self, input: &str, cx: &mut Context<Self>) -> Result<(), LinkError> {
+        let Some(repo) = self.review.read(cx).host().repo.clone() else {
+            return Err(LinkError::NotFound);
+        };
+        let mut folders = self.settings.linked_folders(&repo);
+        folders.push(linked::check(&repo, &folders, input)?);
+        self.settings.set_linked_folders(&repo, folders);
+        self.announce(cx);
+        Ok(())
+    }
+
+    pub fn unlink(&mut self, folder: &PathBuf, cx: &mut Context<Self>) {
+        let Some(repo) = self.review.read(cx).host().repo.clone() else {
+            return;
+        };
+        let mut folders = self.settings.linked_folders(&repo);
+        folders.retain(|linked| linked != folder);
+        self.settings.set_linked_folders(&repo, folders);
+        self.announce(cx);
+    }
+
+    /// A picked folder that can't be linked is dropped silently. Only the start card's path field shows errors.
+    pub fn pick_folder(&mut self, cx: &mut Context<Self>) {
+        let picked = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: None,
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = picked.await else { return };
+            let Some(folder) = paths.into_iter().next() else { return };
+            this.update(cx, |this, cx| this.link(&folder.to_string_lossy(), cx).ok())
+                .ok();
+        })
+        .detach();
+    }
+
     pub fn blocker(&self, cx: &App) -> Option<String> {
         if matches!(self.run, GuideRun::Writing { .. }) {
             return Some("Claude is already writing the guide.".into());
@@ -402,8 +459,9 @@ impl GuideSession {
             model: self.settings.model_for(RunKind::Guide),
             edit_permission: EditPermission::default(),
         };
+        let linked = self.linked(cx);
         self.watch(&engine, cx);
-        self.run = match engine.submit(prompt::request(&target, "")) {
+        self.run = match engine.submit(prompt::request(&target, "", &linked)) {
             Ok(run) => GuideRun::Writing { run, chapters: 0 },
             Err(error) => GuideRun::Failed(error.to_string()),
         };

@@ -106,6 +106,8 @@ pub struct RunRequest {
     pub threads: Vec<ThreadId>,
     /// The `git diff` revisions of the comparison under review, for the `get_diff` tool.
     pub revisions: Vec<String>,
+    /// Folders outside the repo the run may read, passed as `--add-dir`.
+    pub linked: Vec<PathBuf>,
     pub json_schema: Option<String>,
     pub edit_permission: EditPermission,
     pub extra_arguments: Vec<String>,
@@ -122,6 +124,7 @@ impl RunRequest {
             model,
             threads: Vec::new(),
             revisions: Vec::new(),
+            linked: Vec::new(),
             json_schema: None,
             edit_permission: EditPermission::default(),
             extra_arguments: Vec::new(),
@@ -484,6 +487,7 @@ impl Inner {
             repo: request.repo.clone(),
             kind: request.kind,
             revisions: request.revisions.clone(),
+            linked: request.linked.clone(),
             threads: request.threads.clone(),
             permission: request.edit_permission,
             notify: Arc::new(move |notice| {
@@ -661,6 +665,9 @@ impl Inner {
         }
         if let Some(schema) = &request.json_schema {
             command.args(["--json-schema", schema]);
+        }
+        for folder in &request.linked {
+            command.arg("--add-dir").arg(folder);
         }
         command.args(policy.arguments()).args(&request.extra_arguments);
 

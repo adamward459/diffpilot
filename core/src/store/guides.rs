@@ -220,6 +220,7 @@ mod tests {
                 }],
                 diagrams: vec![],
                 impact: vec![Impact {
+                    folder: None,
                     site: "send()".into(),
                     path: "b.ts".into(),
                     line: Some(4),
@@ -229,6 +230,7 @@ mod tests {
             fingerprint: "abc".into(),
             file_fingerprints: [("a.ts".to_string(), "f1".to_string())].into(),
             head: Some("deadbeef".into()),
+            context: vec!["/shared".into()],
         }
     }
 

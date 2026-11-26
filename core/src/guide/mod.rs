@@ -8,6 +8,7 @@ pub mod build;
 #[cfg(test)]
 mod fixtures;
 pub mod layout;
+pub mod linked;
 pub mod mermaid;
 pub mod prompt;
 pub mod reading;
@@ -20,6 +21,7 @@ pub use stale::{Staleness, check, fingerprint};
 use crate::threads::{Side, ThreadAnchor};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -68,6 +70,9 @@ pub struct ChapterFile {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Impact {
+    /// A linked folder the path is in. `None` means the repo.
+    #[serde(default)]
+    pub folder: Option<PathBuf>,
     pub site: String,
     pub path: String,
     pub line: Option<u32>,
@@ -135,6 +140,9 @@ pub struct Guide {
     pub file_fingerprints: BTreeMap<String, String>,
     /// `HEAD` when the guide was written, for "the branch moved 2 commits".
     pub head: Option<String>,
+    /// The linked folders the run could read.
+    #[serde(default)]
+    pub context: Vec<PathBuf>,
 }
 
 impl Guide {
