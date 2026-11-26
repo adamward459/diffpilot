@@ -1,5 +1,6 @@
 use crate::cancel::CancelToken;
 use crate::paths::find_executable;
+use crate::process_groups;
 use crate::prompt;
 use crate::review::{ReviewRequest, ReviewResult};
 use crate::threads::{ReviewThread, ThreadAnchor};
@@ -265,6 +266,7 @@ pub(crate) fn run_process(
     let mut child = command
         .spawn()
         .map_err(|error| ReviewError::Failed(error.to_string()))?;
+    let _tracked = process_groups::Tracked::start(child.id());
     let (mut stdout, mut stderr) = (
         child.stdout.take().expect("stdout is piped"),
         child.stderr.take().expect("stderr is piped"),

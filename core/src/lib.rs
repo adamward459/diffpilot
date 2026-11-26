@@ -15,6 +15,7 @@ pub mod guard;
 pub mod guide;
 pub mod mcp;
 pub mod policy;
+pub mod process_groups;
 pub mod prompt;
 pub mod refs;
 pub mod review;

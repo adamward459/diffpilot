@@ -17,4 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - An app icon.
 - Releases: pushing a `vX.Y.Z` tag publishes a universal (Apple Silicon and Intel) app to GitHub Releases, and `install.sh` installs the latest release.
 
+### Fixed
+
+- Quitting diffpilot now stops the Claude reviews, replies, and fixes that are still running. After a crash, the next launch stops the ones that were left behind.
+
 [Unreleased]: https://github.com/adamward459/diffpilot/commits/main

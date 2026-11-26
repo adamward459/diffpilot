@@ -294,11 +294,11 @@ pub const FEATURES: &[Feature] = &[
     Feature {
         name: "claude-runs",
         paths: &[
-            "core/src/{claude,run,runner,stream,stage,snapshot,guard,policy,prompt,connection}.rs",
+            "core/src/{claude,run,runner,stream,stage,snapshot,guard,policy,prompt,connection,process_groups}.rs",
             "core/src/{review_prompt,review_tools_step}.md",
             "core/src/mcp/**",
             "core/src/bin/**",
-            "core/tests/{runs,mcp,mcp_stdio,guard_hook,e2e,smoke}.rs",
+            "core/tests/{runs,mcp,mcp_stdio,guard_hook,e2e,smoke,process_groups}.rs",
         ],
         tests: &[
             Lib {
@@ -343,6 +343,10 @@ pub const FEATURES: &[Feature] = &[
             },
             Lib {
                 package: CORE,
+                module: "process_groups::",
+            },
+            Lib {
+                package: CORE,
                 module: "mcp::",
             },
             Target {
@@ -368,6 +372,10 @@ pub const FEATURES: &[Feature] = &[
             Target {
                 package: CORE,
                 test: "smoke",
+            },
+            Target {
+                package: CORE,
+                test: "process_groups",
             },
         ],
         bench: None,

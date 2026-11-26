@@ -2,7 +2,8 @@ use diffpilot::bench::{self, Bench};
 use diffpilot::runs::Runs;
 use diffpilot::settings;
 use diffpilot::workspace::{self, Workspace};
-use diffpilot_core::settings::Settings;
+use diffpilot_core::process_groups;
+use diffpilot_core::settings::{Settings, app_support_dir};
 use diffpilot_core::store::Store;
 use diffpilot_core::viewed::ViewedStore;
 use gpui::{
@@ -41,6 +42,17 @@ fn main() {
         let review_store = Arc::new(open_review_store(scripted));
         let viewed_store = Arc::new(ViewedStore::from_env(review_store.clone()));
         settings::init(settings.clone(), settings::Services::system(), cx);
+        if !scripted && let Some(dir) = app_support_dir().map(|dir| dir.join("claude-processes")) {
+            std::thread::spawn(move || {
+                process_groups::reap_orphans(&dir);
+                process_groups::record_in(&dir);
+            });
+        }
+        cx.on_app_quit(|_| {
+            process_groups::stop_all();
+            async {}
+        })
+        .detach();
         if bench.is_none() {
             cx.set_global(Runs::start(review_store.clone(), &settings));
             let settings = settings.clone();
