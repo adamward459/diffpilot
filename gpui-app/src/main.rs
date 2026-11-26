@@ -30,19 +30,25 @@ fn main() {
             Bench::install(cx, start, config);
         }
 
-        let (settings, viewed_store) = if bench.is_some() {
+        // DIFFPILOT_REPO is a test variable: screenshot and scripted runs must not read or change the user's settings.
+        let scripted = bench.is_some() || std::env::var_os("DIFFPILOT_REPO").is_some_and(|path| !path.is_empty());
+        let settings = if scripted {
+            Settings::in_memory()
+        } else {
+            Settings::open_default()
+        };
+        let viewed_store = if bench.is_some() {
             let seeded = std::env::var_os("DIFFPILOT_VIEWED_SEED").is_some_and(|path| !path.is_empty());
-            let store = if seeded {
+            if seeded {
                 ViewedStore::from_env()
             } else {
                 ViewedStore::in_memory()
-            };
-            (Settings::in_memory(), store)
+            }
         } else {
-            (Settings::open_default(), ViewedStore::from_env())
+            ViewedStore::from_env()
         };
         let settings = Arc::new(settings);
-        let review_store = Arc::new(open_review_store(bench.is_some()));
+        let review_store = Arc::new(open_review_store(scripted));
         let viewed_store = Arc::new(viewed_store);
         settings::init(settings.clone(), settings::Services::system(), cx);
         if bench.is_none() {
