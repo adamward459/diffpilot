@@ -1,53 +1,23 @@
 #![allow(dead_code)]
 
 use diffpilot::review::{ReviewEvent, ReviewHost, ReviewSession};
+use diffpilot::testing::{FakeClaude, fake_claude};
 use diffpilot_core::cancel::CancelToken;
 use diffpilot_core::changes::FileStatus;
-use diffpilot_core::claude::{Replier, ReviewError, Reviewer};
+use diffpilot_core::claude::Replier;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{DiffLine, FileDiff, Hunk, LineKind};
-use diffpilot_core::review::{Finding, ReviewRequest, ReviewResult, ReviewRun, Severity};
+use diffpilot_core::review::{Finding, ReviewResult, Severity};
+use diffpilot_core::run::{Run, RunState};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::Store;
 use diffpilot_core::threads::{ReviewThread, Side, ThreadAnchor, ThreadId};
 use gpui::{AppContext, Context, Entity, Render, TestAppContext, VisualTestContext, Window};
 use gpui_component::Root;
 use std::cell::RefCell;
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-
-pub struct StubReviewer {
-    outcome: Mutex<Result<ReviewResult, ReviewError>>,
-    pub requests: Mutex<Vec<ReviewRequest>>,
-    pub tokens: Mutex<Vec<CancelToken>>,
-}
-
-impl StubReviewer {
-    pub fn new(outcome: Result<ReviewResult, ReviewError>) -> Arc<Self> {
-        Arc::new(Self {
-            outcome: Mutex::new(outcome),
-            requests: Mutex::default(),
-            tokens: Mutex::default(),
-        })
-    }
-
-    pub fn will_return(&self, outcome: Result<ReviewResult, ReviewError>) {
-        *self.outcome.lock().unwrap() = outcome;
-    }
-
-    pub fn calls(&self) -> usize {
-        self.requests.lock().unwrap().len()
-    }
-}
-
-impl Reviewer for StubReviewer {
-    fn review(&self, request: &ReviewRequest, cancel: &CancelToken) -> Result<ReviewResult, ReviewError> {
-        self.requests.lock().unwrap().push(request.clone());
-        self.tokens.lock().unwrap().push(cancel.clone());
-        self.outcome.lock().unwrap().clone()
-    }
-}
+use std::time::{Duration, Instant};
 
 #[derive(Default)]
 pub struct StubReplier {
@@ -127,24 +97,29 @@ pub fn file() -> FileDiff {
 
 pub struct Fixture {
     pub session: Entity<ReviewSession>,
-    pub reviewer: Arc<StubReviewer>,
+    pub claude: FakeClaude,
     pub replier: Arc<StubReplier>,
     pub settings: Arc<Settings>,
     pub store: Arc<Store>,
     pub events: Rc<RefCell<Vec<ReviewEvent>>>,
+    _repo: tempfile::TempDir,
 }
 
-pub fn fixture(cx: &mut TestAppContext, outcome: Result<ReviewResult, ReviewError>) -> Fixture {
-    let reviewer = StubReviewer::new(outcome);
+/// A session whose runs end by themselves with `result` as the review. Call `claude.hold()` to keep them going.
+pub fn fixture(cx: &mut TestAppContext, result: ReviewResult) -> Fixture {
+    let claude = fake_claude(cx);
+    claude.review_with(&result);
+    claude.finish();
+    let repo = tempfile::tempdir().unwrap();
     let replier = Arc::new(StubReplier::default());
     let settings = Arc::new(Settings::in_memory());
-    let store = Arc::new(Store::open_in_memory().unwrap());
-    let mut host = ReviewHost::new(Some(PathBuf::from("/repo")), Comparison::checked_out("main", true));
+    let store = claude.store();
+    let mut host = ReviewHost::new(Some(repo.path().to_path_buf()), Comparison::checked_out("main", true));
     host.files = Arc::from([Arc::new(file())]);
     host.visible_path = Some("src/a.ts".into());
     let session = {
-        let (reviewer, replier, settings, store) = (reviewer.clone(), replier.clone(), settings.clone(), store.clone());
-        cx.new(move |_| ReviewSession::new(host, settings, store, reviewer, replier))
+        let (replier, settings, store) = (replier.clone(), settings.clone(), store.clone());
+        cx.new(move |cx| ReviewSession::new(host, settings, store, replier, cx))
     };
     let events = Rc::new(RefCell::new(Vec::new()));
     let sink = events.clone();
@@ -156,31 +131,68 @@ pub fn fixture(cx: &mut TestAppContext, outcome: Result<ReviewResult, ReviewErro
     });
     Fixture {
         session,
-        reviewer,
+        claude,
         replier,
         settings,
         store,
         events,
+        _repo: repo,
     }
 }
 
 pub fn session_on(cx: &mut TestAppContext, store: &Arc<Store>, comparison: Comparison) -> Entity<ReviewSession> {
-    let mut host = ReviewHost::new(Some(PathBuf::from("/repo")), comparison);
+    let mut host = ReviewHost::new(Some(std::env::temp_dir()), comparison);
     host.branch_name = Some("feature".into());
     host.files = Arc::from([Arc::new(file())]);
     let (store, settings) = (store.clone(), Arc::new(Settings::in_memory()));
-    let reviewer = StubReviewer::new(Ok(result("", vec![])));
     let replier = Arc::new(StubReplier::default());
-    cx.new(move |_| ReviewSession::new(host, settings, store, reviewer, replier))
+    cx.new(move |cx| ReviewSession::new(host, settings, store, replier, cx))
+}
+
+pub fn wait_until(cx: &mut TestAppContext, what: &str, mut done: impl FnMut(&mut TestAppContext) -> bool) {
+    cx.executor().allow_parking();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        cx.run_until_parked();
+        if done(cx) {
+            return;
+        }
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 impl Fixture {
-    pub fn run(&self, cx: &mut TestAppContext) -> ReviewRun {
-        self.session.read_with(cx, |session, _| session.run().clone())
+    pub fn current(&self, cx: &mut TestAppContext) -> Option<Run> {
+        self.session.read_with(cx, |session, _| session.current().cloned())
+    }
+
+    pub fn state(&self, cx: &mut TestAppContext) -> Option<RunState> {
+        self.current(cx).map(|run| run.state)
     }
 
     pub fn start(&self, cx: &mut TestAppContext) {
         self.session.update(cx, |session, cx| session.start_review(cx));
+    }
+
+    /// Starts a review and waits until it ends.
+    pub fn review(&self, cx: &mut TestAppContext) {
+        self.start(cx);
+        self.wait_for_end(cx);
+    }
+
+    pub fn wait_for_end(&self, cx: &mut TestAppContext) {
+        wait_until(cx, "the run to end", |cx| {
+            self.state(cx).is_some_and(RunState::is_finished) && self.session.read_with(cx, |s, _| !s.is_busy())
+        });
+    }
+
+    pub fn wait_for_launches(&self, cx: &mut TestAppContext, count: usize) {
+        wait_until(cx, "claude to start", |_| self.claude.launches() >= count);
+    }
+
+    pub fn problem(&self, cx: &mut TestAppContext) -> Option<String> {
+        self.session.read_with(cx, |session, _| session.review_problem())
     }
 
     pub fn thread(&self, cx: &mut TestAppContext, id: ThreadId) -> Option<ReviewThread> {

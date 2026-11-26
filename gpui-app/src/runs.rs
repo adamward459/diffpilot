@@ -52,3 +52,9 @@ impl Runs {
         self.engine.set_claude_binary(settings.claude_path());
     }
 }
+
+pub fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as i64)
+}

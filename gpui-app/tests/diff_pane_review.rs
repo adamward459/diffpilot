@@ -3,27 +3,19 @@ use diffpilot::diff_pane::layout::{LINE, SPLIT_DIVIDER, THREAD, ThreadFrame, col
 use diffpilot::diff_pane::rows::BlockId;
 use diffpilot::diff_pane::rows::RowKind;
 use diffpilot::review::{ReviewHost, ReviewSession, metrics};
+use diffpilot::testing::{FakeClaude, fake_claude};
 use diffpilot_core::cancel::CancelToken;
 use diffpilot_core::changes::FileStatus;
-use diffpilot_core::claude::{Replier, ReviewError, Reviewer};
+use diffpilot_core::claude::Replier;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{DiffLine, DiffMode, FileDiff, Hunk, LineKind};
-use diffpilot_core::review::{Finding, ReviewRequest, ReviewResult, Severity};
+use diffpilot_core::review::{Finding, ReviewResult, Severity};
 use diffpilot_core::settings::Settings;
-use diffpilot_core::store::Store;
 use diffpilot_core::threads::{ReviewThread, Side, ThreadAnchor, ThreadId};
 use gpui::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext, point, px, size};
 use gpui_component::Root;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-
-struct Stub(ReviewResult);
-
-impl Reviewer for Stub {
-    fn review(&self, _: &ReviewRequest, _: &CancelToken) -> Result<ReviewResult, ReviewError> {
-        Ok(self.0.clone())
-    }
-}
+use std::time::{Duration, Instant};
 
 #[derive(Default)]
 struct Chunks(Mutex<Vec<async_channel::Sender<String>>>);
@@ -87,6 +79,8 @@ struct Opened {
     pane: Entity<DiffPane>,
     session: Entity<ReviewSession>,
     replier: Arc<Chunks>,
+    _claude: FakeClaude,
+    _repo: tempfile::TempDir,
 }
 
 fn open(cx: &mut TestAppContext) -> (Opened, &mut VisualTestContext) {
@@ -94,21 +88,17 @@ fn open(cx: &mut TestAppContext) -> (Opened, &mut VisualTestContext) {
         diffpilot_ui_kit::init(cx);
         diffpilot::review::init(cx);
     });
+    let claude = fake_claude(cx);
+    claude.review_with(&review());
+    claude.finish();
+    let repo = tempfile::tempdir().unwrap();
     let replier = Arc::new(Chunks::default());
-    let mut host = ReviewHost::new(Some(PathBuf::from("/repo")), Comparison::checked_out("main", true));
+    let mut host = ReviewHost::new(Some(repo.path().to_path_buf()), Comparison::checked_out("main", true));
     host.branch_name = Some("feature".into());
     let session = {
         let replier = replier.clone();
-        let store = Arc::new(Store::open_in_memory().unwrap());
-        cx.new(move |_| {
-            ReviewSession::new(
-                host,
-                Arc::new(Settings::in_memory()),
-                store,
-                Arc::new(Stub(review())),
-                replier,
-            )
-        })
+        let store = claude.store();
+        cx.new(move |cx| ReviewSession::new(host, Arc::new(Settings::in_memory()), store, replier, cx))
     };
     let mut pane = None;
     let handle = cx.add_window({
@@ -126,7 +116,16 @@ fn open(cx: &mut TestAppContext) -> (Opened, &mut VisualTestContext) {
         pane.set_files(["a.ts", "b.ts", "c.ts"].map(|path| file(path, 40)).to_vec(), cx)
     });
     cx.run_until_parked();
-    (Opened { pane, session, replier }, cx)
+    (
+        Opened {
+            pane,
+            session,
+            replier,
+            _claude: claude,
+            _repo: repo,
+        },
+        cx,
+    )
 }
 
 fn draw(pane: &Entity<DiffPane>, cx: &mut VisualTestContext) {
@@ -159,6 +158,15 @@ fn frame_of(opened: &Opened, cx: &mut VisualTestContext, anchor: &ThreadAnchor) 
 
 fn run_review(opened: &Opened, cx: &mut VisualTestContext) -> Vec<ReviewThread> {
     opened.session.update(cx, |session, cx| session.start_review(cx));
+    cx.executor().allow_parking();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !opened.session.read_with(cx, |session, _| {
+        session.current().is_some_and(|run| run.state.is_finished())
+    }) {
+        assert!(Instant::now() < deadline, "the review did not end");
+        cx.run_until_parked();
+        std::thread::sleep(Duration::from_millis(20));
+    }
     cx.run_until_parked();
     draw(&opened.pane, cx);
     opened

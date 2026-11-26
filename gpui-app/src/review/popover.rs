@@ -1,5 +1,6 @@
 use crate::review::session::ReviewSession;
-use diffpilot_core::review::{Effort, ModelName, ReviewModel, ReviewRun, ReviewScope, focus};
+use diffpilot_core::review::{Effort, ModelName, ReviewModel, ReviewScope, focus};
+use diffpilot_core::run::RunState;
 use diffpilot_ui_kit::components::menu::{MenuItem, MenuSection, menu_button};
 use diffpilot_ui_kit::components::{Button, Look, chip, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
@@ -114,16 +115,22 @@ impl Render for ReviewPopover {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::of(cx);
         let session = self.session.read(cx);
-        let run = session.run().clone();
+        let problem = session.review_problem();
+        let done = session.review_run().is_some_and(|run| run.state == RunState::Done);
+        let busy = session.is_busy();
         let setup = session.setup().clone();
         let model = session.model();
         let files = session.file_count();
         let visible = session.host().visible_path.clone();
         let title = session.title();
-        let start_title = match run {
-            ReviewRun::Failed(_) => "Try Again",
-            ReviewRun::Done { .. } => "Review Again",
-            _ => "Start Review",
+        let start_title = if busy {
+            "Queue Review"
+        } else if problem.is_some() {
+            "Try Again"
+        } else if done {
+            "Review Again"
+        } else {
+            "Start Review"
         };
         let open_name = visible
             .as_deref()
@@ -174,23 +181,17 @@ impl Render for ReviewPopover {
                             .child(title),
                     ),
             )
-            .when_some(
-                match &run {
-                    ReviewRun::Failed(message) => Some(SharedString::from(message.clone())),
-                    _ => None,
-                },
-                |col, message| {
-                    col.child(
-                        h_flex()
-                            .gap_2()
-                            .mb(px(12.))
-                            .items_start()
-                            .text_color(theme.danger)
-                            .child(Icon::new(Glyph::TriangleAlert).size_4().flex_none())
-                            .child(div().min_w_0().child(message)),
-                    )
-                },
-            )
+            .when_some(problem.map(SharedString::from), |col, message| {
+                col.child(
+                    h_flex()
+                        .gap_2()
+                        .mb(px(12.))
+                        .items_start()
+                        .text_color(theme.danger)
+                        .child(Icon::new(Glyph::TriangleAlert).size_4().flex_none())
+                        .child(div().min_w_0().child(message)),
+                )
+            })
             .child(section("What should Claude focus on?").mb(px(6.)))
             .child(
                 div()

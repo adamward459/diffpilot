@@ -86,8 +86,7 @@ fn world(cx: &mut TestAppContext, comparison: Comparison) -> World {
     host.files = Arc::from([Arc::new(file())]);
     let session = {
         let settings = settings.clone();
-        let reviewer = StubReviewer::new(Ok(result("", vec![])));
-        cx.new(move |_| ReviewSession::new(host, settings, store, reviewer, Arc::new(StubReplier::default())))
+        cx.new(move |cx| ReviewSession::new(host, settings, store, Arc::new(StubReplier::default()), cx))
     };
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let sink = events.clone();
@@ -194,7 +193,12 @@ async fn a_fix_run_moves_through_its_states_and_the_threads_follow_it(cx: &mut T
     wait_until(cx, "the run to finish", |cx| w.state(cx) == Some(RunState::Done));
     assert!(!w.session.read_with(cx, |s, _| s.fixing()));
     assert_eq!(w.session.read_with(cx, |s, _| s.fix_outcome()), Some((1, 0)));
-    assert!(w.events.lock().unwrap().contains(&ReviewEvent::FixChanged));
+    assert!(
+        w.events
+            .lock()
+            .unwrap()
+            .contains(&ReviewEvent::RunFinished(RunState::Done))
+    );
 }
 
 #[gpui::test]
@@ -203,7 +207,7 @@ async fn stopping_a_fix_run_ends_it_as_stopped(cx: &mut TestAppContext) {
     w.comment(cx, "Rename this.");
     w.start_fix(cx);
 
-    w.session.update(cx, |session, cx| session.stop_fix(cx));
+    w.session.update(cx, |session, cx| session.stop_claude(cx));
 
     wait_until(cx, "the run to stop", |cx| w.state(cx) == Some(RunState::Stopped));
     assert!(!w.session.read_with(cx, |s, _| s.fixing()));
@@ -211,8 +215,8 @@ async fn stopping_a_fix_run_ends_it_as_stopped(cx: &mut TestAppContext) {
 
 #[gpui::test]
 async fn fix_says_why_it_cannot_start(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(result("", vec![])));
-    let reason = f.session.read_with(cx, |s, cx| s.fix_blocker(cx));
+    let bare = session_on(cx, &Arc::new(Store::open_in_memory().unwrap()), working_tree());
+    let reason = bare.read_with(cx, |s, cx| s.fix_blocker(cx));
     assert!(reason.is_some_and(|reason| reason.contains("not available")));
 
     let staged = world(cx, Comparison::Staged);

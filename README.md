@@ -91,7 +91,7 @@ These environment variables help with testing:
 | --- | --- |
 | `DIFFPILOT_REPO=path` | Open this repository |
 | `DIFFPILOT_APPEARANCE=light` or `dark` | Force the appearance |
-| `DIFFPILOT_REVIEWER=scripted` | Use a fake Claude reviewer with a fixed result |
+| `DIFFPILOT_REVIEWER=scripted` | Use a fake Claude replier with a fixed answer |
 | `DIFFPILOT_VIEWED_SEED=file.json` | Start with these files marked viewed, kept in memory |
 | `DIFFPILOT_BENCH=1` | Run a benchmark, print JSON, and quit |
 

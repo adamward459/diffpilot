@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -177,31 +176,6 @@ pub enum ReviewScope {
     #[default]
     All,
     OpenFile,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReviewRun {
-    Idle,
-    Running { since: Instant },
-    Done { counts: SeverityCounts },
-    Failed(String),
-}
-
-impl ReviewRun {
-    pub fn label(&self) -> String {
-        match self {
-            Self::Idle => "idle".into(),
-            Self::Running { .. } => "running".into(),
-            Self::Failed(_) => "failed".into(),
-            Self::Done { counts } => {
-                let numbers: Vec<String> = Severity::ALL
-                    .iter()
-                    .map(|severity| counts.get(severity).copied().unwrap_or(0).to_string())
-                    .collect();
-                format!("done:{}", numbers.join("/"))
-            }
-        }
-    }
 }
 
 pub mod focus {
@@ -499,15 +473,6 @@ mod tests {
             result.counts(),
             BTreeMap::from([(Severity::MustFix, 2), (Severity::Nit, 1)])
         );
-    }
-
-    #[test]
-    fn the_run_label_lists_counts_in_severity_order() {
-        let counts = BTreeMap::from([(Severity::MustFix, 1), (Severity::Nit, 1)]);
-        assert_eq!(ReviewRun::Done { counts }.label(), "done:1/0/1/0");
-        assert_eq!(ReviewRun::Idle.label(), "idle");
-        assert_eq!(ReviewRun::Running { since: Instant::now() }.label(), "running");
-        assert_eq!(ReviewRun::Failed("x".into()).label(), "failed");
     }
 
     #[test]

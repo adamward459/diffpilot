@@ -3,7 +3,7 @@ use diffpilot::diff_pane::highlight;
 use diffpilot::diff_pane::state::{Geometry, PaneState};
 use diffpilot::diff_pane::{DiffPane, DiffPaneEvent};
 use diffpilot::review::{ReviewHost, ReviewSession};
-use diffpilot_core::claude::{ScriptedReplier, reviewer_from_env};
+use diffpilot_core::claude::ScriptedReplier;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{self, DiffMode, FileDiff, LineKind};
 use diffpilot_core::git;
@@ -571,13 +571,13 @@ fn run_window(repo: PathBuf, launch: Instant, bench: Option<Drive>) {
                 }
                 if demo {
                     let host = ReviewHost::new(Some(repo.clone()), Comparison::checked_out("main", true));
-                    let session = cx.new(|_| {
+                    let session = cx.new(|cx| {
                         ReviewSession::new(
                             host,
                             Arc::new(Settings::in_memory()),
                             Arc::new(Store::open_in_memory().expect("an in-memory store opens")),
-                            Arc::from(reviewer_from_env()),
                             Arc::new(ScriptedReplier::default()),
+                            cx,
                         )
                     });
                     pane.update(cx, |pane, cx| pane.set_review(session.clone(), window, cx));

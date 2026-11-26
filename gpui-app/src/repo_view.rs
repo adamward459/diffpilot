@@ -13,9 +13,7 @@ use crate::remote::{RemoteCapsule, RemoteEvent, RemoteMenu, RemoteStatus, SyncKi
 use crate::review::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
 use crate::sidebar::{LoadedChanges, Sidebar, SidebarEvent};
 use diffpilot_core::changes;
-use diffpilot_core::claude::{
-    ClaudeCliReplier, ClaudeCliReviewer, Replier, Reviewer, ScriptedReplier, reviewer_from_env,
-};
+use diffpilot_core::claude::{ClaudeCliReplier, Replier, ScriptedReplier};
 use diffpilot_core::comparison::{self, Comparison};
 use diffpilot_core::diff::{self, DiffMode, FileDiff};
 use diffpilot_core::editor;
@@ -134,10 +132,9 @@ fn load_diff(repo: &std::path::Path, comparison: &Comparison) -> DiffLoaded {
     }
 }
 
-/// What a session asks when Claude reviews or replies.
+/// What a session asks when Claude replies in a thread.
 #[derive(Clone)]
 pub struct Claude {
-    pub reviewer: Arc<dyn Reviewer>,
     pub replier: Arc<dyn Replier>,
 }
 
@@ -154,15 +151,7 @@ impl Claude {
                 ..ClaudeCliReplier::new(repo)
             })
         };
-        let reviewer: Arc<dyn Reviewer> = if scripted {
-            Arc::from(reviewer_from_env())
-        } else {
-            Arc::new(ClaudeCliReviewer {
-                binary: settings.claude_path(),
-                ..ClaudeCliReviewer::default()
-            })
-        };
-        Self { reviewer, replier }
+        Self { replier }
     }
 }
 
@@ -320,9 +309,9 @@ impl RepoView {
         self.claude = Claude::from_env(&self.repo, &self.settings);
         if let Some(session) = &self.session {
             let claude = self.claude.clone();
-            session.review.update(cx, |review, cx| {
-                review.use_settings(claude.reviewer, claude.replier, cx)
-            });
+            session
+                .review
+                .update(cx, |review, cx| review.use_settings(claude.replier, cx));
         }
     }
 
@@ -453,7 +442,7 @@ impl RepoView {
         host.branch_name = branch_name;
         let review = {
             let (settings, claude, store) = (self.settings.clone(), self.claude.clone(), self.review_store.clone());
-            cx.new(|_| ReviewSession::new(host, settings, store, claude.reviewer, claude.replier))
+            cx.new(|cx| ReviewSession::new(host, settings, store, claude.replier, cx))
         };
         pane.update(cx, |pane, cx| pane.set_review(review.clone(), window, cx));
         let pill = cx.new(|cx| ReviewPill::new(review.clone(), window, cx));

@@ -1,16 +1,19 @@
 //! Shows the review pill and a few thread cards.
 //!
-//! `DIFFPILOT_REVIEWER=scripted` and `DIFFPILOT_REVIEW_SECONDS` pick the scripted reviewer's delay.
+//! `DIFFPILOT_REVIEW_SECONDS` sets how long the fake `claude` takes to review.
 //! `DIFFPILOT_APPEARANCE=light|dark` picks the theme.
 //! `DIFFPILOT_DEMO_START=1` starts a review at launch. `DIFFPILOT_DEMO_POPOVER=1` opens the popover.
 //! `DIFFPILOT_BENCH=1` runs a hidden window and prints frame times as JSON on stdout.
 
 use diffpilot::bench::{Counting, Meter, live_bytes};
 use diffpilot::review::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession, ThreadCard, ThreadChange};
+use diffpilot::runs::Runs;
+use diffpilot::testing::fake_engine;
 use diffpilot_core::changes::FileStatus;
-use diffpilot_core::claude::{Replier, Reviewer, ScriptedReplier, ScriptedReviewer, reviewer_from_env};
+use diffpilot_core::claude::{Replier, ScriptedReplier};
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{DiffLine, FileDiff, Hunk, LineKind};
+use diffpilot_core::review::{Finding, ReviewResult, Severity};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::Store;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
@@ -147,7 +150,65 @@ trait WhenCards: Sized {
 }
 impl<T> WhenCards for T {}
 
-fn session(cx: &mut App, reviewer: Arc<dyn Reviewer>, replier: Arc<dyn Replier>) -> Entity<ReviewSession> {
+fn demo_review() -> ReviewResult {
+    let finding = |path: &str, line: Option<u32>, severity, title: &str, body: &str| Finding {
+        path: path.into(),
+        line,
+        severity,
+        title: title.into(),
+        body: body.into(),
+    };
+    ReviewResult {
+        summary: "The archive flow works, but one path skips the undo step.".into(),
+        findings: vec![
+            finding(
+                "docs/archive.md",
+                Some(2),
+                Severity::MustFix,
+                "Undo window is not documented",
+                "The doc names no undo window. Add the time limit in `docs/archive.md:2`.",
+            ),
+            finding(
+                "src/api/archive.ts",
+                Some(9999),
+                Severity::Suggestion,
+                "Retry is missing",
+                "A failed archive call is not retried. Wrap it in the shared retry helper.",
+            ),
+            finding(
+                "src/api/client.ts",
+                None,
+                Severity::Nit,
+                "Name is vague",
+                "Rename `req` to `request`.",
+            ),
+            finding(
+                "scripts/missing.py",
+                Some(3),
+                Severity::Question,
+                "Is this file still used?",
+                "Nothing in the diff calls this script. Should it stay?",
+            ),
+        ],
+    }
+}
+
+fn install_fake_claude(cx: &mut App, seconds: f64) {
+    let claude = fake_engine();
+    claude.review_with(&demo_review());
+    claude.finish_after(seconds);
+    cx.set_global(Runs::with_engine(claude.engine()));
+    Box::leak(Box::new(claude));
+}
+
+fn review_seconds() -> f64 {
+    std::env::var("DIFFPILOT_REVIEW_SECONDS")
+        .ok()
+        .and_then(|text| text.trim().parse().ok())
+        .unwrap_or(1.5)
+}
+
+fn session(cx: &mut App, replier: Arc<dyn Replier>) -> Entity<ReviewSession> {
     let mut host = ReviewHost::new(
         Some(PathBuf::from("/tmp/diffpilot-demo")),
         Comparison::checked_out("main", true),
@@ -156,7 +217,7 @@ fn session(cx: &mut App, reviewer: Arc<dyn Reviewer>, replier: Arc<dyn Replier>)
     host.files = Arc::from([Arc::new(archive_file())]);
     host.visible_path = Some("docs/archive.md".into());
     let store = Arc::new(Store::open_in_memory().expect("an in-memory store opens"));
-    cx.new(|_| ReviewSession::new(host, Arc::new(Settings::in_memory()), store, reviewer, replier))
+    cx.new(|cx| ReviewSession::new(host, Arc::new(Settings::in_memory()), store, replier, cx))
 }
 
 fn open_gallery(
@@ -186,7 +247,8 @@ fn open_gallery(
 }
 
 fn run_demo(cx: &mut App) {
-    let session = session(cx, Arc::from(reviewer_from_env()), Arc::new(ScriptedReplier::default()));
+    install_fake_claude(cx, review_seconds());
+    let session = session(cx, Arc::new(ScriptedReplier::default()));
     let (_, gallery) = open_gallery(cx, false, session.clone());
     let flag = |name: &str| std::env::var(name).is_ok_and(|value| value == "1");
     if flag("DIFFPILOT_DEMO_POPOVER") {
@@ -227,11 +289,8 @@ async fn bench(cx: &mut AsyncApp) {
     });
     let (window, gallery, session) = cx
         .update(|cx| {
-            let reviewer = Arc::new(ScriptedReviewer {
-                delay: Duration::ZERO,
-                ..ScriptedReviewer::default()
-            });
-            let session = session(cx, reviewer, replier);
+            install_fake_claude(cx, 0.0);
+            let session = session(cx, replier);
             let (window, gallery) = open_gallery(cx, true, session.clone());
             (window, gallery, session)
         })
@@ -382,11 +441,7 @@ async fn reopen_retained(cx: &mut AsyncApp) -> i64 {
     for cycle in 0..=REOPEN_CYCLES {
         let window = cx
             .update(|cx| {
-                let session = session(
-                    cx,
-                    Arc::new(ScriptedReviewer::default()),
-                    Arc::new(ScriptedReplier::default()),
-                );
+                let session = session(cx, Arc::new(ScriptedReplier::default()));
                 session.update(cx, |session, cx| {
                     let id = session.create_thread(ThreadAnchor::line("docs/archive.md", Side::New, 3), cx);
                     session.post(id, "Is this line needed?", cx);

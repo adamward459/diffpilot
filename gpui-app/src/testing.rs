@@ -2,15 +2,14 @@ use crate::repo_view::{Claude, RepoView};
 use crate::runs::Runs;
 use crate::settings::{self, Services, Tab};
 use crate::workspace::{self, Workspace};
-use diffpilot_core::cancel::CancelToken;
-use diffpilot_core::claude::{ReviewError, Reviewer, ScriptedReplier};
+use diffpilot_core::claude::ScriptedReplier;
 use diffpilot_core::diff::FileDiff;
 use diffpilot_core::github::auth::{Credentials, GhCli, MemoryStore};
 use diffpilot_core::github::http::{Http, HttpError, Method, Request, Response};
 use diffpilot_core::guide::stale::{self, file_fingerprints};
 use diffpilot_core::guide::{Attention, Chapter, ChapterFile, Guide, Note, Overview, Span, fingerprint};
 use diffpilot_core::mcp::McpBridge;
-use diffpilot_core::review::{Finding, ReviewRequest, ReviewResult, Severity};
+use diffpilot_core::review::{Finding, ReviewResult, Severity};
 use diffpilot_core::runner::{EngineConfig, McpLaunch, RunEngine};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::Store;
@@ -21,32 +20,27 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
-struct Canned;
-
-impl Reviewer for Canned {
-    fn review(&self, _: &ReviewRequest, _: &CancelToken) -> Result<ReviewResult, ReviewError> {
-        let finding = |path: &str, line, severity, title: &str| Finding {
-            path: path.into(),
-            line,
-            severity,
-            title: title.into(),
-            body: format!("{title} body"),
-        };
-        Ok(ReviewResult {
-            summary: "Fine overall.".into(),
-            findings: vec![
-                finding("base.txt", Some(2), Severity::MustFix, "Edited"),
-                finding("src/staged.rs", None, Severity::Nit, "Name"),
-                finding("docs/committed.md", None, Severity::Suggestion, "Doc"),
-                finding("src/staged.rs", Some(5), Severity::Question, "Why"),
-            ],
-        })
+pub fn canned_review() -> ReviewResult {
+    let finding = |path: &str, line, severity, title: &str| Finding {
+        path: path.into(),
+        line,
+        severity,
+        title: title.into(),
+        body: format!("{title} body"),
+    };
+    ReviewResult {
+        summary: "Fine overall.".into(),
+        findings: vec![
+            finding("base.txt", Some(2), Severity::MustFix, "Edited"),
+            finding("src/staged.rs", None, Severity::Nit, "Name"),
+            finding("docs/committed.md", None, Severity::Suggestion, "Doc"),
+            finding("src/staged.rs", Some(5), Severity::Question, "Why"),
+        ],
     }
 }
 
 pub fn canned_claude() -> Claude {
     Claude {
-        reviewer: Arc::new(Canned),
         replier: Arc::new(ScriptedReplier::default()),
     }
 }
@@ -347,15 +341,26 @@ pub fn wait_until_shows(cx: &mut VisualTestContext, selector: &str) {
     }
 }
 
-/// A `claude` script that starts, then ends only after `finish`. Each start adds a line to `launches`.
+/// A `claude` script that plays a plan, a few tool calls and the run's end. Each start adds a line to
+/// `launches`. The run ends after `finish`, or after the delay `finish_after` sets.
 pub struct FakeClaude {
     work: tempfile::TempDir,
+    engine: RunEngine,
     _bridge: Arc<McpBridge>,
 }
 
 impl FakeClaude {
-    fn launches(&self) -> usize {
+    pub fn launches(&self) -> usize {
         std::fs::read_to_string(self.work.path().join("launches")).map_or(0, |text| text.lines().count())
+    }
+
+    pub fn engine(&self) -> RunEngine {
+        self.engine.clone()
+    }
+
+    /// The store the engine writes its runs and MCP comments to. A session reads threads from the same one.
+    pub fn store(&self) -> Arc<Store> {
+        self.engine.store().clone()
     }
 
     pub fn wait_for_launches(&self, cx: &mut VisualTestContext, count: usize) {
@@ -373,6 +378,69 @@ impl FakeClaude {
     pub fn finish(&self) {
         std::fs::write(self.work.path().join("go"), "").expect("write go");
     }
+
+    pub fn hold(&self) {
+        let _ = std::fs::remove_file(self.work.path().join("go"));
+    }
+
+    pub fn finish_after(&self, seconds: f64) {
+        std::fs::write(self.work.path().join("auto"), seconds.to_string()).expect("write auto");
+    }
+
+    /// The next runs write a comment for each finding, then end with `result` as their structured output.
+    pub fn review_with(&self, result: &ReviewResult) {
+        let comment = |(index, finding): (usize, &Finding)| {
+            let line = finding.line.unwrap_or(1);
+            tool_use(
+                &format!("c{index}"),
+                "mcp__diffpilot__add_comment",
+                &serde_json::json!({ "file": finding.path, "startLine": line }),
+            )
+        };
+        let before: Vec<String> = result.findings.iter().enumerate().map(comment).collect();
+        let after = serde_json::json!({
+            "type": "result", "subtype": "success", "is_error": false, "num_turns": 4, "result": "Done.",
+            "structured_output": result,
+        });
+        std::fs::write(self.work.path().join("before"), before.join("\n")).expect("write before");
+        std::fs::write(self.work.path().join("after"), after.to_string()).expect("write after");
+    }
+
+    pub fn fail_with(&self, message: &str) {
+        let after = serde_json::json!({
+            "type": "result", "subtype": "error_during_execution", "is_error": true, "result": message,
+        });
+        std::fs::write(self.work.path().join("after"), after.to_string()).expect("write after");
+    }
+
+    /// Calls a diffpilot MCP tool the way the running `claude` would.
+    pub fn tool(&self, tool: &str, args: serde_json::Value) -> serde_json::Value {
+        let file = self.work.path().join("mcp.json");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !file.exists() {
+            assert!(std::time::Instant::now() < deadline, "no run got an MCP config");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let config: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(file).expect("a run is going")).expect("mcp.json is JSON");
+        let args_list = config["mcpServers"]["diffpilot"]["args"].as_array().expect("args");
+        let at = args_list.iter().position(|arg| arg == "--token").expect("a token");
+        let token = args_list[at + 1].as_str().expect("token text");
+        let line = serde_json::json!({ "token": token, "tool": tool, "args": args });
+        self._bridge.handle_line(&line.to_string())
+    }
+
+    pub fn prompt(&self) -> String {
+        std::fs::read_to_string(self.work.path().join("prompt")).unwrap_or_default()
+    }
+
+    pub fn model(&self) -> String {
+        std::fs::read_to_string(self.work.path().join("model"))
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    }
 }
 
 fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
@@ -383,17 +451,66 @@ fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
     path
 }
 
-pub fn fake_claude(cx: &mut TestAppContext) -> FakeClaude {
+fn tool_use(id: &str, name: &str, input: &serde_json::Value) -> String {
+    serde_json::json!({
+        "type": "assistant",
+        "message": { "id": format!("m-{id}"), "role": "assistant",
+            "content": [{ "type": "tool_use", "id": id, "name": name, "input": input }] },
+    })
+    .to_string()
+}
+
+fn tool_result(id: &str, text: &str) -> String {
+    serde_json::json!({
+        "type": "user",
+        "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": id, "content": text }] },
+    })
+    .to_string()
+}
+
+fn play() -> String {
+    let todo = |content: &str, active: &str, status: &str| serde_json::json!({ "content": content, "activeForm": active, "status": status });
+    let plan = serde_json::json!({ "todos": [
+        todo("Read the diff", "Reading the diff", "completed"),
+        todo("Check the callers", "Checking the callers", "in_progress"),
+        todo("Write the review", "Writing the review", "pending"),
+    ]});
+    let init = r#"{"type":"system","subtype":"init","session_id":"s-1","model":"m","tools":[],"mcp_servers":[]}"#;
+    [
+        init.to_string(),
+        tool_use("t1", "TodoWrite", &plan),
+        tool_use("t2", "Read", &serde_json::json!({ "file_path": "src/staged.rs" })),
+        tool_result("t2", "let value = 1;"),
+        tool_use("t3", "Grep", &serde_json::json!({ "pattern": "value" })),
+        tool_result("t3", "src/staged.rs"),
+        tool_use("t4", "Bash", &serde_json::json!({ "command": "git diff --stat" })),
+        tool_result("t4", "1 file changed"),
+    ]
+    .join("\n")
+}
+
+pub fn fake_engine() -> FakeClaude {
     let work = tempfile::tempdir().expect("tempdir");
     let dir = work.path();
+    std::fs::write(dir.join("play"), play() + "\n").expect("write play");
     let claude = script(
         dir,
         "claude",
         &format!(
             r#"echo $$ >> '{dir}/launches'
-echo '{{"type":"system","subtype":"init","session_id":"s-1","model":"m","tools":[],"mcp_servers":[]}}'
-while [ ! -f '{dir}/go' ]; do sleep 0.05; done
-echo '{{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"Done."}}'"#,
+printf '%s' "$2" > '{dir}/prompt'
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --model) echo "$2" > '{dir}/model' ;;
+    --mcp-config) cp "$2" '{dir}/mcp.json' ;;
+  esac
+  shift
+done
+cat '{dir}/play'
+[ -f '{dir}/before' ] && cat '{dir}/before'
+echo
+if [ -f '{dir}/auto' ]; then sleep "$(cat '{dir}/auto')"; else while [ ! -f '{dir}/go' ]; do sleep 0.05; done; fi
+if [ -f '{dir}/after' ]; then cat '{dir}/after'; else echo '{{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"Done."}}'; fi"#,
             dir = dir.display()
         ),
     );
@@ -410,8 +527,18 @@ echo '{{"type":"result","subtype":"success","is_error":false,"num_turns":1,"resu
     config.run_dir = dir.join("runs");
     config.keep_snapshots = 0;
     config.mcp = Some(McpLaunch::new(bridge.clone()));
-    cx.update(|cx| cx.set_global(Runs::with_engine(RunEngine::new(config))));
-    FakeClaude { work, _bridge: bridge }
+    FakeClaude {
+        work,
+        engine: RunEngine::new(config),
+        _bridge: bridge,
+    }
+}
+
+pub fn fake_claude(cx: &mut TestAppContext) -> FakeClaude {
+    let fake = fake_engine();
+    let runs = Runs::with_engine(fake.engine());
+    cx.update(|cx| cx.set_global(runs));
+    fake
 }
 
 const GITHUB_URL: &str = "github.com:o/r.git";

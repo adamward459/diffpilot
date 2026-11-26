@@ -11,7 +11,7 @@ fn card(
     cx: &mut TestAppContext,
     pick: impl FnOnce(&Fixture, &mut TestAppContext) -> ThreadId,
 ) -> (Fixture, Entity<ThreadCard>, &mut VisualTestContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
     let id = pick(&f, cx);
     let session: Entity<ReviewSession> = f.session.clone();
     let (card, vcx) = root_window(cx, |_, cx| ThreadCard::new(session, id, cx));
@@ -19,8 +19,7 @@ fn card(
 }
 
 fn finished_review(f: &Fixture, cx: &mut TestAppContext) {
-    f.session.update(cx, |session, cx| session.start_review(cx));
-    cx.run_until_parked();
+    f.review(cx);
 }
 
 fn thread_with(f: &Fixture, cx: &mut TestAppContext, severity: Option<Severity>) -> ThreadId {

@@ -1,6 +1,8 @@
-use crate::common::{StubReplier, StubReviewer, finding, result};
+use crate::common::{StubReplier, finding, result};
 use diffpilot::repo_view::Claude;
-use diffpilot::testing::{click, fixture, open_repo, press, shows, type_text};
+use diffpilot::testing::{
+    click, fake_claude, fixture, open_repo, open_repo_in, press, shows, type_text, wait_until_shows,
+};
 use diffpilot_core::review::Severity;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::threads::{CLAUDE_NAME, USER_NAME};
@@ -11,16 +13,17 @@ use std::sync::Arc;
 #[gpui::test]
 fn a_comment_a_review_and_a_reply_end_up_as_threads_in_the_pane(app: &mut TestAppContext) {
     let dir = fixture();
-    let reviewer = StubReviewer::new(Ok(result(
+    let fake = fake_claude(app);
+    fake.review_with(&result(
         "Fine overall.",
         vec![
             finding("base.txt", Some(2), Severity::MustFix, "Edited"),
             finding("src/staged.rs", None, Severity::Nit, "Name"),
         ],
-    )));
+    ));
+    fake.finish();
     let replier = Arc::new(StubReplier::default());
     let claude = Claude {
-        reviewer: reviewer.clone(),
         replier: replier.clone(),
     };
     let (_, cx) = open_repo(
@@ -44,8 +47,8 @@ fn a_comment_a_review_and_a_reply_end_up_as_threads_in_the_pane(app: &mut TestAp
 
     click(cx, "review:open");
     click(cx, "review:start");
-    assert!(shows(cx, "review:done"), "the pill reports the finished review");
-    assert_eq!(reviewer.calls(), 1);
+    wait_until_shows(cx, "review:done");
+    assert_eq!(fake.launches(), 1);
     assert!(
         shows(cx, "jump-bar:threads:4"),
         "the review added a summary and two findings"
@@ -79,4 +82,59 @@ fn a_comment_a_review_and_a_reply_end_up_as_threads_in_the_pane(app: &mut TestAp
     replier.send("the line changed.");
     replier.finish();
     assert!(shows(cx, &format!("comment:{CLAUDE_NAME}:Yes, the line changed.")));
+}
+
+#[gpui::test]
+fn comments_a_running_review_writes_become_threads_and_the_next_review_replaces_them(app: &mut TestAppContext) {
+    let dir = fixture();
+    let fake = fake_claude(app);
+    fake.hold();
+    let claude = Claude {
+        replier: Arc::new(StubReplier::default()),
+    };
+    let (_, cx) = open_repo_in(
+        app,
+        dir.path(),
+        Arc::new(Settings::in_memory()),
+        Arc::new(ViewedStore::in_memory()),
+        fake.store(),
+        claude,
+    );
+
+    click(cx, "sidebar:row:docs/committed.md");
+    click(cx, "pane:comment-on-file:docs/committed.md");
+    type_text(cx, "Why this file?");
+    press(cx, "cmd-enter");
+    assert!(shows(cx, "jump-bar:threads:1"));
+
+    click(cx, "review:open");
+    click(cx, "review:start");
+    fake.wait_for_launches(cx, 1);
+    let comment = fake.tool(
+        "add_comment",
+        serde_json::json!({
+            "file": "base.txt", "startLine": 2, "severity": "must-fix", "title": "Edited", "body": "Check this line.",
+        }),
+    );
+    assert_eq!(comment["ok"], true, "{comment}");
+    wait_until_shows(cx, "jump-bar:threads:2");
+
+    fake.review_with(&result(
+        "",
+        vec![
+            finding("base.txt", Some(2), Severity::Nit, "Second"),
+            finding("src/staged.rs", None, Severity::Nit, "Third"),
+            finding("docs/committed.md", None, Severity::Question, "Fourth"),
+        ],
+    ));
+    fake.finish();
+    wait_until_shows(cx, "review:done");
+    assert!(
+        shows(cx, "jump-bar:threads:2"),
+        "the comment of the first review stays until the run ends"
+    );
+
+    click(cx, "review:open");
+    click(cx, "review:start");
+    wait_until_shows(cx, "jump-bar:threads:4");
 }

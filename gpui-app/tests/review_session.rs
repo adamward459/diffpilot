@@ -3,10 +3,9 @@ mod common;
 use common::*;
 use diffpilot::review::session::{NO_REPLY_MESSAGE, NO_REPO_MESSAGE};
 use diffpilot::review::{ReviewEvent, ThreadChange};
-use diffpilot_core::cancel::CancelToken;
-use diffpilot_core::claude::ReviewError;
 use diffpilot_core::comparison::Comparison;
-use diffpilot_core::review::{Effort, ModelName, ReviewModel, ReviewRun, ReviewScope, Severity};
+use diffpilot_core::review::{Effort, ModelName, ReviewModel, ReviewScope, Severity};
+use diffpilot_core::run::RunState;
 use diffpilot_core::store::Store;
 use diffpilot_core::threads::ThreadStatus;
 use diffpilot_core::threads::{CLAUDE_NAME, Side, ThreadAnchor, ThreadId, USER_NAME};
@@ -16,14 +15,15 @@ use std::sync::Arc;
 
 #[gpui::test]
 async fn a_run_ends_done_with_threads_planned_from_the_findings(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
+    f.claude.hold();
     f.start(cx);
-    assert!(matches!(f.run(cx), ReviewRun::Running { .. }));
-    cx.run_until_parked();
+    assert!(f.session.read_with(cx, |s, _| s.reviewing()));
+    f.claude.finish();
+    f.wait_for_end(cx);
 
-    let ReviewRun::Done { counts } = f.run(cx) else {
-        panic!("run is {:?}", f.run(cx))
-    };
+    assert_eq!(f.state(cx), Some(RunState::Done));
+    let counts = f.session.read_with(cx, |s, _| s.review_counts());
     assert_eq!(counts.get(&Severity::MustFix), Some(&1));
     assert_eq!(counts.get(&Severity::Nit), Some(&1));
 
@@ -49,12 +49,12 @@ async fn a_run_ends_done_with_threads_planned_from_the_findings(cx: &mut TestApp
 
 #[gpui::test]
 async fn a_run_announces_running_threads_then_done(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
-    f.start(cx);
-    cx.run_until_parked();
+    let f = fixture(cx, two_findings());
+    f.review(cx);
     let events = f.events.borrow().clone();
     assert_eq!(events.first(), Some(&ReviewEvent::RunChanged));
     assert_eq!(events.last(), Some(&ReviewEvent::RunChanged));
+    assert!(events.contains(&ReviewEvent::RunFinished(RunState::Done)));
     let added = events
         .iter()
         .filter(|event| matches!(event, ReviewEvent::ThreadsChanged(ThreadChange::Added(_))))
@@ -64,7 +64,7 @@ async fn a_run_announces_running_threads_then_done(cx: &mut TestAppContext) {
 
 #[gpui::test]
 async fn the_request_carries_the_setup_the_popover_collected(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(result("", vec![])));
+    let f = fixture(cx, result("", vec![]));
     f.session.update(cx, |session, cx| {
         session.update_setup(
             |setup| {
@@ -76,121 +76,134 @@ async fn the_request_carries_the_setup_the_popover_collected(cx: &mut TestAppCon
             cx,
         )
     });
-    f.start(cx);
-    cx.run_until_parked();
-    let request = f.reviewer.requests.lock().unwrap()[0].clone();
-    assert_eq!(request.repo, PathBuf::from("/repo"));
-    assert_eq!(request.revisions, ["--merge-base", "main"]);
-    assert_eq!(request.focus, "Security");
-    assert_eq!(request.instructions, "look at auth");
-    assert_eq!(request.paths, ["src/a.ts"]);
-    assert_eq!(request.model, ReviewModel::new(ModelName::Haiku, Effort::Low));
+    f.review(cx);
+    let prompt = f.claude.prompt();
+    assert!(prompt.contains("git diff --merge-base main -- 'src/a.ts'"), "{prompt}");
+    assert!(prompt.contains("Security"));
+    assert!(prompt.contains("> look at auth"));
+    assert_eq!(f.claude.model(), "haiku");
+    let run = f.current(cx).unwrap();
+    assert_eq!(run.model, ReviewModel::new(ModelName::Haiku, Effort::Low));
     assert_eq!(
         f.settings.reviews_model(),
         ReviewModel::new(ModelName::Haiku, Effort::Low)
     );
-    assert_eq!(f.settings.review_focuses(&PathBuf::from("/repo")), ["Security"]);
+    let repo = f.session.read_with(cx, |s, _| s.host().repo.clone().unwrap());
+    assert_eq!(f.settings.review_focuses(&repo), ["Security"]);
 }
 
 #[gpui::test]
 async fn an_empty_review_still_ends_done_with_no_threads(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(result("", vec![])));
-    f.start(cx);
-    cx.run_until_parked();
-    assert_eq!(f.run(cx).label(), "done:0/0/0/0");
+    let f = fixture(cx, result("", vec![]));
+    f.review(cx);
+    assert_eq!(f.state(cx), Some(RunState::Done));
+    assert!(f.session.read_with(cx, |s, _| s.review_counts().is_empty()));
     assert!(f.threads(cx).is_empty());
 }
 
 #[gpui::test]
-async fn stop_cancels_the_run_and_returns_to_idle(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+async fn stop_ends_the_run_as_stopped_and_adds_no_threads(cx: &mut TestAppContext) {
+    let f = fixture(cx, two_findings());
+    f.claude.hold();
     f.start(cx);
-    f.session.update(cx, |session, cx| session.stop_review(cx));
-    assert_eq!(f.run(cx), ReviewRun::Idle);
-    cx.run_until_parked();
-    assert_eq!(f.run(cx), ReviewRun::Idle);
+    f.wait_for_launches(cx, 1);
+    f.session.update(cx, |session, cx| session.stop_claude(cx));
+    f.wait_for_end(cx);
+    assert_eq!(f.state(cx), Some(RunState::Stopped));
+    assert_eq!(f.problem(cx), None);
     assert!(f.threads(cx).is_empty());
-    assert!(f.reviewer.tokens.lock().unwrap().iter().all(CancelToken::is_cancelled));
 }
 
 #[gpui::test]
 async fn stopping_when_nothing_runs_changes_nothing(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
-    f.session.update(cx, |session, cx| session.stop_review(cx));
+    let f = fixture(cx, two_findings());
+    f.session.update(cx, |session, cx| session.stop_claude(cx));
     assert!(f.events.borrow().is_empty());
-    f.start(cx);
-    cx.run_until_parked();
+    f.review(cx);
     let before = f.events.borrow().len();
-    f.session.update(cx, |session, cx| session.stop_review(cx));
+    f.session.update(cx, |session, cx| session.stop_claude(cx));
     assert_eq!(f.events.borrow().len(), before);
-    assert!(matches!(f.run(cx), ReviewRun::Done { .. }));
+    assert_eq!(f.state(cx), Some(RunState::Done));
 }
 
 #[gpui::test]
-async fn starting_while_a_run_is_going_does_not_start_another(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+async fn starting_while_a_run_is_going_queues_the_next_one_behind_it(cx: &mut TestAppContext) {
+    let f = fixture(cx, two_findings());
+    f.claude.hold();
     f.start(cx);
+    f.wait_for_launches(cx, 1);
     f.start(cx);
+    assert_eq!(f.session.read_with(cx, |s, _| s.queued().len()), 1);
     cx.run_until_parked();
-    assert_eq!(f.reviewer.calls(), 1);
+    assert_eq!(f.claude.launches(), 1);
+
+    f.claude.finish();
+    f.wait_for_launches(cx, 2);
+    f.wait_for_end(cx);
+    assert_eq!(f.claude.launches(), 2);
+    assert!(f.session.read_with(cx, |s, _| s.queued().is_empty()));
 }
 
 #[gpui::test]
 async fn a_failure_shows_its_message_and_the_next_run_can_succeed(cx: &mut TestAppContext) {
-    let f = fixture(cx, Err(ReviewError::Failed("boom".into())));
-    f.start(cx);
-    cx.run_until_parked();
-    assert_eq!(f.run(cx), ReviewRun::Failed("boom".into()));
+    let f = fixture(cx, two_findings());
+    f.claude.fail_with("boom");
+    f.review(cx);
+    assert_eq!(f.state(cx), Some(RunState::Failed));
+    assert_eq!(f.problem(cx).as_deref(), Some("boom"));
     assert!(f.threads(cx).is_empty());
+    assert!(f.events.borrow().contains(&ReviewEvent::RunFinished(RunState::Failed)));
 
-    f.reviewer.will_return(Ok(two_findings()));
-    f.start(cx);
-    assert!(matches!(f.run(cx), ReviewRun::Running { .. }));
-    cx.run_until_parked();
-    assert!(matches!(f.run(cx), ReviewRun::Done { .. }));
+    f.claude.review_with(&two_findings());
+    f.review(cx);
+    assert_eq!(f.state(cx), Some(RunState::Done));
+    assert_eq!(f.problem(cx), None);
+    assert_eq!(f.threads(cx).len(), 3);
 }
 
 #[gpui::test]
-async fn a_missing_claude_command_is_a_failure_with_its_own_message(cx: &mut TestAppContext) {
-    let f = fixture(cx, Err(ReviewError::NotFound));
-    f.start(cx);
-    cx.run_until_parked();
-    assert_eq!(f.run(cx), ReviewRun::Failed(ReviewError::NotFound.to_string()));
+async fn a_claude_command_that_cannot_start_is_a_failure_with_its_message(cx: &mut TestAppContext) {
+    let f = fixture(cx, two_findings());
+    f.claude.engine().set_claude_binary(Some("/nonexistent/claude".into()));
+    f.review(cx);
+    assert_eq!(f.state(cx), Some(RunState::Failed));
+    assert!(f.problem(cx).is_some());
 }
 
 #[gpui::test]
-async fn a_cancelled_result_that_was_not_stopped_goes_back_to_idle(cx: &mut TestAppContext) {
-    let f = fixture(cx, Err(ReviewError::Cancelled));
-    f.start(cx);
-    cx.run_until_parked();
-    assert_eq!(f.run(cx), ReviewRun::Idle);
-}
-
-#[gpui::test]
-async fn without_a_repo_the_run_fails_before_the_reviewer_is_called(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+async fn without_a_repo_the_run_fails_before_claude_starts(cx: &mut TestAppContext) {
+    let f = fixture(cx, two_findings());
     f.session.update(cx, |session, cx| session.set_repo(None, cx));
     f.start(cx);
     cx.run_until_parked();
-    assert_eq!(f.run(cx), ReviewRun::Failed(NO_REPO_MESSAGE.into()));
-    assert_eq!(f.reviewer.calls(), 0);
+    assert_eq!(f.problem(cx).as_deref(), Some(NO_REPO_MESSAGE));
+    assert_eq!(f.current(cx), None);
+    assert_eq!(f.claude.launches(), 0);
 }
 
 #[gpui::test]
-async fn running_again_replaces_the_earlier_review_threads_and_keeps_the_users(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
-    f.start(cx);
-    cx.run_until_parked();
+async fn running_again_replaces_the_earlier_review_threads_when_it_is_done_and_keeps_the_users(
+    cx: &mut TestAppContext,
+) {
+    let f = fixture(cx, two_findings());
+    f.review(cx);
     let first: Vec<ThreadId> = f.threads(cx).iter().map(|t| t.id).collect();
     let mine = f.user_thread(cx);
     f.post(cx, mine, "my note");
 
-    f.reviewer.will_return(Ok(result(
+    f.claude.review_with(&result(
         "Second.",
         vec![finding("src/a.ts", Some(3), Severity::Question, "Why")],
-    )));
+    ));
+    f.claude.hold();
     f.start(cx);
-    cx.run_until_parked();
+    f.wait_for_launches(cx, 2);
+    assert!(
+        first.iter().all(|id| f.thread(cx, *id).is_some()),
+        "the old threads stay while the new review runs"
+    );
+    f.claude.finish();
+    f.wait_for_end(cx);
 
     let threads = f.threads(cx);
     let ids: Vec<ThreadId> = threads.iter().map(|t| t.id).collect();
@@ -203,7 +216,9 @@ async fn running_again_replaces_the_earlier_review_threads_and_keeps_the_users(c
         .collect();
     assert_eq!(titles, ["Why"]);
     assert_eq!(threads.len(), 3);
-    assert_eq!(f.run(cx).label(), "done:0/0/0/1");
+    let counts = f.session.read_with(cx, |s, _| s.review_counts());
+    assert_eq!(counts.get(&Severity::Question), Some(&1));
+    assert_eq!(counts.len(), 1);
 
     let removed = f
         .events
@@ -215,22 +230,42 @@ async fn running_again_replaces_the_earlier_review_threads_and_keeps_the_users(c
 }
 
 #[gpui::test]
+async fn a_failed_second_review_keeps_the_first_ones_threads(cx: &mut TestAppContext) {
+    let f = fixture(cx, two_findings());
+    f.review(cx);
+    let first: Vec<ThreadId> = f.threads(cx).iter().map(|t| t.id).collect();
+    f.claude.fail_with("boom");
+    f.review(cx);
+    assert_eq!(f.state(cx), Some(RunState::Failed));
+    assert!(first.iter().all(|id| f.thread(cx, *id).is_some()));
+}
+
+#[gpui::test]
 async fn rerunning_ends_a_reply_streaming_in_a_replaced_thread(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
-    f.start(cx);
-    cx.run_until_parked();
+    let f = fixture(cx, two_findings());
+    f.review(cx);
     let summary = f.threads(cx)[0].id;
     f.session.update(cx, |session, cx| session.ask_claude(summary, cx));
     assert!(f.session.read_with(cx, |session, _| session.is_replying(summary)));
-    f.start(cx);
-    cx.run_until_parked();
+    f.review(cx);
     assert!(f.thread(cx, summary).is_none());
     assert!(f.replier.tokens.lock().unwrap()[0].is_cancelled());
 }
 
 #[gpui::test]
+async fn run_again_starts_the_same_request_once_the_run_has_ended(cx: &mut TestAppContext) {
+    let f = fixture(cx, two_findings());
+    assert!(!f.session.read_with(cx, |s, _| s.can_run_again()));
+    f.review(cx);
+    assert!(f.session.read_with(cx, |s, _| s.can_run_again()));
+    f.session.update(cx, |session, cx| session.run_again(cx));
+    f.wait_for_end(cx);
+    assert_eq!(f.claude.launches(), 2);
+}
+
+#[gpui::test]
 async fn a_post_without_a_mention_adds_one_comment_and_asks_no_one(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
     let id = f.user_thread(cx);
     f.post(cx, id, "  just a note  ");
     cx.run_until_parked();
@@ -245,7 +280,7 @@ async fn a_post_without_a_mention_adds_one_comment_and_asks_no_one(cx: &mut Test
 
 #[gpui::test]
 async fn blank_text_is_not_posted(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
     let id = f.user_thread(cx);
     let before = f.events.borrow().len();
     f.post(cx, id, " \n ");
@@ -255,7 +290,7 @@ async fn blank_text_is_not_posted(cx: &mut TestAppContext) {
 
 #[gpui::test]
 async fn a_post_that_mentions_claude_starts_a_reply(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
     let id = f.user_thread(cx);
     f.post(cx, id, "@claude is this needed?");
     let thread = f.thread(cx, id).unwrap();
@@ -273,7 +308,7 @@ async fn a_post_that_mentions_claude_starts_a_reply(cx: &mut TestAppContext) {
 
 #[gpui::test]
 async fn an_address_that_only_looks_like_a_mention_does_not_start_a_reply(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
     let id = f.user_thread(cx);
     f.post(cx, id, "mail me@claude.com or ask @claudette");
     assert_eq!(f.replier.asked(), 0);
@@ -281,7 +316,7 @@ async fn an_address_that_only_looks_like_a_mention_does_not_start_a_reply(cx: &m
 
 #[gpui::test]
 async fn ask_claude_replies_without_a_new_user_comment(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
     let id = f.user_thread(cx);
     f.post(cx, id, "what about this?");
     f.session.update(cx, |session, cx| session.ask_claude(id, cx));
@@ -293,7 +328,7 @@ async fn ask_claude_replies_without_a_new_user_comment(cx: &mut TestAppContext) 
 
 #[gpui::test]
 async fn a_second_ask_while_a_reply_streams_is_ignored(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
     let id = f.user_thread(cx);
     f.post(cx, id, "@claude one");
     f.session.update(cx, |session, cx| session.ask_claude(id, cx));
@@ -311,7 +346,7 @@ async fn a_second_ask_while_a_reply_streams_is_ignored(cx: &mut TestAppContext) 
 
 #[gpui::test]
 async fn reply_chunks_append_to_one_comment_and_the_end_of_the_stream_finishes_it(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
     let id = f.user_thread(cx);
     f.post(cx, id, "@claude hi");
     f.events.borrow_mut().clear();
@@ -338,7 +373,7 @@ async fn reply_chunks_append_to_one_comment_and_the_end_of_the_stream_finishes_i
 
 #[gpui::test]
 async fn a_reply_that_ends_without_text_says_so_instead_of_staying_empty(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
     let id = f.user_thread(cx);
     f.post(cx, id, "@claude hi");
     f.replier.finish();
@@ -350,7 +385,7 @@ async fn a_reply_that_ends_without_text_says_so_instead_of_staying_empty(cx: &mu
 
 #[gpui::test]
 async fn removing_a_thread_cancels_its_reply_and_drops_late_chunks(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
     let id = f.user_thread(cx);
     let other = f.session.update(cx, |session, cx| {
         session.create_thread(ThreadAnchor::file("src/a.ts"), cx)
@@ -373,7 +408,7 @@ async fn removing_a_thread_cancels_its_reply_and_drops_late_chunks(cx: &mut Test
 
 #[gpui::test]
 async fn removing_an_unknown_thread_announces_nothing(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
     f.session
         .update(cx, |session, cx| session.remove_thread(ThreadId(42), cx));
     assert!(f.events.borrow().is_empty());
@@ -381,7 +416,7 @@ async fn removing_an_unknown_thread_announces_nothing(cx: &mut TestAppContext) {
 
 #[gpui::test]
 async fn a_second_thread_on_the_same_anchor_is_the_first_one(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
     let first = f.user_thread(cx);
     let again = f.user_thread(cx);
     assert_eq!(first, again);
@@ -396,7 +431,7 @@ async fn a_second_thread_on_the_same_anchor_is_the_first_one(cx: &mut TestAppCon
 
 #[gpui::test]
 async fn the_title_follows_the_comparison_and_file_count(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
     f.session
         .update(cx, |session, cx| session.set_branch_name(Some("feature".into()), cx));
     assert_eq!(
@@ -410,23 +445,22 @@ async fn the_title_follows_the_comparison_and_file_count(cx: &mut TestAppContext
 
 #[gpui::test]
 async fn the_setup_is_remembered_per_repo_and_reloaded_when_the_repo_changes(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
+    let repo = f.session.read_with(cx, |s, _| s.host().repo.clone().unwrap());
     f.session.update(cx, |session, cx| {
         session.update_setup(|s| _ = s.focuses.insert("Tests".into()), cx)
     });
-    f.start(cx);
-    cx.run_until_parked();
+    f.review(cx);
     f.session
         .update(cx, |session, cx| session.set_repo(Some(PathBuf::from("/other")), cx));
     assert!(f.session.read_with(cx, |s, _| s.setup().focuses.is_empty()));
-    f.session
-        .update(cx, |session, cx| session.set_repo(Some(PathBuf::from("/repo")), cx));
+    f.session.update(cx, |session, cx| session.set_repo(Some(repo), cx));
     assert!(f.session.read_with(cx, |s, _| s.setup().focuses.contains("Tests")));
 }
 
 #[gpui::test]
 async fn dropping_the_session_cancels_a_streaming_reply(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
     let id = f.user_thread(cx);
     f.post(cx, id, "@claude hi");
     let token = f.replier.tokens.lock().unwrap()[0].clone();
@@ -481,7 +515,7 @@ async fn two_comparisons_keep_separate_threads(cx: &mut TestAppContext) {
 
 #[gpui::test]
 async fn resolving_keeps_the_thread_in_the_store_and_out_of_the_counts(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
+    let f = fixture(cx, two_findings());
     let id = f.user_thread(cx);
     f.post(cx, id, "Fix this.");
     assert_eq!(f.session.read_with(cx, |s, _| s.thread_count()), 1);

@@ -1,31 +1,21 @@
 use crate::cancel::CancelToken;
 use crate::paths::find_executable;
 use crate::process_groups;
-use crate::prompt;
-use crate::review::{ReviewRequest, ReviewResult};
 use crate::threads::{ReviewThread, ThreadAnchor};
-use serde::Deserialize;
 use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ReviewError {
-    #[error("The claude command was not found. Install Claude Code, then try again.")]
-    NotFound,
     #[error("{0}")]
     Failed(String),
     #[error("The run was cancelled.")]
     Cancelled,
-}
-
-/// Runs on the caller's thread and blocks. Call it from a background executor.
-pub trait Reviewer: Send + Sync {
-    fn review(&self, request: &ReviewRequest, cancel: &CancelToken) -> Result<ReviewResult, ReviewError>;
 }
 
 /// Chunks arrive on the returned channel. It closes when the reply ends, fails or is cancelled.
@@ -33,157 +23,9 @@ pub trait Replier: Send + Sync {
     fn reply(&self, thread: &ReviewThread, cancel: &CancelToken) -> async_channel::Receiver<String>;
 }
 
-pub const DEFAULT_REVIEW_DELAY: Duration = Duration::from_millis(1500);
-
-pub struct ScriptedReviewer {
-    pub result: ReviewResult,
-    pub delay: Duration,
-    pub failure: Option<String>,
-}
-
-impl Default for ScriptedReviewer {
-    fn default() -> Self {
-        Self {
-            result: default_scripted_result(),
-            delay: DEFAULT_REVIEW_DELAY,
-            failure: None,
-        }
-    }
-}
-
-impl Reviewer for ScriptedReviewer {
-    fn review(&self, _request: &ReviewRequest, cancel: &CancelToken) -> Result<ReviewResult, ReviewError> {
-        if cancel.wait(self.delay) {
-            return Err(ReviewError::Cancelled);
-        }
-        match &self.failure {
-            Some(message) => Err(ReviewError::Failed(message.clone())),
-            None => Ok(self.result.clone()),
-        }
-    }
-}
-
-pub fn default_scripted_result() -> ReviewResult {
-    use crate::review::{Finding, Severity};
-    let finding = |path: &str, line: Option<u32>, severity, title: &str, body: &str| Finding {
-        path: path.into(),
-        line,
-        severity,
-        title: title.into(),
-        body: body.into(),
-    };
-    ReviewResult {
-        summary: "The archive flow works, but one path skips the undo step.".into(),
-        findings: vec![
-            finding(
-                "docs/archive.md",
-                Some(2),
-                Severity::MustFix,
-                "Undo window is not documented",
-                "The doc names no undo window. Add the time limit in `docs/archive.md:2`.",
-            ),
-            finding(
-                "src/api/archive.ts",
-                Some(9999),
-                Severity::Suggestion,
-                "Retry is missing",
-                "A failed archive call is not retried. Wrap it in the shared retry helper.",
-            ),
-            finding(
-                "src/api/client.ts",
-                None,
-                Severity::Nit,
-                "Name is vague",
-                "Rename `req` to `request`.",
-            ),
-            finding(
-                "scripts/missing.py",
-                Some(3),
-                Severity::Question,
-                "Is this file still used?",
-                "Nothing in the diff calls this script. Should it stay?",
-            ),
-        ],
-    }
-}
-
-/// `DIFFPILOT_REVIEWER=scripted` picks the scripted reviewer, and `DIFFPILOT_REVIEW_SECONDS` sets its delay.
-pub fn reviewer_from_env() -> Box<dyn Reviewer> {
-    reviewer_from(
-        std::env::var("DIFFPILOT_REVIEWER").ok().as_deref(),
-        std::env::var("DIFFPILOT_REVIEW_SECONDS").ok().as_deref(),
-    )
-}
-
-pub fn reviewer_from(kind: Option<&str>, seconds: Option<&str>) -> Box<dyn Reviewer> {
-    if kind != Some("scripted") {
-        return Box::new(ClaudeCliReviewer::default());
-    }
-    Box::new(ScriptedReviewer {
-        delay: scripted_delay(seconds),
-        ..ScriptedReviewer::default()
-    })
-}
-
-pub fn scripted_delay(seconds: Option<&str>) -> Duration {
-    seconds
-        .and_then(|text| text.trim().parse::<f64>().ok())
-        .and_then(|seconds| Duration::try_from_secs_f64(seconds).ok())
-        .unwrap_or(DEFAULT_REVIEW_DELAY)
-}
-
 pub const SCHEMA: &str = r#"{"type":"object","properties":{"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":["integer","null"]},"severity":{"type":"string","enum":["must-fix","suggestion","nit","question"]},"title":{"type":"string"},"body":{"type":"string"}},"required":["path","severity","title","body"]}}},"required":["summary","findings"]}"#;
 
 const READ_ONLY_GIT: [&str; 3] = ["Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)"];
-
-#[derive(Debug, Clone, Default)]
-pub struct ClaudeCliReviewer {
-    pub binary: Option<PathBuf>,
-    pub extra_arguments: Vec<String>,
-}
-
-impl ClaudeCliReviewer {
-    pub fn arguments(request: &ReviewRequest) -> Vec<String> {
-        let mut args: Vec<String> = [
-            "-p",
-            &prompt::render(request),
-            "--output-format",
-            "json",
-            "--json-schema",
-            SCHEMA,
-            "--tools",
-            "Read,Grep,Glob,Bash",
-            "--model",
-            request.model.name.as_str(),
-            "--effort",
-            request.model.effort.as_str(),
-            "--allowedTools",
-        ]
-        .map(String::from)
-        .into();
-        args.extend(READ_ONLY_GIT.map(String::from));
-        args
-    }
-
-    pub fn parse(output: &[u8]) -> Result<ReviewResult, ReviewError> {
-        #[derive(Deserialize)]
-        struct Envelope {
-            is_error: Option<bool>,
-            result: Option<String>,
-            structured_output: Option<ReviewResult>,
-        }
-        let envelope: Envelope = serde_json::from_slice(output)
-            .map_err(|_| ReviewError::Failed("Claude returned output that is not valid JSON.".into()))?;
-        if envelope.is_error == Some(true) {
-            return Err(ReviewError::Failed(
-                envelope.result.unwrap_or_else(|| "Claude reported an error.".into()),
-            ));
-        }
-        envelope
-            .structured_output
-            .ok_or_else(|| ReviewError::Failed("Claude returned no structured review.".into()))
-    }
-}
 
 pub fn claude_binary() -> Option<PathBuf> {
     let mut candidates = Vec::new();
@@ -205,41 +47,6 @@ pub(crate) fn claude_command(binary: &Path, repo: &Path) -> Command {
         .collect();
     command.env("PATH", path.join(":"));
     command
-}
-
-impl Reviewer for ClaudeCliReviewer {
-    fn review(&self, request: &ReviewRequest, cancel: &CancelToken) -> Result<ReviewResult, ReviewError> {
-        let binary = self
-            .binary
-            .clone()
-            .or_else(claude_binary)
-            .ok_or(ReviewError::NotFound)?;
-        let mut command = claude_command(&binary, &request.repo);
-        command.args(Self::arguments(request)).args(&self.extra_arguments);
-
-        let stdout = Arc::new(Mutex::new(Vec::new()));
-        let sink = stdout.clone();
-        let finished = run_process(command, cancel, move |chunk| {
-            sink.lock().unwrap().extend_from_slice(chunk);
-            true
-        })?;
-        let output = stdout.lock().unwrap().clone();
-        if let Ok(result) = Self::parse(&output) {
-            return Ok(result);
-        }
-        if !finished.status.success() {
-            let message = String::from_utf8_lossy(&finished.stderr).trim().to_string();
-            return Err(ReviewError::Failed(if message.is_empty() {
-                match finished.status.code() {
-                    Some(code) => format!("claude exited with status {code}."),
-                    None => "claude was stopped by a signal.".into(),
-                }
-            } else {
-                message
-            }));
-        }
-        Self::parse(&output)
-    }
 }
 
 pub(crate) struct Finished {
@@ -469,14 +276,10 @@ impl Utf8Chunks {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::review::{Effort, ModelName, ReviewModel, Severity};
+    use crate::review::Severity;
     use crate::threads::{Side, ThreadStore};
     use std::os::unix::fs::PermissionsExt;
     use std::time::Instant;
-
-    fn request() -> ReviewRequest {
-        ReviewRequest::new(Path::new("/r"), vec!["--merge-base".into(), "main".into()], "Tests")
-    }
 
     fn fake_claude(dir: &Path, script: &str) -> PathBuf {
         let path = dir.join("claude");
@@ -485,67 +288,8 @@ mod tests {
         path
     }
 
-    fn cli(binary: PathBuf) -> ClaudeCliReviewer {
-        ClaudeCliReviewer {
-            binary: Some(binary),
-            extra_arguments: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn parses_the_structured_output_of_the_cli() {
-        let json = r#"{"type":"result","subtype":"success","is_error":false,"result":"","session_id":"x",
-             "structured_output":{"summary":"One bug.","findings":[
-               {"path":"a.ts","line":4,"severity":"must-fix","title":"Null","body":"Check it."},
-               {"path":"b.ts","line":null,"severity":"question","title":"Why","body":"Is it used?"},
-               {"path":"c.ts","severity":"nit","title":"Name","body":"Rename."}]}}"#;
-        let result = ClaudeCliReviewer::parse(json.as_bytes()).unwrap();
-        assert_eq!(result.summary, "One bug.");
-        let severities: Vec<_> = result.findings.iter().map(|f| f.severity).collect();
-        assert_eq!(severities, [Severity::MustFix, Severity::Question, Severity::Nit]);
-        let lines: Vec<_> = result.findings.iter().map(|f| f.line).collect();
-        assert_eq!(lines, [Some(4), None, None]);
-        assert_eq!(result.counts().len(), 3);
-    }
-
-    #[test]
-    fn cli_errors_become_messages() {
-        let failed = |message: &str| Err(ReviewError::Failed(message.into()));
-        assert_eq!(
-            ClaudeCliReviewer::parse(br#"{"is_error":true,"result":"Not logged in"}"#),
-            failed("Not logged in")
-        );
-        assert_eq!(
-            ClaudeCliReviewer::parse(br#"{"is_error":false,"result":"hi"}"#),
-            failed("Claude returned no structured review.")
-        );
-        assert_eq!(
-            ClaudeCliReviewer::parse(b"oops"),
-            failed("Claude returned output that is not valid JSON.")
-        );
-    }
-
-    #[test]
-    fn cli_arguments_allow_only_reading_git() {
-        let args = ClaudeCliReviewer::arguments(&request());
-        assert_eq!(args[0], "-p");
-        assert!(args[1].contains("git diff --merge-base main"));
-        assert!(args.contains(&"--json-schema".to_string()));
-        let at = args.iter().position(|arg| arg == "--allowedTools").unwrap();
-        assert_eq!(
-            args[at + 1..],
-            ["Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)"]
-        );
-    }
-
-    #[test]
-    fn cli_arguments_carry_the_chosen_model_and_effort() {
-        let mut chosen = request();
-        chosen.model = ReviewModel::new(ModelName::Sonnet, Effort::Medium);
-        let args = ClaudeCliReviewer::arguments(&chosen);
-        let after = |flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
-        assert_eq!(after("--model"), "sonnet");
-        assert_eq!(after("--effort"), "medium");
+    fn run(binary: PathBuf, dir: &Path, cancel: &CancelToken) -> Option<ReviewError> {
+        run_process(claude_command(&binary, dir), cancel, |_| true).err()
     }
 
     #[test]
@@ -555,42 +299,10 @@ mod tests {
     }
 
     #[test]
-    fn a_fake_cli_run_returns_the_parsed_review() {
-        let dir = tempfile::tempdir().unwrap();
-        let binary = fake_claude(
-            dir.path(),
-            r#"echo '{"is_error":false,"structured_output":{"summary":"ok","findings":[]}}'"#,
-        );
-        let mut request = request();
-        request.repo = dir.path().to_path_buf();
-        let result = cli(binary).review(&request, &CancelToken::new()).unwrap();
-        assert_eq!(result.summary, "ok");
-    }
-
-    #[test]
-    fn a_failing_cli_reports_stderr_then_the_status() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut request = request();
-        request.repo = dir.path().to_path_buf();
-        let with_message = fake_claude(dir.path(), "echo 'Not logged in' >&2; exit 1");
-        assert_eq!(
-            cli(with_message).review(&request, &CancelToken::new()),
-            Err(ReviewError::Failed("Not logged in".into()))
-        );
-        let silent = fake_claude(dir.path(), "exit 3");
-        assert_eq!(
-            cli(silent).review(&request, &CancelToken::new()),
-            Err(ReviewError::Failed("claude exited with status 3.".into()))
-        );
-    }
-
-    #[test]
     fn cancelling_kills_the_cli_process() {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("pid");
         let binary = fake_claude(dir.path(), &format!("echo $$ > '{}'\nexec sleep 30", marker.display()));
-        let mut request = request();
-        request.repo = dir.path().to_path_buf();
         let cancel = CancelToken::new();
         let trigger = cancel.clone();
         let ready = marker.clone();
@@ -601,9 +313,9 @@ mod tests {
             trigger.cancel();
         });
         let started = Instant::now();
-        let result = cli(binary).review(&request, &cancel);
+        let result = run(binary, dir.path(), &cancel);
         waiter.join().unwrap();
-        assert_eq!(result, Err(ReviewError::Cancelled));
+        assert_eq!(result, Some(ReviewError::Cancelled));
         assert!(started.elapsed() < Duration::from_secs(10));
         let pid = std::fs::read_to_string(&marker).unwrap().trim().to_string();
         std::thread::sleep(Duration::from_millis(200));
@@ -626,8 +338,6 @@ mod tests {
                 marker.display()
             ),
         );
-        let mut request = request();
-        request.repo = dir.path().to_path_buf();
         let cancel = CancelToken::new();
         let trigger = cancel.clone();
         let ready = marker.clone();
@@ -637,7 +347,7 @@ mod tests {
             }
             trigger.cancel();
         });
-        assert_eq!(cli(binary).review(&request, &cancel), Err(ReviewError::Cancelled));
+        assert_eq!(run(binary, dir.path(), &cancel), Some(ReviewError::Cancelled));
         waiter.join().unwrap();
         let pid = std::fs::read_to_string(&marker).unwrap().trim().to_string();
         std::thread::sleep(Duration::from_millis(200));
@@ -663,8 +373,6 @@ mod tests {
                 marker.display()
             ),
         );
-        let mut request = request();
-        request.repo = dir.path().to_path_buf();
         let cancel = CancelToken::new();
         let trigger = cancel.clone();
         let ready = marker.clone();
@@ -675,7 +383,7 @@ mod tests {
             trigger.cancel();
         });
         let started = Instant::now();
-        assert_eq!(cli(binary).review(&request, &cancel), Err(ReviewError::Cancelled));
+        assert_eq!(run(binary, dir.path(), &cancel), Some(ReviewError::Cancelled));
         waiter.join().unwrap();
         assert!(started.elapsed() < Duration::from_secs(10));
         let pid = std::fs::read_to_string(&marker).unwrap().trim().to_string();
@@ -692,66 +400,13 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_binary_is_not_found_or_a_spawn_failure() {
-        let reviewer = cli(PathBuf::from("/nonexistent/claude"));
-        assert!(matches!(
-            reviewer.review(&request(), &CancelToken::new()),
-            Err(ReviewError::Failed(_))
-        ));
-    }
-
-    #[test]
-    fn the_scripted_reviewer_returns_its_result_or_its_failure() {
-        let quick = ScriptedReviewer {
-            delay: Duration::ZERO,
-            ..ScriptedReviewer::default()
-        };
-        assert_eq!(quick.review(&request(), &CancelToken::new()).unwrap().findings.len(), 4);
-        let failing = ScriptedReviewer {
-            delay: Duration::ZERO,
-            failure: Some("No network".into()),
-            ..ScriptedReviewer::default()
-        };
-        assert_eq!(
-            failing.review(&request(), &CancelToken::new()),
-            Err(ReviewError::Failed("No network".into()))
+    fn a_missing_binary_is_a_spawn_failure() {
+        let missing = run(
+            PathBuf::from("/nonexistent/claude"),
+            Path::new("/"),
+            &CancelToken::new(),
         );
-    }
-
-    #[test]
-    fn cancelling_stops_the_scripted_reviewer_and_drops_its_result() {
-        let slow = ScriptedReviewer {
-            delay: Duration::from_secs(30),
-            ..ScriptedReviewer::default()
-        };
-        let cancel = CancelToken::new();
-        let trigger = cancel.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(50));
-            trigger.cancel();
-        });
-        let started = Instant::now();
-        assert_eq!(slow.review(&request(), &cancel), Err(ReviewError::Cancelled));
-        assert!(started.elapsed() < Duration::from_secs(5));
-    }
-
-    #[test]
-    fn the_review_delay_comes_from_the_environment_value() {
-        assert_eq!(scripted_delay(Some("0.25")), Duration::from_millis(250));
-        assert_eq!(scripted_delay(Some("0")), Duration::ZERO);
-        assert_eq!(scripted_delay(Some("soon")), DEFAULT_REVIEW_DELAY);
-        assert_eq!(scripted_delay(Some("-1")), DEFAULT_REVIEW_DELAY);
-        assert_eq!(scripted_delay(None), DEFAULT_REVIEW_DELAY);
-    }
-
-    #[test]
-    fn the_scripted_reviewer_is_picked_only_when_asked_for() {
-        let scripted = reviewer_from(Some("scripted"), Some("0"));
-        assert!(scripted.review(&request(), &CancelToken::new()).is_ok());
-        let cli = reviewer_from(None, None);
-        let cancelled = CancelToken::new();
-        cancelled.cancel();
-        assert_eq!(cli.review(&request(), &cancelled), Err(ReviewError::Cancelled));
+        assert!(matches!(missing, Some(ReviewError::Failed(_))));
     }
 
     fn thread() -> ReviewThread {
