@@ -458,3 +458,33 @@ fn the_reading_stays_until_the_new_one_lands_and_a_stale_result_is_dropped(app: 
     cx.run_until_parked();
     assert_eq!(chapters(cx), 2, "only the last diff counts");
 }
+
+#[gpui::test]
+fn the_banner_keeps_the_commit_count_while_the_diff_keeps_changing(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let behind = diffpilot_core::git::run(world.repo.path(), &["rev-parse", "HEAD~1"])
+        .unwrap()
+        .trim()
+        .to_string();
+    store_guide_with(&world, cx, |guide| guide.head = Some(behind));
+    show_guide(&world, cx);
+    let guide = world.view.read_with(cx, |view, _| view.guide());
+    let text = |cx: &mut VisualTestContext| guide.read_with(cx, |guide, _| guide.out_of_date_text());
+    let pane = world.view.read_with(cx, |view, _| view.pane());
+    let edit = |cx: &mut VisualTestContext, suffix: &str| {
+        let mut files = diff_files(&world, cx);
+        let changed = files.iter_mut().find(|file| file.path == "base.txt").unwrap();
+        changed.hunks[0].lines[0].text.push_str(suffix);
+        pane.update(cx, |pane, cx| pane.set_files(files, cx));
+    };
+
+    edit(cx, " one");
+    cx.run_until_parked();
+    assert!(guide.read_with(cx, |guide, _| guide.out_of_date()));
+    assert_eq!(text(cx), "The branch moved 1 commit after Claude wrote this guide.");
+
+    edit(cx, " two");
+    assert_eq!(text(cx), "The branch moved 1 commit after Claude wrote this guide.");
+    cx.run_until_parked();
+    assert_eq!(text(cx), "The branch moved 1 commit after Claude wrote this guide.");
+}
