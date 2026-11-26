@@ -522,6 +522,7 @@ impl RepoView {
                     DiffPaneEvent::FirstPaint => Bench::mark_now(cx, Mark::FirstDiffPaint),
                     DiffPaneEvent::ShownMode(_) => cx.notify(),
                     DiffPaneEvent::OpenRef(code) => this.open_ref(code, window, cx),
+                    DiffPaneEvent::RevealInFinder(path) => cx.reveal_path(&this.repo.join(path)),
                 },
             ),
         ];

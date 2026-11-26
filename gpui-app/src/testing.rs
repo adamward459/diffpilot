@@ -286,6 +286,10 @@ pub fn type_text(cx: &mut VisualTestContext, text: &str) {
     draw(cx);
 }
 
+pub fn clipboard(cx: &mut VisualTestContext) -> Option<String> {
+    cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()))
+}
+
 pub fn wait_until_shows(cx: &mut VisualTestContext, selector: &str) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     while !shows(cx, selector) {

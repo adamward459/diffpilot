@@ -16,7 +16,7 @@ use diffpilot_core::diff::{DiffMode, FileDiff, LineKind};
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use diffpilot_ui_kit::Glyph;
-use diffpilot_ui_kit::components::menu::{MenuAt, MenuItem, MenuSection, menu_at};
+use diffpilot_ui_kit::components::menu::{MenuAt, MenuItem, MenuSection, menu_at, menu_button};
 use diffpilot_ui_kit::components::{
     BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, label_segment, status_badge, tag, viewed_toggle,
 };
@@ -46,6 +46,7 @@ pub enum DiffPaneEvent {
     /// The mode the rows are drawn in changed. A split pane that is too narrow draws unified rows.
     ShownMode(DiffMode),
     OpenRef(CodeRef),
+    RevealInFinder(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -848,7 +849,6 @@ impl DiffPane {
             .cursor_pointer()
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle_collapsed(&collapse_path, cx)))
             .child(painted::chevron(!collapsed, 12.0, theme.diff.muted));
-        let nothing = |_: &ClickEvent, _: &mut Window, _: &mut gpui::App| {};
         let id = if pinned { "pinned-header" } else { "file-header" };
         let left = div()
             .flex()
@@ -919,15 +919,7 @@ impl DiffPane {
                 ),
                 || format!("pane:open-in-editor:{}", diff.path),
             ))
-            .child(bar_button(
-                theme,
-                "file-more",
-                Glyph::Ellipsis,
-                "More",
-                false,
-                false,
-                nothing,
-            ))
+            .child(self.more_menu(file, pinned, cx))
             .child(div().w(px(8.0)))
             .child(
                 viewed_toggle(
@@ -947,20 +939,70 @@ impl DiffPane {
         }
     }
 
+    fn more_menu(&self, file: usize, pinned: bool, cx: &mut Context<Self>) -> impl IntoElement {
+        let diff = self.state.files[file].clone();
+        let collapsed = self.state.collapsed.contains(&diff.path);
+        let viewed = self.state.viewed.contains(&diff.path);
+        let pane = cx.entity();
+        let id = format!("{}:{}", if pinned { "pinned-more" } else { "file-more" }, diff.path);
+        let trigger = tag(
+            bar_button(
+                &self.theme,
+                "file-more",
+                Glyph::Ellipsis,
+                "More",
+                true,
+                false,
+                |_, _, _| {},
+            ),
+            || format!("pane:{id}"),
+        );
+        menu_button(id, trigger, move |_, _| {
+            let emit = |event: DiffPaneEvent| {
+                let pane = pane.clone();
+                move |_: &mut Window, cx: &mut App| pane.update(cx, |_, cx| cx.emit(event.clone()))
+            };
+            let path = diff.path.clone();
+            let copy_path = MenuItem::new("Copy Path", move |_, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(path.clone()))
+            })
+            .icon(Glyph::Copy, None);
+            let patch = file_patch(&diff);
+            let copy_diff = MenuItem::new("Copy Diff", move |_, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(patch.clone()))
+            });
+            let mut files = vec![copy_path.into(), copy_diff.into()];
+            if diff.status != FileStatus::Deleted {
+                files.push(
+                    MenuItem::new(
+                        "Reveal in Finder",
+                        emit(DiffPaneEvent::RevealInFinder(diff.path.clone())),
+                    )
+                    .into(),
+                );
+            }
+            let toggle_path = diff.path.clone();
+            let toggle_pane = pane.clone();
+            let collapse = MenuItem::new(if collapsed { "Expand File" } else { "Collapse File" }, move |_, cx| {
+                toggle_pane.update(cx, |pane, cx| pane.toggle_collapsed(&toggle_path, cx))
+            });
+            let mark = MenuItem::new(
+                if viewed { "Mark as Not Viewed" } else { "Mark as Viewed" },
+                emit(DiffPaneEvent::ToggleViewed(diff.path.clone())),
+            );
+            vec![
+                MenuSection::new(files),
+                MenuSection::new(vec![collapse.into(), mark.into()]),
+            ]
+        })
+        .anchor(gpui::Corner::TopRight)
+    }
+
     fn hunk_bar(&self, file: usize, hunk: usize, glass: Option<Hsla>, cx: &mut Context<Self>) -> Div {
         let theme = &self.theme;
         let source = &self.state.files[file].hunks[hunk];
         let header = source.header.clone();
-        let mut patch = header.clone();
-        for line in &source.lines {
-            patch.push('\n');
-            patch.push(match line.kind {
-                LineKind::Added => '+',
-                LineKind::Deleted => '-',
-                LineKind::Context => ' ',
-            });
-            patch.push_str(&line.text);
-        }
+        let patch = hunk_patch(source);
         let copy = Button::new(("hunk-copy", file * 4096 + hunk))
             .label("Copy")
             .look(Look::Plain)
@@ -1262,4 +1304,35 @@ impl Render for DiffPane {
         }
         root
     }
+}
+
+fn hunk_patch(hunk: &diffpilot_core::diff::Hunk) -> String {
+    let mut patch = hunk.header.clone();
+    for line in &hunk.lines {
+        patch.push('\n');
+        patch.push(match line.kind {
+            LineKind::Added => '+',
+            LineKind::Deleted => '-',
+            LineKind::Context => ' ',
+        });
+        patch.push_str(&line.text);
+    }
+    patch
+}
+
+fn file_patch(diff: &FileDiff) -> String {
+    let old = match diff.status {
+        FileStatus::Added => "/dev/null".to_string(),
+        _ => format!("a/{}", diff.old_path.as_deref().unwrap_or(&diff.path)),
+    };
+    let new = match diff.status {
+        FileStatus::Deleted => "/dev/null".to_string(),
+        _ => format!("b/{}", diff.path),
+    };
+    let mut patch = format!("--- {old}\n+++ {new}");
+    for hunk in &diff.hunks {
+        patch.push('\n');
+        patch.push_str(&hunk_patch(hunk));
+    }
+    patch
 }
