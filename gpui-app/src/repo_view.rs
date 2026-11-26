@@ -2,6 +2,8 @@ use crate::bench::{Bench, Mark};
 use crate::comparison_control::{Select, comparison_control};
 use crate::pane::{DiffPane, DiffPaneEvent};
 use crate::sidebar::{LoadedChanges, Sidebar, SidebarEvent};
+use diffpilot::diff_pane::layout::SPLIT_MIN_WIDTH;
+use diffpilot::review::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
 use diffpilot_core::changes;
 use diffpilot_core::claude::{
     ClaudeCliReplier, ClaudeCliReviewer, Replier, Reviewer, ScriptedReplier, reviewer_from_env,
@@ -16,8 +18,6 @@ use diffpilot_core::sync::{self, BranchStatus};
 use diffpilot_core::tree;
 use diffpilot_core::viewed::{ViewedFiles, ViewedKey, ViewedStore};
 use diffpilot_core::watcher::{self, WatchGuard};
-use diffpilot_diff_pane::layout::SPLIT_MIN_WIDTH;
-use diffpilot_review_ui::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
 use diffpilot_ui_kit::components::{
     BAR_HEIGHT, Button, Crumb, IconSegment, Look, OnSelect, SwitchItem, activity_capsule, bar_button, capsule, crumbs,
     glyph_icon, icon_switch, jump_bar, status_bar, switch_bar,
@@ -389,7 +389,7 @@ impl RepoView {
         self.compact_toolbar = false;
         let subscriptions = vec![
             cx.subscribe_in(&review, window, |this, review, event: &ReviewEvent, _, cx| {
-                if matches!(event, ReviewEvent::ThreadsChanged(change) if !matches!(change, diffpilot_review_ui::ThreadChange::Updated(_))) {
+                if matches!(event, ReviewEvent::ThreadsChanged(change) if !matches!(change, diffpilot::review::ThreadChange::Updated(_))) {
                     this.show_comment_counts(review, cx);
                 }
             }),
@@ -1550,7 +1550,7 @@ mod tests {
         cx.run_until_parked();
         assert!(compact(cx), "the result shows for a few seconds");
         cx.executor()
-            .advance_clock(Duration::from_secs(diffpilot_review_ui::pill::RESULT_SECONDS + 1));
+            .advance_clock(Duration::from_secs(diffpilot::review::pill::RESULT_SECONDS + 1));
         cx.run_until_parked();
         assert!(!compact(cx), "the result is gone");
     }

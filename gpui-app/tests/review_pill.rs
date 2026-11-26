@@ -1,11 +1,11 @@
 mod common;
 
 use common::*;
+use diffpilot::review::pill::RESULT_SECONDS;
+use diffpilot::review::{PillEvent, ReviewPill, StopReview};
 use diffpilot_core::claude::ReviewError;
 use diffpilot_core::review::ReviewRun;
 use diffpilot_core::threads::ThreadAnchor;
-use diffpilot_review_ui::pill::RESULT_SECONDS;
-use diffpilot_review_ui::{PillEvent, ReviewPill, StopReview};
 use gpui::{Entity, TestAppContext, VisualTestContext};
 use std::cell::RefCell;
 use std::rc::Rc;

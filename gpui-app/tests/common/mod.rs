@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use diffpilot::review::{ReviewEvent, ReviewHost, ReviewSession};
 use diffpilot_core::cancel::CancelToken;
 use diffpilot_core::changes::FileStatus;
 use diffpilot_core::claude::{Replier, ReviewError, Reviewer};
@@ -8,7 +9,6 @@ use diffpilot_core::diff::{DiffLine, FileDiff, Hunk, LineKind};
 use diffpilot_core::review::{Finding, ReviewRequest, ReviewResult, ReviewRun, Severity};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::threads::{ReviewThread, Side, ThreadAnchor, ThreadId};
-use diffpilot_review_ui::{ReviewEvent, ReviewHost, ReviewSession};
 use gpui::{AppContext, Context, Entity, Render, TestAppContext, VisualTestContext, Window};
 use gpui_component::Root;
 use std::cell::RefCell;
@@ -196,7 +196,7 @@ pub fn root_window<V: Render + 'static>(
 ) -> (Entity<V>, &mut VisualTestContext) {
     cx.update(|cx| {
         diffpilot_ui_kit::init(cx);
-        diffpilot_review_ui::init(cx);
+        diffpilot::review::init(cx);
     });
     let mut view = None;
     let handle = cx.add_window(|window, cx| {

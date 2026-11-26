@@ -1,5 +1,5 @@
-use crate::popover::{PopoverEvent, ReviewPopover};
-use crate::session::{ReviewEvent, ReviewSession};
+use crate::review::popover::{PopoverEvent, ReviewPopover};
+use crate::review::session::{ReviewEvent, ReviewSession};
 use diffpilot_core::review::{ReviewRun, Severity};
 use diffpilot_core::threads::ThreadId;
 use diffpilot_ui_kit::components::{Button, Look, filled_check, severity_badge};

@@ -1,1 +1,1 @@
-pub use diffpilot_diff_pane::{DiffPane, DiffPaneEvent};
+pub use diffpilot::diff_pane::{DiffPane, DiffPaneEvent};

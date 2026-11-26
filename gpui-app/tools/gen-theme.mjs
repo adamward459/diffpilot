@@ -1,5 +1,5 @@
-// Regenerates src/highlight/theme_data.rs from the shiki themes the web page used.
-// Run from the repo root after `npm ci` in web/: node diff-pane/tools/gen-theme.mjs
+// Regenerates src/diff_pane/highlight/theme_data.rs from the shiki themes the web page used.
+// Run from the repo root after `npm ci` in web/: node gpui-app/tools/gen-theme.mjs
 import { writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
@@ -32,4 +32,4 @@ const out = [
   await table('dark-plus', 'DARK_PLUS'),
   await table('light-plus', 'LIGHT_PLUS'),
 ].join('\n');
-writeFileSync(new URL('../src/highlight/theme_data.rs', import.meta.url), out);
+writeFileSync(new URL('../src/diff_pane/highlight/theme_data.rs', import.meta.url), out);

@@ -1,5 +1,5 @@
-use crate::markup::{Markup, SpanKind, pending_mention};
-use crate::session::{ReviewEvent, ReviewSession, ThreadChange};
+use crate::review::markup::{Markup, SpanKind, pending_mention};
+use crate::review::session::{ReviewEvent, ReviewSession, ThreadChange};
 use diffpilot_core::threads::{CLAUDE_NAME, ReviewThread, ThreadAnchor, ThreadComment, ThreadId, mentions_claude};
 use diffpilot_ui_kit::components::{Button, Look, avatar, card_shell, icon_button, severity_badge};
 use diffpilot_ui_kit::{Glyph, Theme};

@@ -1,4 +1,4 @@
-use crate::rows::{Row, RowKind, Rows};
+use crate::diff_pane::rows::{Row, RowKind, Rows};
 use diffpilot_core::diff::{DiffMode, FileDiff};
 use diffpilot_core::threads::{Side, ThreadAnchor};
 use std::ops::Range;
@@ -291,8 +291,8 @@ pub fn position(rows: &Rows, tops: &Tops, scroll: f32) -> Option<Position> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rows::{ThreadSlot, Visibility, build};
-    use crate::testing::{added, diff, line, lines_with};
+    use crate::diff_pane::rows::{ThreadSlot, Visibility, build};
+    use crate::diff_pane::testing::{added, diff, line, lines_with};
     use diffpilot_core::diff::{DiffLine, DiffMode, LineKind};
     use diffpilot_core::threads::{Side, ThreadId};
     use std::collections::HashSet;

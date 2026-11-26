@@ -1,6 +1,6 @@
 # diffpilot
 
-Rust app built with GPUI. The Cargo workspace has five crates: `core` (logic), `ui-kit` (theme, icons, shared components), `diff-pane`, `review-ui`, and `gpui-app` (app shell, sidebar, comparison).
+Rust app built with GPUI. The Cargo workspace has three crates: `core` (logic), `ui-kit` (theme, icons, shared components), and `gpui-app` (the app: shell, sidebar, comparison, the diff pane in `src/diff_pane/`, and the review UI in `src/review/`).
 
 - Run `git config core.hooksPath .githooks` once per clone. The pre-commit hook formats all Rust (`cargo fmt`) and Python (ruff) code with `scripts/format.py`.
 - All worktrees share one Cargo build dir, `~/.cargo/build/diffpilot` (set in `.cargo/config.toml`). Dependencies build once for every worktree, so you do not need your own `CARGO_TARGET_DIR`.

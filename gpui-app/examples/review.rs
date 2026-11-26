@@ -5,13 +5,13 @@
 //! `DIFFPILOT_DEMO_START=1` starts a review at launch. `DIFFPILOT_DEMO_POPOVER=1` opens the popover.
 //! `DIFFPILOT_BENCH=1` runs a hidden window and prints frame times as JSON on stdout.
 
+use diffpilot::review::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession, ThreadCard, ThreadChange};
 use diffpilot_core::changes::FileStatus;
 use diffpilot_core::claude::{Replier, Reviewer, ScriptedReplier, ScriptedReviewer, reviewer_from_env};
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{DiffLine, FileDiff, Hunk, LineKind};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
-use diffpilot_review_ui::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession, ThreadCard, ThreadChange};
 use gpui::{
     App, AppContext, Application, AsyncApp, Bounds, Context, Entity, InteractiveElement, IntoElement, ParentElement,
     Pixels, Render, StatefulInteractiveElement, Styled, Subscription, Window, WindowBounds, WindowOptions, canvas, div,
@@ -365,7 +365,7 @@ fn main() {
         .with_assets(diffpilot_ui_kit::Assets)
         .run(move |cx: &mut App| {
             diffpilot_ui_kit::init(cx);
-            diffpilot_review_ui::init(cx);
+            diffpilot::review::init(cx);
             if benching {
                 cx.spawn(async move |cx| bench(cx).await).detach();
             } else {

@@ -1,13 +1,13 @@
+use diffpilot::diff_pane::highlight;
+use diffpilot::diff_pane::state::{Geometry, PaneState};
+use diffpilot::diff_pane::{DiffPane, DiffPaneEvent};
+use diffpilot::review::{ReviewHost, ReviewSession};
 use diffpilot_core::claude::{ScriptedReplier, reviewer_from_env};
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{self, DiffMode, FileDiff, LineKind};
 use diffpilot_core::git;
 use diffpilot_core::settings::{self, Settings};
 use diffpilot_core::threads::{Side, ThreadAnchor};
-use diffpilot_diff_pane::highlight;
-use diffpilot_diff_pane::state::{Geometry, PaneState};
-use diffpilot_diff_pane::{DiffPane, DiffPaneEvent};
-use diffpilot_review_ui::{ReviewHost, ReviewSession};
 use diffpilot_ui_kit::Assets;
 use gpui::{
     AnyWindowHandle, App, AppContext as _, Application, Bounds, Entity, Window, WindowBounds, WindowOptions, px, size,
@@ -397,7 +397,7 @@ fn run_window(repo: PathBuf, launch: Instant, bench: Option<Drive>) {
     Application::new().with_assets(Assets).run(move |cx: &mut App| {
         diffpilot_ui_kit::init(cx);
         if demo {
-            diffpilot_review_ui::init(cx);
+            diffpilot::review::init(cx);
         }
         let slot: Rc<RefCell<Option<Entity<DiffPane>>>> = Rc::default();
         let review: Rc<RefCell<Option<Entity<ReviewSession>>>> = Rc::default();

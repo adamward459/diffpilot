@@ -1,9 +1,9 @@
 mod common;
 
 use common::*;
+use diffpilot::review::{ReviewSession, ThreadCard, metrics};
 use diffpilot_core::review::Severity;
 use diffpilot_core::threads::{CLAUDE_NAME, ThreadAnchor, ThreadId};
-use diffpilot_review_ui::{ReviewSession, ThreadCard, metrics};
 use gpui::{Entity, TestAppContext, VisualTestContext, px};
 
 fn card(

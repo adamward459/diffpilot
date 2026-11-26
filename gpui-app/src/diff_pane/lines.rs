@@ -1,6 +1,6 @@
-use crate::highlight::{Piece, Span, chunk_pieces, pieces};
-use crate::layout::{CODE_PADDING, LINE, NUMBER_COLUMN, RIBBON, SPLIT_DIVIDER, wrap_ranges};
-use crate::word::{pair_lines, word_ranges};
+use crate::diff_pane::highlight::{Piece, Span, chunk_pieces, pieces};
+use crate::diff_pane::layout::{CODE_PADDING, LINE, NUMBER_COLUMN, RIBBON, SPLIT_DIVIDER, wrap_ranges};
+use crate::diff_pane::word::{pair_lines, word_ranges};
 use diffpilot_core::diff::{DiffLine, Hunk, LineKind};
 use diffpilot_core::threads::Side;
 use diffpilot_ui_kit::Theme;

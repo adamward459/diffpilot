@@ -11,9 +11,7 @@ The Cargo workspace is split by crate:
 | --- | --- |
 | `core` (`diffpilot-core`) | logic: git, diff, review, viewed store, settings |
 | `ui-kit` (`diffpilot-ui-kit`) | theme, icons, and shared components; has a `gallery` example |
-| `diff-pane` (`diffpilot-diff-pane`) | the diff view; has a bench example |
-| `review-ui` (`diffpilot-review-ui`) | review UI components |
-| `gpui-app` (`diffpilot`) | app shell, sidebar, comparison; the binary |
+| `gpui-app` (`diffpilot`) | the binary: app shell, sidebar, comparison. Its library holds the diff view (`src/diff_pane/`) and the review UI (`src/review/`); the `diff_pane` and `review` examples are benches |
 
 Unit tests sit next to the code (`#[cfg(test)]`) or in a crate's `tests/` folder. A change to a crate's `src/`, `assets/`, `Cargo.toml`, or `build.rs` also touches the crates that depend on it. A change to its `tests/`, `examples/`, or `benches/` touches only that crate. A change to `tests/` alone runs no hot path checks or screenshots. A change to the root `Cargo.toml`, `Cargo.lock`, or `rustfmt.toml` touches all of them.
 
@@ -40,13 +38,13 @@ The merged PR leaves `baselines/` and `screenshots/` on the base branch, so they
 
 ## Screenshots
 
-- The app reads these variables: `DIFFPILOT_REPO` (the fixture repo in `.fixtures/large`, built by `scripts/fixture_repo.py`), `DIFFPILOT_VIEWED_SEED`, `DIFFPILOT_APPEARANCE` (`light` or `dark`), `DIFFPILOT_DIFF_MODE` (`unified` or `split`), and `DIFFPILOT_REVIEWER=scripted`. The diff-pane example also takes `DIFFPILOT_WRAP=0`, `DIFFPILOT_REVEAL=<path>` (scroll to that file), and `DIFFPILOT_DEMO_THREADS=1` (a comment on each side of the first changed line pair, in the revealed file when one is set).
+- The app reads these variables: `DIFFPILOT_REPO` (the fixture repo in `.fixtures/large`, built by `scripts/fixture_repo.py`), `DIFFPILOT_VIEWED_SEED`, `DIFFPILOT_APPEARANCE` (`light` or `dark`), `DIFFPILOT_DIFF_MODE` (`unified` or `split`), and `DIFFPILOT_REVIEWER=scripted`. The `diff_pane` example also takes `DIFFPILOT_WRAP=0`, `DIFFPILOT_REVEAL=<path>` (scroll to that file), and `DIFFPILOT_DEMO_THREADS=1` (a comment on each side of the first changed line pair, in the revealed file when one is set).
 - Use deterministic data, so screenshots only change when the UI changes.
 
 ## Hot path checks
 
 - The target is 120 FPS, so one frame has a budget of 8.33 ms. Code that runs on every frame must fit in that budget with room to spare.
-- A crate with a bench mode prints one JSON object of numeric metrics on stdout when `DIFFPILOT_BENCH=1`. Nested objects become dotted names. Every metric is smaller-is-better. Benches: `cargo run --release -p diffpilot-diff-pane --example diff_pane`, `cargo run --release -p diffpilot-review-ui --example review`, and `cargo run --release -p diffpilot`.
+- A crate with a bench mode prints one JSON object of numeric metrics on stdout when `DIFFPILOT_BENCH=1`. Nested objects become dotted names. Every metric is smaller-is-better. Benches: `cargo run --release -p diffpilot --example diff_pane`, `cargo run --release -p diffpilot --example review`, and `cargo run --release -p diffpilot`. `baselines/bench.json` keys them as `diff-pane`, `review-ui`, and `gpui-app`.
 - `scripts/test.py baseline` runs every bench 5 times (`--rounds N`) and writes `baselines/bench.json`: the median, p95, and run count of each metric, and the host (CPU, macOS, display refresh rate, rustc, profile). `baseline <crate>` updates only that crate's part when the host is the same.
 - `scripts/test.py hotpath` runs each bench 3 times on your branch and compares the medians with `baselines/bench.json` on the PR's base ref (`--base REF` to override). It fails when a metric is more than 5% worse. A metric the baseline does not have counts as new.
 - The benches draw on frame callbacks, and a window gets none while another window covers it. A bench run that takes more than 180 s fails with a message. Keep the bench window visible, and run benches on a quiet machine: `baseline` and `hotpath` warn when the load average is above half the cores.

@@ -78,7 +78,7 @@ pub fn word_ranges(deleted: &str, added: &str) -> Option<WordMarks> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::line;
+    use crate::diff_pane::testing::line;
 
     fn kinds(text: &str) -> Vec<DiffLine> {
         text.chars()

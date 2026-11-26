@@ -1,13 +1,17 @@
-use crate::chrome;
-use crate::highlight::{self, FileTokens};
-use crate::layout::{FILE_HEADER, HUNK, LINE, NOTICE, NUMBER_COLUMN, SPLIT_DIVIDER, Sticky, ThreadFrame, column_width};
-use crate::lines::{self, CODE_SIZE, Column, Fonts, Frame, LineCache, LineKey, LineRequest, PaintFiller, Style, Thumb};
-use crate::rows::{Notice, RowKind, ThreadSlot};
-use crate::state::{Geometry, PaneState};
+use crate::diff_pane::chrome;
+use crate::diff_pane::highlight::{self, FileTokens};
+use crate::diff_pane::layout::{
+    FILE_HEADER, HUNK, LINE, NOTICE, NUMBER_COLUMN, SPLIT_DIVIDER, Sticky, ThreadFrame, column_width,
+};
+use crate::diff_pane::lines::{
+    self, CODE_SIZE, Column, Fonts, Frame, LineCache, LineKey, LineRequest, PaintFiller, Style, Thumb,
+};
+use crate::diff_pane::rows::{Notice, RowKind, ThreadSlot};
+use crate::diff_pane::state::{Geometry, PaneState};
+use crate::review::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange};
 use diffpilot_core::diff::{DiffMode, FileDiff, LineKind};
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
-use diffpilot_review_ui::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange};
 use diffpilot_ui_kit::Glyph;
 use diffpilot_ui_kit::components::{
     BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, label_segment, status_badge, viewed_toggle,

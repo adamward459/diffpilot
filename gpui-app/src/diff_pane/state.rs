@@ -1,8 +1,8 @@
-use crate::layout::{
+use crate::diff_pane::layout::{
     CODE_PADDING, GUTTER, Position, SPLIT_GUTTER, THREAD, Tops, cells, column_width, columns_for, position, shown_mode,
     split_columns_for,
 };
-use crate::rows::{RowRef, Rows, ThreadSlot, Visibility, body_notice, build};
+use crate::diff_pane::rows::{RowRef, Rows, ThreadSlot, Visibility, body_notice, build};
 use diffpilot_core::diff::{DiffMode, FileDiff};
 use diffpilot_core::threads::ThreadId;
 use std::collections::{HashMap, HashSet};
@@ -426,8 +426,8 @@ impl PaneState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::{FILE_HEADER, GAP, HUNK, LINE, NOTICE, SPLIT_MIN_WIDTH};
-    use crate::testing::{added, diff, lines_with};
+    use crate::diff_pane::layout::{FILE_HEADER, GAP, HUNK, LINE, NOTICE, SPLIT_MIN_WIDTH};
+    use crate::diff_pane::testing::{added, diff, lines_with};
     use diffpilot_core::threads::{Side, ThreadAnchor};
 
     const GEOMETRY: Geometry = Geometry {
@@ -976,7 +976,7 @@ mod tests {
         let unified = state.max_scroll_x();
         assert_eq!(unified, 200.0 * 7.0 + CODE_PADDING - (1000.0 - GUTTER + CODE_PADDING));
         state.set_mode(DiffMode::Split);
-        let column = crate::layout::column_width(1000.0);
+        let column = crate::diff_pane::layout::column_width(1000.0);
         let split = 200.0 * 7.0 + CODE_PADDING - (column - SPLIT_GUTTER + CODE_PADDING);
         assert_eq!(state.max_scroll_x(), split);
         state.scroll_x_by(1e9);
@@ -1017,7 +1017,7 @@ mod tests {
         let binary_rows = state.rows.file_range(2).unwrap();
         assert!(matches!(
             state.rows.rows[binary_rows.start + 1].kind,
-            crate::rows::RowKind::Notice(_)
+            crate::diff_pane::rows::RowKind::Notice(_)
         ));
     }
 }

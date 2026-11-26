@@ -23,7 +23,7 @@ pub fn init(cx: &mut App) {
         gpui::KeyBinding::new("ctrl-cmd-s", ToggleSidebar, None),
     ]);
     crate::sidebar::bind_keys(cx);
-    diffpilot_review_ui::init(cx);
+    diffpilot::review::init(cx);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.set_menus(vec![
         Menu {

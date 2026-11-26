@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run diffpilot checks per Cargo crate.
 
-A crate is a workspace member: core (logic), ui-kit (theme, icons, shared components), diff-pane,
-review-ui, gpui-app (app shell, sidebar, comparison). Crates are named by package (diffpilot-core) or folder (core). A change in a crate's
+A crate is a workspace member: core (logic), ui-kit (theme, icons, shared components), gpui-app (the
+app: shell, sidebar, comparison, the diff pane, and the review UI). Crates are named by package (diffpilot-core) or folder (core). A change in a crate's
 src/, assets/, Cargo.toml or build.rs also touches the crates that depend on it; a change to its tests/, examples/ or benches/ touches
 only that crate. A change to the root Cargo files touches all crates.
 
@@ -63,13 +63,7 @@ BASELINE_ROUNDS = 5
 BENCH_TIMEOUT_S = 180
 # Medians and 95th percentiles settle between runs. Maxima, over-budget counts and interval counts swing 20-50%.
 STABLE_METRICS = ("median_ms", "p95_ms")
-HEADLESS_FEATURE = "headless-tests"
 APP_PACKAGE = "diffpilot"
-BENCH_ARGS = {
-    "diffpilot-diff-pane": ["-p", "diffpilot-diff-pane", "--example", "diff_pane"],
-    "diffpilot-review-ui": ["-p", "diffpilot-review-ui", "--example", "review"],
-    APP_PACKAGE: ["-p", APP_PACKAGE],
-}
 SCREENSHOT_PACKAGES = (APP_PACKAGE,)
 SCENES = (("light", "light"), ("dark", "dark"))
 COMMANDS = ("unit", "clippy", "hotpath", "baseline", "screenshot", "related", "lint")
@@ -84,10 +78,26 @@ class Crate:
     package: str
     folder: str
     deps: tuple[str, ...]
-    features: tuple[str, ...] = ()
 
-    def feature_flags(self) -> list[str]:
-        return [f"{self.package}/{HEADLESS_FEATURE}"] if HEADLESS_FEATURE in self.features else []
+
+@dataclass(frozen=True)
+class Bench:
+    name: str
+    package: str
+    args: tuple[str, ...]
+
+
+# The names key baselines/bench.json.
+BENCHES = (
+    Bench("diff-pane", APP_PACKAGE, ("-p", APP_PACKAGE, "--example", "diff_pane")),
+    Bench("review-ui", APP_PACKAGE, ("-p", APP_PACKAGE, "--example", "review")),
+    Bench("gpui-app", APP_PACKAGE, ("-p", APP_PACKAGE)),
+)
+
+
+def benches_of(crates: list[Crate]) -> list[Bench]:
+    packages = {c.package for c in crates}
+    return [b for b in BENCHES if b.package in packages]
 
 
 def sh(*cmd: str, cwd: Path = ROOT) -> str:
@@ -111,7 +121,6 @@ def workspace() -> list[Crate]:
                 p["name"],
                 Path(p["manifest_path"]).parent.relative_to(ROOT).as_posix(),
                 tuple(d["name"] for d in p["dependencies"] if d["name"] in members),
-                tuple(p["features"]),
             )
             for p in packages
         ),
@@ -189,9 +198,7 @@ def cargo(*args: str, cwd: Path = ROOT, env: dict | None = None) -> int:
 
 
 def select(crates: list[Crate]) -> list[str]:
-    args = [arg for c in crates for arg in ("-p", c.package)]
-    features = [f for c in crates for f in c.feature_flags()]
-    return args + (["--features", ",".join(features)] if features else [])
+    return [arg for c in crates for arg in ("-p", c.package)]
 
 
 def inputs_hash(crates: list[Crate], crate: Crate, check: str) -> str:
@@ -203,7 +210,7 @@ def inputs_hash(crates: list[Crate], crate: Crate, check: str) -> str:
         if f.startswith(crate.folder + "/") or any(builds_into_dependents(d, f) for d in deps)
     )
     digest = hashlib.sha256()
-    digest.update(f"{check}\0{crate.package}\0{' '.join(crate.feature_flags())}\0".encode())
+    digest.update(f"{check}\0{crate.package}\0".encode())
     digest.update(sh("rustc", "-vV").encode())
     for name in [*ROOT_FILES, *files]:
         path = ROOT / name
@@ -298,10 +305,10 @@ def flatten(value: object, prefix: str = "") -> dict[str, float]:
     return {}
 
 
-def bench_once(crate: Crate, cwd: Path) -> dict[str, float]:
+def bench_once(bench: Bench, cwd: Path) -> dict[str, float]:
     try:
         done = subprocess.run(
-            ["cargo", "run", "--release", "--quiet", *BENCH_ARGS[crate.package]],
+            ["cargo", "run", "--release", "--quiet", *bench.args],
             check=False,
             cwd=cwd,
             env={**os.environ, **bench_env()},
@@ -311,28 +318,28 @@ def bench_once(crate: Crate, cwd: Path) -> dict[str, float]:
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(
-            f"{crate.folder}: the bench stalled for {BENCH_TIMEOUT_S} s. Its window gets no frames while another "
+            f"{bench.name}: the bench stalled for {BENCH_TIMEOUT_S} s. Its window gets no frames while another "
             "window covers it; keep the bench window visible and run again."
         ) from None
     if done.returncode != 0:
         raise RuntimeError(
-            f"{crate.folder}: bench run failed (exit {done.returncode}). Does it support DIFFPILOT_BENCH=1?\n"
+            f"{bench.name}: bench run failed (exit {done.returncode}). Does it support DIFFPILOT_BENCH=1?\n"
             + done.stderr.strip()[-2000:]
         )
     try:
         metrics = flatten(json.loads(done.stdout))
     except json.JSONDecodeError:
-        raise RuntimeError(f"{crate.folder}: DIFFPILOT_BENCH=1 did not print a JSON object on stdout") from None
+        raise RuntimeError(f"{bench.name}: DIFFPILOT_BENCH=1 did not print a JSON object on stdout") from None
     stable = {name: value for name, value in metrics.items() if name.endswith(STABLE_METRICS)}
     if not stable:
         raise RuntimeError(
-            f"{crate.folder}: DIFFPILOT_BENCH=1 printed no median or p95 metrics (names ending {', '.join(STABLE_METRICS)})"
+            f"{bench.name}: DIFFPILOT_BENCH=1 printed no median or p95 metrics (names ending {', '.join(STABLE_METRICS)})"
         )
     return stable
 
 
-def build_benches(benched: list[Crate], cwd: Path) -> int:
-    return next((code for c in benched if (code := cargo("build", "--release", *BENCH_ARGS[c.package], cwd=cwd))), 0)
+def build_benches(benches: list[Bench], cwd: Path) -> int:
+    return next((code for b in benches if (code := cargo("build", "--release", *b.args, cwd=cwd))), 0)
 
 
 def refresh_rate() -> str:
@@ -370,22 +377,22 @@ def p95(values: list[float]) -> float:
 
 
 def baseline(crates: list[Crate], rounds: int) -> int:
-    benched = [c for c in crates if c.package in BENCH_ARGS]
+    benched = benches_of(crates)
     ensure_fixture()
     warn_if_busy("baseline")
     if code := build_benches(benched, ROOT):
         return code
-    samples: dict[str, dict[str, list[float]]] = {c.folder: {} for c in benched}
+    samples: dict[str, dict[str, list[float]]] = {b.name: {} for b in benched}
     for n in range(rounds):
-        for c in benched:
-            print(f"== baseline {c.folder} round {n + 1}/{rounds}", file=sys.stderr)
+        for b in benched:
+            print(f"== baseline {b.name} round {n + 1}/{rounds}", file=sys.stderr)
             try:
-                metrics = bench_once(c, ROOT)
+                metrics = bench_once(b, ROOT)
             except RuntimeError as e:
                 print(f"baseline: {e}", file=sys.stderr)
                 return 1
             for name, value in metrics.items():
-                samples[c.folder].setdefault(name, []).append(value)
+                samples[b.name].setdefault(name, []).append(value)
     now = host()
     old = json.loads(BASELINE.read_text()) if BASELINE.is_file() else {}
     kept = old.get("metrics", {}) if old.get("host") == now else {}
@@ -433,15 +440,15 @@ def compare(folder: str, head: dict[str, list[float]], base: dict[str, float]) -
 
 
 def hotpath(crates: list[Crate], base: str | None) -> int:
-    benched = [c for c in crates if c.package in BENCH_ARGS]
+    benched = benches_of(crates)
     if not benched:
-        print("No selected crate has a bench mode.", file=sys.stderr)
+        print("No selected crate has a bench.", file=sys.stderr)
         return 0
     ensure_fixture()
     warn_if_busy("hotpath")
     ref = resolve_base(base)
     data, why = committed_baseline(ref)
-    missing = [c.folder for c in benched if data is not None and c.folder not in data["metrics"]]
+    missing = [b.name for b in benched if data is not None and b.name not in data["metrics"]]
     if missing:
         data, why = None, f"the baseline on {ref} has no {', '.join(missing)}"
     if data is None:
@@ -451,19 +458,19 @@ def hotpath(crates: list[Crate], base: str | None) -> int:
     if code := build_benches(benched, ROOT):
         return code
     regressions = 0
-    for c in benched:
+    for b in benched:
         samples: dict[str, list[float]] = {}
         for n in range(HOTPATH_ROUNDS):
-            print(f"== hotpath {c.folder} round {n + 1}/{HOTPATH_ROUNDS}", file=sys.stderr)
+            print(f"== hotpath {b.name} round {n + 1}/{HOTPATH_ROUNDS}", file=sys.stderr)
             try:
-                metrics = bench_once(c, ROOT)
+                metrics = bench_once(b, ROOT)
             except RuntimeError as e:
                 print(f"hotpath: {e}", file=sys.stderr)
                 return 1
             for name, value in metrics.items():
                 samples.setdefault(name, []).append(value)
-        base_medians = {name: m["median"] for name, m in data["metrics"].get(c.folder, {}).items()}
-        regressions += compare(c.folder, samples, base_medians)
+        base_medians = {name: m["median"] for name, m in data["metrics"].get(b.name, {}).items()}
+        regressions += compare(b.name, samples, base_medians)
     if regressions:
         print("== hotpath: worse than the baseline; confirming against a build of the base", file=sys.stderr)
         return hotpath_against_build(benched, ref)
@@ -481,33 +488,33 @@ def base_worktree(ref: str) -> Path:
     return path
 
 
-def hotpath_against_build(benched: list[Crate], ref: str) -> int:
+def hotpath_against_build(benched: list[Bench], ref: str) -> int:
     path = base_worktree(ref)
     print(f"== hotpath base build: {ref} at {git('rev-parse', '--short', ref)[0]}", file=sys.stderr)
     sides = (("base", path), ("head", ROOT))
     for side, cwd in sides:
-        for c in benched:
-            code = cargo("build", "--release", *BENCH_ARGS[c.package], cwd=cwd)
+        for b in benched:
+            code = cargo("build", "--release", *b.args, cwd=cwd)
             if code != 0:
                 if side == "base":
-                    print(f"base cannot build {c.folder}; no baseline for it", file=sys.stderr)
+                    print(f"base cannot build {b.name}; no baseline for it", file=sys.stderr)
                     continue
                 return code
 
     regressions = 0
-    for c in benched:
+    for b in benched:
         samples: dict[str, dict[str, list[float]]] = {"base": {}, "head": {}}
         # Alternate base and head so slow drift on the machine hits both sides equally.
         try:
             for n in range(HOTPATH_ROUNDS):
                 for side, cwd in sides:
-                    print(f"== hotpath {c.folder} round {n + 1}/{HOTPATH_ROUNDS}: {side}", file=sys.stderr)
+                    print(f"== hotpath {b.name} round {n + 1}/{HOTPATH_ROUNDS}: {side}", file=sys.stderr)
                     try:
-                        metrics = bench_once(c, cwd)
+                        metrics = bench_once(b, cwd)
                     except RuntimeError as e:
                         if side == "head":
                             raise
-                        print(f"base has no usable bench for {c.folder}: {e}", file=sys.stderr)
+                        print(f"base has no usable bench for {b.name}: {e}", file=sys.stderr)
                         break
                     for name, value in metrics.items():
                         samples[side].setdefault(name, []).append(value)
@@ -515,7 +522,7 @@ def hotpath_against_build(benched: list[Crate], ref: str) -> int:
             print(f"hotpath: {e}", file=sys.stderr)
             return 1
         base_medians = {name: statistics.median(v) for name, v in samples["base"].items()}
-        regressions += compare(c.folder, samples["head"], base_medians)
+        regressions += compare(b.name, samples["head"], base_medians)
     return 1 if regressions else 0
 
 
@@ -702,11 +709,11 @@ def related() -> None:
         if todo:
             print(f"  scripts/test.py {check} {' '.join(c.folder for c in touched if c.package in todo)}")
     for c in built:
-        if c.package in BENCH_ARGS:
+        if benches_of([c]):
             print(f"  scripts/test.py hotpath {c.folder}")
     if py:
         print("  scripts/test.py lint")
-    if any(c.package in BENCH_ARGS for c in built):
+    if benches_of(built):
         print("Before you open or update the PR (then commit baselines/bench.json):")
         print("  scripts/test.py baseline")
     if screenshot_crates(built):
@@ -717,13 +724,17 @@ def related() -> None:
 def lint() -> None:
     crates = workspace()
     packages = {c.package for c in crates}
-    for table, name in ((BENCH_ARGS, "BENCH_ARGS"), ({p: 1 for p in SCREENSHOT_PACKAGES}, "SCREENSHOT_PACKAGES")):
+    for table, name in (({b.package for b in BENCHES}, "BENCHES"), (set(SCREENSHOT_PACKAGES), "SCREENSHOT_PACKAGES")):
         for stale in sorted(set(table) - packages):
             raise LintError(f"{name} names {stale}, which is not a workspace member")
     if not (ROOT / "rustfmt.toml").is_file():
         raise LintError("rustfmt.toml is missing")
     baked = subprocess.run(
-        ["git", "grep", "-l", 'env!("CARGO_BIN_EXE_', "--", "*.rs"], cwd=ROOT, capture_output=True, text=True
+        ["git", "grep", "-l", 'env!("CARGO_BIN_EXE_', "--", "*.rs"],
+        check=False,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
     ).stdout.split()
     if baked:
         raise LintError(

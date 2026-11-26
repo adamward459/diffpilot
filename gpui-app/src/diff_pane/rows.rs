@@ -382,7 +382,7 @@ fn push_line_threads(rows: &mut Vec<Row>, f: u32, line: &DiffLine, threads: &[(u
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{diff_hunks, line, lines_of};
+    use crate::diff_pane::testing::{diff_hunks, line, lines_of};
 
     fn file(path: &str, hunks: Vec<Vec<DiffLine>>) -> Arc<FileDiff> {
         Arc::new(diff_hunks(path, hunks))

@@ -1,3 +1,3 @@
 [workspace]
-members = ["core", "diff-pane", "gpui-app", "review-ui", "ui-kit"]
+members = ["core", "gpui-app", "ui-kit"]
 resolver = "3"

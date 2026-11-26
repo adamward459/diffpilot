@@ -1,4 +1,4 @@
-use crate::session::ReviewSession;
+use crate::review::session::ReviewSession;
 use diffpilot_core::review::{Effort, ModelName, ReviewModel, ReviewRun, ReviewScope, focus};
 use diffpilot_ui_kit::components::{Button, Look, chip};
 use diffpilot_ui_kit::{Glyph, Theme};

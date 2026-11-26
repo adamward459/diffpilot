@@ -1,5 +1,7 @@
-#![cfg(feature = "headless-tests")]
-
+use diffpilot::diff_pane::DiffPane;
+use diffpilot::diff_pane::layout::{LINE, SPLIT_DIVIDER, THREAD, ThreadFrame, column_width};
+use diffpilot::diff_pane::rows::RowKind;
+use diffpilot::review::{ReviewHost, ReviewSession, metrics};
 use diffpilot_core::cancel::CancelToken;
 use diffpilot_core::changes::FileStatus;
 use diffpilot_core::claude::{Replier, ReviewError, Reviewer};
@@ -8,10 +10,6 @@ use diffpilot_core::diff::{DiffLine, DiffMode, FileDiff, Hunk, LineKind};
 use diffpilot_core::review::{Finding, ReviewRequest, ReviewResult, Severity};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::threads::{ReviewThread, Side, ThreadAnchor, ThreadId};
-use diffpilot_diff_pane::DiffPane;
-use diffpilot_diff_pane::layout::{LINE, SPLIT_DIVIDER, THREAD, ThreadFrame, column_width};
-use diffpilot_diff_pane::rows::RowKind;
-use diffpilot_review_ui::{ReviewHost, ReviewSession, metrics};
 use gpui::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext, point, px, size};
 use gpui_component::Root;
 use std::path::PathBuf;
@@ -92,7 +90,7 @@ struct Opened {
 fn open(cx: &mut TestAppContext) -> (Opened, &mut VisualTestContext) {
     cx.update(|cx| {
         diffpilot_ui_kit::init(cx);
-        diffpilot_review_ui::init(cx);
+        diffpilot::review::init(cx);
     });
     let replier = Arc::new(Chunks::default());
     let mut host = ReviewHost::new(Some(PathBuf::from("/repo")), Comparison::checked_out("main", true));
@@ -209,7 +207,7 @@ fn review_run_heights(cx: &mut TestAppContext, mode: DiffMode) {
     let change = threads.iter().filter(|t| t.anchor == ThreadAnchor::Change).count();
     assert_eq!(change, 2, "the summary and the finding on a file outside the diff");
     let first = opened.pane.read_with(cx, |pane, _| pane.state().rows.rows[0].kind);
-    assert!(matches!(first, diffpilot_diff_pane::rows::RowKind::Thread { .. }));
+    assert!(matches!(first, diffpilot::diff_pane::rows::RowKind::Thread { .. }));
 
     let line = threads
         .iter()

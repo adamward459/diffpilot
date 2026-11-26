@@ -1,13 +1,13 @@
 mod common;
 
 use common::*;
+use diffpilot::review::session::{NO_REPLY_MESSAGE, NO_REPO_MESSAGE};
+use diffpilot::review::{ReviewEvent, ThreadChange};
 use diffpilot_core::cancel::CancelToken;
 use diffpilot_core::claude::ReviewError;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::review::{Effort, ModelName, ReviewModel, ReviewRun, ReviewScope, Severity};
 use diffpilot_core::threads::{CLAUDE_NAME, Side, ThreadAnchor, ThreadId, USER_NAME};
-use diffpilot_review_ui::session::{NO_REPLY_MESSAGE, NO_REPO_MESSAGE};
-use diffpilot_review_ui::{ReviewEvent, ThreadChange};
 use gpui::TestAppContext;
 use std::path::PathBuf;
 

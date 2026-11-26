@@ -1,9 +1,7 @@
-#![cfg(feature = "headless-tests")]
-
+use diffpilot::diff_pane::rows::RowKind;
+use diffpilot::diff_pane::{DiffPane, DiffPaneEvent};
 use diffpilot_core::changes::FileStatus;
 use diffpilot_core::diff::{DiffLine, DiffMode, FileDiff, Hunk, LineKind};
-use diffpilot_diff_pane::rows::RowKind;
-use diffpilot_diff_pane::{DiffPane, DiffPaneEvent};
 use gpui::{ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point, px, size};
 use std::cell::RefCell;
 use std::collections::HashSet;
