@@ -4,7 +4,7 @@
 use super::{Attention, Guide, Note};
 use crate::diff::FileDiff;
 use std::borrow::Borrow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 pub const NOT_IN_GUIDE_TITLE: &str = "Not in the guide";
@@ -39,13 +39,17 @@ pub struct Reading {
 /// Files that left the diff are dropped, chapters left empty are dropped, and files the guide never saw are
 /// collected in a last chapter.
 pub fn reading<F: Borrow<FileDiff>>(guide: &Guide, files: &[F]) -> Reading {
+    let mut by_path: HashMap<&str, &FileDiff> = HashMap::new();
+    for diff in files.iter().map(Borrow::borrow) {
+        by_path.entry(diff.path.as_str()).or_insert(diff);
+    }
     let mut placed: HashSet<&str> = HashSet::new();
     let mut chapters = Vec::new();
     for (index, chapter) in guide.chapters.iter().enumerate() {
         let kept: Vec<&FileDiff> = chapter
             .files
             .iter()
-            .filter_map(|file| files.iter().map(Borrow::borrow).find(|diff| diff.path == file.path))
+            .filter_map(|file| by_path.get(file.path.as_str()).copied())
             .filter(|diff| placed.insert(diff.path.as_str()))
             .collect();
         if kept.is_empty() {
