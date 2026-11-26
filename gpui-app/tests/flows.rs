@@ -13,6 +13,7 @@ mod flows {
     mod preview;
     mod remote;
     mod review;
+    mod selection;
     mod sidebar_keys;
     mod viewed;
 }

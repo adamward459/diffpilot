@@ -15,7 +15,9 @@ use diffpilot_core::settings::Settings;
 use diffpilot_core::store::Store;
 use diffpilot_core::threads::Side;
 use diffpilot_core::viewed::ViewedStore;
-use gpui::{AppContext as _, Bounds, Entity, Global, Modifiers, Pixels, TestAppContext, VisualTestContext};
+use gpui::{
+    AppContext as _, Bounds, Entity, Global, Modifiers, MouseButton, Pixels, TestAppContext, VisualTestContext,
+};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -322,6 +324,15 @@ pub fn click(cx: &mut VisualTestContext, selector: &str) {
 pub fn hover(cx: &mut VisualTestContext, selector: &str) {
     let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
     cx.simulate_mouse_move(bounds.center(), None, Modifiers::default());
+    draw(cx);
+}
+
+pub fn drag_below(cx: &mut VisualTestContext, selector: &str, from: f32, to: f32) {
+    let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
+    let at = |dy: f32| gpui::point(bounds.center().x, bounds.bottom() + gpui::px(dy));
+    cx.simulate_mouse_down(at(from), MouseButton::Left, Modifiers::default());
+    cx.simulate_mouse_move(at(to), MouseButton::Left, Modifiers::default());
+    cx.simulate_mouse_up(at(to), MouseButton::Left, Modifiers::default());
     draw(cx);
 }
 
