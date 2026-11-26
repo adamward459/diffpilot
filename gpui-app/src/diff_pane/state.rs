@@ -222,7 +222,6 @@ impl PaneState {
         self.refilter(anchor)
     }
 
-    /// Shows only these paths, in this order. `None` shows every file in diff order.
     pub fn set_filter(&mut self, filter: Option<Vec<String>>) -> Vec<Option<usize>> {
         if filter == self.filter {
             return (0..self.files.len()).map(Some).collect();
@@ -461,7 +460,7 @@ impl PaneState {
         Some(self.tops.top(self.rows.block_row(slot as u32)?))
     }
 
-    /// Sets the height of a thread's row. Rows below it move. A row above the viewport keeps the
+    /// Sets the height of a block's row. Rows below it move. A row above the viewport keeps the
     /// content in view where it is, and a row under the viewport top grows downward.
     pub fn set_block_height(&mut self, id: BlockId, height: f32) -> bool {
         let Some(slot) = self.blocks.iter().position(|block| block.id == id) else {
@@ -482,7 +481,7 @@ impl PaneState {
         true
     }
 
-    /// Scrolls just enough to show the thread under the pinned header of height `inset`.
+    /// Scrolls just enough to show the block under the pinned header of height `inset`.
     pub fn reveal_block(&mut self, id: BlockId, inset: f32) -> bool {
         let Some(slot) = self.blocks.iter().position(|block| block.id == id) else {
             return false;

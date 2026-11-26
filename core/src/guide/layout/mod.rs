@@ -115,7 +115,6 @@ pub struct EdgeGeom {
     pub to: String,
     /// The first point is on the source border and the last on the target border.
     pub points: Vec<Point>,
-    /// The text and its center.
     pub label: Option<(String, Point)>,
     pub style: LineStyle,
     pub tail: Tip,

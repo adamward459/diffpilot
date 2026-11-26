@@ -193,7 +193,6 @@ impl GuideSession {
         self.read_count() > 0
     }
 
-    /// The guide no longer matches the diff, and the reviewer did not choose to keep reading it.
     pub fn out_of_date(&self) -> bool {
         let (Some(stored), Some(staleness)) = (&self.stored, &self.staleness) else {
             return false;
