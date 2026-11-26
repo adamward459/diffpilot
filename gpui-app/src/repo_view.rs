@@ -475,6 +475,7 @@ impl RepoView {
                     DiffPaneEvent::OpenInEditor { path, line } => this.open_in_editor(path, *line, cx),
                     DiffPaneEvent::FirstPaint => Bench::mark_now(cx, Mark::FirstDiffPaint),
                     DiffPaneEvent::ShownMode(_) => cx.notify(),
+                    DiffPaneEvent::OpenRef(_) => {}
                 },
             ),
         ];
@@ -1485,7 +1486,7 @@ mod tests {
         assert_eq!(counts.get("src/staged.rs"), Some(&2));
         assert_eq!(counts.get("docs/committed.md"), Some(&1));
         assert_eq!(counts.get(""), Some(&1), "the summary belongs to the whole change");
-        let slots = pane.read_with(cx, |pane, _| pane.state().threads.len());
+        let slots = pane.read_with(cx, |pane, _| pane.state().blocks.len());
         assert_eq!(slots, 5);
 
         let session = review_session(&opened, cx);
@@ -1493,7 +1494,7 @@ mod tests {
         session.update(cx, |session, cx| session.remove_thread(first.expect("a thread"), cx));
         let counts = sidebar.read_with(cx, |sidebar, _| sidebar.comments().clone());
         assert_eq!(counts.values().sum::<usize>(), 4);
-        assert_eq!(pane.read_with(cx, |pane, _| pane.state().threads.len()), 4);
+        assert_eq!(pane.read_with(cx, |pane, _| pane.state().blocks.len()), 4);
     }
 
     #[gpui::test]

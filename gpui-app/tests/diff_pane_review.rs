@@ -1,5 +1,6 @@
 use diffpilot::diff_pane::DiffPane;
 use diffpilot::diff_pane::layout::{LINE, SPLIT_DIVIDER, THREAD, ThreadFrame, column_width};
+use diffpilot::diff_pane::rows::BlockId;
 use diffpilot::diff_pane::rows::RowKind;
 use diffpilot::review::{ReviewHost, ReviewSession, metrics};
 use diffpilot_core::cancel::CancelToken;
@@ -135,9 +136,9 @@ fn draw(pane: &Entity<DiffPane>, cx: &mut VisualTestContext) {
 }
 
 fn row_height(opened: &Opened, cx: &mut VisualTestContext, id: ThreadId) -> f32 {
-    opened
-        .pane
-        .read_with(cx, |pane, _| pane.state().thread_height(id).expect("a thread row"))
+    opened.pane.read_with(cx, |pane, _| {
+        pane.state().block_height(BlockId::Thread(id)).expect("a thread row")
+    })
 }
 
 fn card_height(opened: &Opened, cx: &mut VisualTestContext, id: ThreadId, anchor: &ThreadAnchor) -> f32 {
@@ -182,7 +183,7 @@ fn review_run_heights(cx: &mut TestAppContext, mode: DiffMode) {
     let before = opened.pane.read_with(cx, |pane, _| pane.state().tops.total());
     let threads = run_review(&opened, cx);
     assert_eq!(threads.len(), 4, "the summary and three findings");
-    let slots = opened.pane.read_with(cx, |pane, _| pane.state().threads.len());
+    let slots = opened.pane.read_with(cx, |pane, _| pane.state().blocks.len());
     assert_eq!(slots, 4);
 
     let mut grown = 0.0;
@@ -217,7 +218,7 @@ fn review_run_heights(cx: &mut TestAppContext, mode: DiffMode) {
     let change = threads.iter().filter(|t| t.anchor == ThreadAnchor::Change).count();
     assert_eq!(change, 2, "the summary and the finding on a file outside the diff");
     let first = opened.pane.read_with(cx, |pane, _| pane.state().rows.rows[0].kind);
-    assert!(matches!(first, diffpilot::diff_pane::rows::RowKind::Thread { .. }));
+    assert!(matches!(first, diffpilot::diff_pane::rows::RowKind::Block { .. }));
 
     let line = threads
         .iter()
@@ -226,7 +227,7 @@ fn review_run_heights(cx: &mut TestAppContext, mode: DiffMode) {
     opened.pane.read_with(cx, |pane, _| {
         let state = pane.state();
         let row = state
-            .thread_top(line.id)
+            .block_top(BlockId::Thread(line.id))
             .map(|top| state.tops.row_at(top).unwrap())
             .unwrap();
         let shown = match state.rows.rows[row - 1].kind {
@@ -443,7 +444,7 @@ fn a_file_comment_opens_its_composer_in_view(cx: &mut TestAppContext) {
     draw(&opened.pane, cx);
     opened.pane.read_with(cx, |pane, _| {
         let state = pane.state();
-        let top = state.thread_top(id).expect("the thread is placed");
+        let top = state.block_top(BlockId::Thread(id)).expect("the thread is placed");
         assert!(
             top >= state.scroll() && top < state.scroll() + 600.0,
             "{top} vs {}",

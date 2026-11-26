@@ -155,7 +155,7 @@ pub fn row_height(row: Row, files: &[Arc<FileDiff>], wrap: Option<usize>, thread
         RowKind::Hunk { .. } => HUNK,
         RowKind::Gap => GAP,
         RowKind::Notice(_) => NOTICE,
-        RowKind::Thread { slot } => threads.get(slot as usize).copied().unwrap_or(THREAD),
+        RowKind::Block { slot } => threads.get(slot as usize).copied().unwrap_or(THREAD),
         RowKind::Line { hunk, line } => {
             let Some(cols) = wrap else { return LINE };
             let text = &files[row.file as usize].hunks[hunk as usize].lines[line as usize].text;
@@ -291,7 +291,7 @@ pub fn position(rows: &Rows, tops: &Tops, scroll: f32) -> Option<Position> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diff_pane::rows::{ThreadSlot, Visibility, build};
+    use crate::diff_pane::rows::{BlockId, BlockSlot, Visibility, build};
     use crate::diff_pane::testing::{added, diff, line, lines_with};
     use diffpilot_core::diff::{DiffLine, DiffMode, LineKind};
     use diffpilot_core::threads::{Side, ThreadId};
@@ -486,8 +486,8 @@ mod tests {
     #[test]
     fn a_thread_row_takes_its_slot_height_or_the_placeholder() {
         let files = files();
-        let threads = [ThreadSlot {
-            id: ThreadId(1),
+        let threads = [BlockSlot {
+            id: BlockId::Thread(ThreadId(1)),
             anchor: ThreadAnchor::file("a.ts"),
         }];
         let none = HashSet::new();
@@ -500,7 +500,7 @@ mod tests {
             &threads,
             DiffMode::Unified,
         );
-        let row = rows.thread_row(0).unwrap();
+        let row = rows.block_row(0).unwrap();
         assert_eq!(Tops::new(&rows.rows, &files, None).height(row), THREAD);
         let tops = Tops::with_threads(&rows.rows, &files, None, &[200.0]);
         assert_eq!(tops.height(row), 200.0);
@@ -509,8 +509,8 @@ mod tests {
     #[test]
     fn resizing_a_row_in_place_matches_a_rebuild() {
         let files = files();
-        let threads = [ThreadSlot {
-            id: ThreadId(1),
+        let threads = [BlockSlot {
+            id: BlockId::Thread(ThreadId(1)),
             anchor: ThreadAnchor::file("a.ts"),
         }];
         let none = HashSet::new();
@@ -523,7 +523,7 @@ mod tests {
             &threads,
             DiffMode::Unified,
         );
-        let row = rows.thread_row(0).unwrap();
+        let row = rows.block_row(0).unwrap();
         let mut tops = Tops::with_threads(&rows.rows, &files, None, &[150.0]);
         tops.set_height(row, 260.0);
         let rebuilt = Tops::with_threads(&rows.rows, &files, None, &[260.0]);
@@ -545,8 +545,8 @@ mod tests {
     #[test]
     fn the_top_of_the_pane_over_a_change_thread_belongs_to_the_first_file_without_a_pinned_header() {
         let files = files();
-        let threads = [ThreadSlot {
-            id: ThreadId(1),
+        let threads = [BlockSlot {
+            id: BlockId::Thread(ThreadId(1)),
             anchor: ThreadAnchor::Change,
         }];
         let none = HashSet::new();

@@ -6,8 +6,10 @@ use crate::diff_pane::layout::{
 use crate::diff_pane::lines::{
     self, CODE_SIZE, Column, Fonts, Frame, LineCache, LineKey, LineRequest, PaintFiller, Style, Thumb,
 };
-use crate::diff_pane::rows::{Notice, RowKind, ThreadSlot};
+use crate::diff_pane::rows::{BlockId, BlockSlot, Notice, RowKind};
 use crate::diff_pane::state::{Geometry, PaneState};
+use crate::guide::note::{NoteCard, NoteEvent};
+use crate::guide::text::CodeRef;
 use crate::review::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange};
 use diffpilot_core::changes::FileStatus;
 use diffpilot_core::diff::{DiffMode, FileDiff, LineKind};
@@ -43,6 +45,24 @@ pub enum DiffPaneEvent {
     },
     /// The mode the rows are drawn in changed. A split pane that is too narrow draws unified rows.
     ShownMode(DiffMode),
+    /// A `[[path#L12]]` ref in a guide note was clicked.
+    OpenRef(CodeRef),
+}
+
+/// A guide note to show under a line (or under the file header when `line` is `None`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaneNote {
+    pub path: String,
+    pub side: Side,
+    pub line: Option<u32>,
+    pub text: String,
+    pub critical: bool,
+}
+
+struct Note {
+    view: Entity<NoteCard>,
+    anchor: ThreadAnchor,
+    _opened: Subscription,
 }
 
 struct LineMenu {
@@ -109,6 +129,7 @@ struct Review {
 pub struct DiffPane {
     state: PaneState,
     review: Option<Review>,
+    notes: Vec<Note>,
     pending_focus: Option<ThreadId>,
     mouse: Option<(Pixels, Pixels)>,
     origin: (Pixels, Pixels),
@@ -166,6 +187,7 @@ impl DiffPane {
         Self {
             state: PaneState::new(geometry),
             review: None,
+            notes: Vec::new(),
             pending_focus: None,
             mouse: None,
             origin: (px(0.0), px(0.0)),
@@ -196,6 +218,54 @@ impl DiffPane {
         self.lines.clear();
         self.share_files(cx);
         self.sync(cx);
+    }
+
+    /// Shows only these files, in this order, or every file again with `None`. The pane scrolls to the top.
+    pub fn set_filter(&mut self, filter: Option<Vec<String>>, cx: &mut Context<Self>) {
+        if self.state.filter() == filter.as_deref() {
+            return;
+        }
+        let reused = self.state.set_filter(filter);
+        let old = std::mem::take(&mut self.highlights);
+        self.highlights = reused
+            .iter()
+            .map(|from| {
+                from.and_then(|index| old.get(index).cloned())
+                    .unwrap_or(Highlight::Missing)
+            })
+            .collect();
+        self.lines.clear();
+        self.state.scroll_to(0.0);
+        self.remeasure = true;
+        self.sync(cx);
+    }
+
+    pub fn set_notes(&mut self, notes: Vec<PaneNote>, window: &mut Window, cx: &mut Context<Self>) {
+        self.notes = notes
+            .into_iter()
+            .map(|note| {
+                let view = cx.new(|_| NoteCard::new(&note.text, note.critical));
+                let opened = cx.subscribe_in(&view, window, |_, _, NoteEvent::Open(code): &NoteEvent, _, cx| {
+                    cx.emit(DiffPaneEvent::OpenRef(code.clone()));
+                });
+                let anchor = match note.line {
+                    Some(line) => ThreadAnchor::line(&note.path, note.side, line),
+                    None => ThreadAnchor::file(&note.path),
+                };
+                Note {
+                    view,
+                    anchor,
+                    _opened: opened,
+                }
+            })
+            .collect();
+        self.rebuild_blocks(window, cx);
+    }
+
+    pub fn reveal_line(&mut self, path: &str, side: Side, line: u32, cx: &mut Context<Self>) {
+        if self.state.reveal_line(path, side, line, FILE_HEADER + HUNK) {
+            self.sync(cx);
+        }
     }
 
     pub fn set_uncommitted(&mut self, paths: HashSet<String>, cx: &mut Context<Self>) {
@@ -258,7 +328,7 @@ impl DiffPane {
         });
         self.share_files(cx);
         self.share_visible(self.state.visible_path().map(str::to_owned), cx);
-        self.rebuild_threads(window, cx);
+        self.rebuild_blocks(window, cx);
     }
 
     pub fn review(&self) -> Option<&Entity<ReviewSession>> {
@@ -276,16 +346,16 @@ impl DiffPane {
             return;
         };
         card.update(cx, |card, cx| card.focus_composer(window, cx));
-        self.measure(id, window, cx);
-        self.state.reveal_thread(id, FILE_HEADER + HUNK);
+        self.measure(BlockId::Thread(id), window, cx);
+        self.state.reveal_block(BlockId::Thread(id), FILE_HEADER + HUNK);
         self.sync(cx);
     }
 
     fn share_files(&mut self, cx: &mut Context<Self>) {
         let Some(review) = &self.review else { return };
-        let files: Arc<[Arc<FileDiff>]> = self.state.files.clone().into();
+        let files: Arc<[Arc<FileDiff>]> = self.state.all_files().into();
         review.session.update(cx, |session, cx| session.set_files(files, cx));
-        if self.state.files.is_empty() {
+        if self.state.all_files().is_empty() {
             self.share_visible(None, cx);
         }
     }
@@ -300,50 +370,59 @@ impl DiffPane {
 
     fn threads_changed(&mut self, change: ThreadChange, window: &mut Window, cx: &mut Context<Self>) {
         match change {
-            ThreadChange::Added(_) | ThreadChange::Removed(_) => self.rebuild_threads(window, cx),
+            ThreadChange::Added(_) | ThreadChange::Removed(_) => self.rebuild_blocks(window, cx),
             ThreadChange::Updated(id) => {
-                self.measure(id, window, cx);
+                self.measure(BlockId::Thread(id), window, cx);
                 self.sync(cx);
             }
         }
     }
 
-    fn rebuild_threads(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(review) = &self.review else { return };
-        let slots: Vec<ThreadSlot> = review
-            .session
-            .read(cx)
-            .threads()
-            .map(|thread| ThreadSlot {
-                id: thread.id,
-                anchor: thread.anchor.clone(),
-            })
-            .collect();
-        let session = review.session.clone();
+    fn rebuild_blocks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut slots: Vec<BlockSlot> = Vec::new();
         let mut added = Vec::new();
-        if let Some(review) = &mut self.review {
-            review.cards.retain(|id, _| slots.iter().any(|slot| slot.id == *id));
-            for slot in &slots {
-                if review.cards.contains_key(&slot.id) {
+        if let Some(review) = &self.review {
+            let session = review.session.clone();
+            let threads: Vec<(ThreadId, ThreadAnchor)> = session
+                .read(cx)
+                .threads()
+                .map(|thread| (thread.id, thread.anchor.clone()))
+                .collect();
+            slots.extend(threads.iter().map(|(id, anchor)| BlockSlot {
+                id: BlockId::Thread(*id),
+                anchor: anchor.clone(),
+            }));
+            let mut cards = std::mem::take(&mut self.review.as_mut().expect("review is set").cards);
+            cards.retain(|id, _| threads.iter().any(|(thread, _)| thread == id));
+            for (id, _) in &threads {
+                let id = *id;
+                if cards.contains_key(&id) {
                     continue;
                 }
-                let id = slot.id;
                 let view = cx.new(|cx| ThreadCard::new(session.clone(), id, cx));
                 let resized = cx.subscribe_in(&view, window, move |this, _, CardEvent::Resized, window, cx| {
-                    this.measure(id, window, cx);
+                    this.measure(BlockId::Thread(id), window, cx);
                     this.sync(cx);
                 });
-                review.cards.insert(
+                cards.insert(
                     id,
                     Card {
                         view,
                         _resized: resized,
                     },
                 );
-                added.push(id);
+                added.push(BlockId::Thread(id));
             }
+            self.review.as_mut().expect("review is set").cards = cards;
         }
-        self.state.set_threads(slots);
+        for (index, note) in self.notes.iter().enumerate() {
+            slots.push(BlockSlot {
+                id: BlockId::Note(index as u32),
+                anchor: note.anchor.clone(),
+            });
+            added.push(BlockId::Note(index as u32));
+        }
+        self.state.set_blocks(slots);
         for id in added {
             self.measure(id, window, cx);
         }
@@ -356,19 +435,28 @@ impl DiffPane {
         self.sync(cx);
     }
 
-    fn measure(&mut self, id: ThreadId, window: &Window, cx: &mut Context<Self>) {
-        let Some(card) = self.card(id).cloned() else { return };
-        let Some(slot) = self.state.threads.iter().find(|slot| slot.id == id) else {
+    fn card_height(&self, id: BlockId, width: Pixels, window: &Window, cx: &App) -> Option<f32> {
+        let height = match id {
+            BlockId::Thread(id) => self.card(id)?.read(cx).height(width, window, cx),
+            BlockId::Note(index) => self.notes.get(index as usize)?.view.read(cx).height(width, window, cx),
+        };
+        Some(f32::from(height))
+    }
+
+    fn measure(&mut self, id: BlockId, window: &Window, cx: &mut Context<Self>) {
+        let Some(slot) = self.state.blocks.iter().find(|slot| slot.id == id) else {
             return;
         };
         let frame = ThreadFrame::of(&slot.anchor, self.state.split_width());
         let width = px(frame.card_width(self.state.geometry().width));
-        let height = f32::from(card.read(cx).height(width, window, cx));
-        self.state.set_thread_height(id, frame.row_height(height));
+        let Some(height) = self.card_height(id, width, window, cx) else {
+            return;
+        };
+        self.state.set_block_height(id, frame.row_height(height));
     }
 
     fn measure_all(&mut self, window: &Window, cx: &mut Context<Self>) {
-        let ids: Vec<ThreadId> = self.state.threads.iter().map(|slot| slot.id).collect();
+        let ids: Vec<BlockId> = self.state.blocks.iter().map(|slot| slot.id).collect();
         for id in ids {
             self.measure(id, window, cx);
         }
@@ -712,9 +800,9 @@ impl DiffPane {
         let can_open = diff.status != FileStatus::Deleted;
         let threads = self
             .state
-            .threads
+            .blocks
             .iter()
-            .filter(|slot| slot.anchor.path() == diff.path)
+            .filter(|slot| matches!(slot.id, BlockId::Thread(_)) && slot.anchor.path() == diff.path)
             .count();
         let chevron = div()
             .id((if pinned { "pinned-collapse" } else { "collapse" }, file))
@@ -930,9 +1018,12 @@ impl DiffPane {
         body
     }
 
-    fn thread_row(&self, slot: u32, y: f32, height: f32) -> Option<Div> {
-        let thread = &self.state.threads[slot as usize];
-        let card = self.card(thread.id)?;
+    fn block_row(&self, slot: u32, y: f32, height: f32) -> Option<Div> {
+        let thread = &self.state.blocks[slot as usize];
+        let card: AnyView = match thread.id {
+            BlockId::Thread(id) => self.card(id)?.clone().into(),
+            BlockId::Note(index) => self.notes.get(index as usize)?.view.clone().into(),
+        };
         let frame = ThreadFrame::of(&thread.anchor, self.state.split_width());
         let card_height = height - frame.top - frame.bottom - if frame.rule { 1.0 } else { 0.0 };
         let style = StyleRefinement::default().w_full().h(px(card_height));
@@ -956,7 +1047,7 @@ impl DiffPane {
                     .bg(self.theme.diff.line),
             );
         }
-        Some(row.child(AnyView::from(card.clone()).cached(style)))
+        Some(row.child(card.cached(style)))
     }
 
     fn column_span(&self, column: Column) -> (f32, f32) {
@@ -1103,7 +1194,7 @@ impl Render for DiffPane {
             let file = row.file as usize;
             let element = match row.kind {
                 RowKind::Line { .. } | RowKind::Pair { .. } | RowKind::Gap => continue,
-                RowKind::Thread { slot } => match self.thread_row(slot, y, height) {
+                RowKind::Block { slot } => match self.block_row(slot, y, height) {
                     Some(thread) => thread,
                     None => continue,
                 },
