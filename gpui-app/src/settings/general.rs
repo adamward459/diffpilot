@@ -1,13 +1,27 @@
-use super::window::SettingsWindow;
+use super::window::{Menu, SettingsWindow};
 use diffpilot_core::diff::DiffMode;
+use diffpilot_core::editor::Editor;
 use diffpilot_core::settings::AppearanceChoice;
 use diffpilot_ui_kit::Theme;
-use diffpilot_ui_kit::components::{Row, caption, grouped, section, segmented_control, switch, tag};
+use diffpilot_ui_kit::components::{
+    MenuEntry, MenuItem, Row, caption, grouped, menu as dropdown, picker, section, segmented_control, switch, tag,
+};
 use gpui::prelude::*;
 use gpui::{App, Context, Div, IntoElement, Keystroke, SharedString, div, px};
-use gpui_component::ActiveTheme;
+use gpui_component::input::Input;
+use gpui_component::{ActiveTheme, Sizable};
+use std::rc::Rc;
 
 pub fn general(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(16.))
+        .child(launch(window, t, cx))
+        .child(editor(window, t, cx))
+}
+
+fn launch(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
     let open = window.settings.open_last_repository();
     section(
         t,
@@ -32,6 +46,89 @@ pub fn general(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWind
             ],
         ),
     )
+}
+
+fn editor(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
+    let saved = window.settings.editor();
+    let detected = window.detected_editor.clone();
+    let label = match &saved {
+        None => format!("Automatic ({})", detected.title()),
+        Some(editor) => editor.title().to_string(),
+    };
+    let this = cx.entity();
+    let template = window.custom_editor.clone();
+    let choose = move |choice: Option<Editor>| -> diffpilot_ui_kit::components::Select {
+        let this = this.clone();
+        let template = template.clone();
+        Rc::new(move |_, cx| {
+            let choice = match &choice {
+                Some(Editor::Custom(_)) => Some(Editor::Custom(template.read(cx).value().to_string())),
+                other => other.clone(),
+            };
+            this.update(cx, |this, cx| {
+                this.settings.set_editor(choice.clone());
+                this.close_menu(cx);
+            })
+        })
+    };
+    let mut entries = vec![MenuEntry::Item(MenuItem {
+        label: format!("Automatic ({})", detected.title()).into(),
+        checked: saved.is_none(),
+        on_select: choose(None),
+    })];
+    let presets = Editor::PRESETS
+        .into_iter()
+        .chain([Editor::Custom(String::new())])
+        .map(|editor| {
+            let checked = match (&saved, &editor) {
+                (Some(Editor::Custom(_)), Editor::Custom(_)) => true,
+                (Some(current), editor) => current == editor,
+                (None, _) => false,
+            };
+            MenuEntry::Item(MenuItem {
+                label: editor.title().into(),
+                checked,
+                on_select: choose(Some(editor)),
+            })
+        });
+    entries.extend(presets);
+    let open = window.menu == Some(Menu::Editor);
+    let control = div()
+        .relative()
+        .child(
+            tag(picker(t, "editor", label, true), "editor")
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(Menu::Editor, cx))),
+        )
+        .when(open, |this| this.child(dropdown(t, "editor", entries)));
+    let mut rows = vec![
+        Row::new(t, "Open files in")
+            .subtitle(caption(t, "Used by Open in Editor in the diff."))
+            .control(control)
+            .into_any_element(),
+    ];
+    if matches!(saved, Some(Editor::Custom(_))) {
+        let field = div()
+            .w(px(280.))
+            .h(px(22.))
+            .rounded(px(5.))
+            .border_1()
+            .border_color(t.ui.cap_border)
+            .bg(t.ui.cap)
+            .overflow_hidden()
+            .child(
+                Input::new(&window.custom_editor)
+                    .small()
+                    .appearance(false)
+                    .bordered(false),
+            );
+        rows.push(
+            Row::new(t, "Command")
+                .subtitle(caption(t, "Use {file}, {line} and {column}."))
+                .control(field)
+                .into_any_element(),
+        );
+    }
+    section(t, "Editor", grouped(t, rows))
 }
 
 pub fn appearance(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) -> impl IntoElement {
@@ -81,8 +178,8 @@ pub fn diff(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>
         grouped(
             t,
             vec![
-                Row::new(t, "Wrap lines by default")
-                    .subtitle(caption(t, "Applies to repositories you open from now on."))
+                Row::new(t, "Wrap lines")
+                    .subtitle(caption(t, "Same as the wrap button in the toolbar."))
                     .control(
                         tag(switch(t, "wrap-lines", wrap, true), "wrap-lines").on_click(cx.listener(
                             move |this, _, _, cx| {
@@ -93,7 +190,7 @@ pub fn diff(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>
                     )
                     .into_any_element(),
                 Row::new(t, "Layout")
-                    .subtitle(caption(t, "Applies to repositories you open from now on."))
+                    .subtitle(caption(t, "Same as the Unified and Split switch in the toolbar."))
                     .control(segmented_control(
                         t,
                         "layout",

@@ -1,4 +1,4 @@
-use crate::features::{FEATURES, Feature, TestSel, Usage, listed, resolve};
+use crate::features::{FEATURES, Feature, TestSel, Usage, has_lib, listed, resolve};
 use crate::select::select;
 use crate::workspace::{Crate, ROOT_FILES, Workspace};
 use crate::{Result, git, root, run};
@@ -182,8 +182,12 @@ impl Plan {
         out
     }
 
-    fn lib_targets() -> Vec<String> {
-        args(&["--lib", "--bins"])
+    fn lib_targets(&self) -> Vec<String> {
+        if self.packages.iter().any(|package| has_lib(package)) {
+            args(&["--lib", "--bins"])
+        } else {
+            args(&["--bins"])
+        }
     }
 
     fn test_targets(&self) -> Vec<String> {
@@ -191,7 +195,7 @@ impl Plan {
     }
 
     fn build(&self, ws: &Workspace) -> Result<Vec<Exe>> {
-        let mut targets = Self::lib_targets();
+        let mut targets = self.lib_targets();
         targets.extend(self.test_targets());
         let build = self.command(
             &["test", "--no-run", "--message-format=json-render-diagnostics"],
@@ -257,7 +261,7 @@ impl Plan {
         }
         let mut out = vec![];
         if !names.is_empty() {
-            let mut lib = self.command(&["test", "--no-fail-fast"], &Self::lib_targets());
+            let mut lib = self.command(&["test", "--no-fail-fast"], &self.lib_targets());
             lib.extend(args(&["--", "--exact"]));
             lib.extend(names);
             out.push(lib);

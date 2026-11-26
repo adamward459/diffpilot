@@ -151,6 +151,7 @@ pub struct EngineConfig {
     /// Where each run puts its generated settings file.
     pub run_dir: PathBuf,
     /// How many editing runs per review keep their snapshot, and so can still show a change or be undone.
+    /// At 0, no run takes a snapshot, so the repo's .git is never written to.
     pub keep_snapshots: usize,
     /// The MCP server. Without it a run cannot add or answer comments, and cannot ask before an edit.
     pub mcp: Option<McpLaunch>,
@@ -204,6 +205,7 @@ struct State {
 
 struct Inner {
     config: EngineConfig,
+    claude_binary: Mutex<Option<PathBuf>>,
     state: Mutex<State>,
     subscribers: Mutex<Vec<async_channel::Sender<RunEvent>>>,
     guard_checked: OnceLock<bool>,
@@ -225,6 +227,7 @@ impl RunEngine {
         let _ = config.store.fail_stale_runs();
         Self {
             inner: Arc::new(Inner {
+                claude_binary: Mutex::new(config.claude_binary.clone()),
                 config,
                 state: Mutex::default(),
                 subscribers: Mutex::default(),
@@ -239,6 +242,11 @@ impl RunEngine {
 
     pub fn has_mcp(&self) -> bool {
         self.inner.has_mcp()
+    }
+
+    /// Runs that start from now on use this `claude`. None searches for it.
+    pub fn set_claude_binary(&self, path: Option<PathBuf>) {
+        *self.inner.claude_binary.lock().unwrap() = path;
     }
 
     /// A review request that fits this engine: findings arrive as comments while the run goes when the MCP
@@ -429,7 +437,8 @@ impl Inner {
     }
 
     fn claude(&self) -> Option<PathBuf> {
-        self.config.claude_binary.clone().or_else(claude::claude_binary)
+        let chosen = self.claude_binary.lock().unwrap().clone();
+        chosen.or_else(claude::claude_binary)
     }
 
     fn has_mcp(&self) -> bool {
@@ -613,7 +622,8 @@ impl Inner {
         if let Err(error) = prepared {
             return Ending::Failed(format!("Could not prepare the run: {error}"));
         }
-        if request.kind.edits() {
+        let snapshots = request.kind.edits() && self.config.keep_snapshots > 0;
+        if snapshots {
             match snapshot::take(&request.repo, id) {
                 Ok(taken) => {
                     self.with_run(id, |live| live.run.snapshot = Some(taken));
@@ -670,8 +680,10 @@ impl Inner {
             mcp.bridge.unregister(token);
         }
         let ending = self.ending_of(id, result);
-        if request.kind.edits() {
+        if snapshots {
             self.record_changes(id, &request.repo);
+        }
+        if request.kind.edits() {
             self.record_thread_files(id, request);
         }
         let _ = std::fs::remove_dir_all(&dir);
@@ -828,6 +840,14 @@ impl Inner {
             Self::spawn(self.clone(), next);
         }
     }
+}
+
+/// The helper binaries that `cargo build -p diffpilot-core --bins` puts next to the app and that are not there.
+pub fn missing_helpers() -> Vec<&'static str> {
+    ["diffpilot-guard", "diffpilot-mcp"]
+        .into_iter()
+        .filter(|name| sibling_binary(name).is_none())
+        .collect()
 }
 
 fn guard_blocks_a_push(guard: &Path) -> bool {

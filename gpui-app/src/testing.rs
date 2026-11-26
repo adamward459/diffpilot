@@ -5,6 +5,7 @@ use diffpilot_core::claude::{ReviewError, Reviewer, ScriptedReplier};
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::review::{Finding, ReviewRequest, ReviewResult, Severity};
 use diffpilot_core::settings::Settings;
+use diffpilot_core::store::Store;
 use diffpilot_core::viewed::ViewedStore;
 use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext};
 use std::path::Path;
@@ -121,7 +122,8 @@ pub fn open_repo(
     let repo = repo.to_path_buf();
     let mut view = None;
     let handle = cx.add_window(|window, cx| {
-        let entity = cx.new(|cx| RepoView::new(repo, settings, store, claude, window, cx));
+        let review_store = Arc::new(Store::open_in_memory().expect("an in-memory store opens"));
+        let entity = cx.new(|cx| RepoView::new(repo, settings, store, review_store, claude, window, cx));
         view = Some(entity.clone());
         gpui_component::Root::new(entity, window, cx)
     });

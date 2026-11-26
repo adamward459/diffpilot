@@ -1,5 +1,6 @@
 use crate::comparison::Comparison;
 use crate::diff::DiffMode;
+use crate::editor::Editor;
 use crate::policy::EditPermission;
 use crate::review::ReviewModel;
 use crate::run::RunKind;
@@ -15,6 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[serde(rename_all = "camelCase")]
 struct Data {
     recent_folder: Option<PathBuf>,
+    folders: Vec<PathBuf>,
     comparisons: BTreeMap<String, Comparison>,
     reviews_model: Option<ReviewModel>,
     fixes_model: Option<ReviewModel>,
@@ -26,12 +28,16 @@ struct Data {
     open_last_repository: Option<bool>,
     appearance: Option<AppearanceChoice>,
     wrap_lines: Option<bool>,
+    editor: Option<Editor>,
 }
+
+type Listener = Box<dyn Fn() + Send + Sync>;
 
 pub struct Settings {
     file: Option<PathBuf>,
     data: Mutex<Data>,
     unreadable: AtomicBool,
+    listeners: Mutex<Vec<Listener>>,
 }
 
 pub fn app_support_dir() -> Option<PathBuf> {
@@ -44,6 +50,7 @@ impl Settings {
             file: None,
             data: Mutex::default(),
             unreadable: AtomicBool::new(false),
+            listeners: Mutex::default(),
         }
     }
 
@@ -61,6 +68,7 @@ impl Settings {
             file: Some(file),
             data: Mutex::new(data),
             unreadable: AtomicBool::new(unreadable),
+            listeners: Mutex::default(),
         }
     }
 
@@ -100,7 +108,25 @@ impl Settings {
     }
 
     pub fn remember_folder(&self, folder: &Path) {
-        self.write(|data| data.recent_folder = Some(folder.to_path_buf()));
+        self.write(|data| {
+            data.recent_folder = Some(folder.to_path_buf());
+            if !data.folders.iter().any(|known| known == folder) {
+                data.folders.push(folder.to_path_buf());
+            }
+        });
+    }
+
+    pub fn folders(&self) -> Vec<PathBuf> {
+        self.read(|data| data.folders.clone())
+    }
+
+    pub fn forget_folder(&self, folder: &Path) {
+        self.write(|data| {
+            data.folders.retain(|known| known != folder);
+            if data.recent_folder.as_deref() == Some(folder) {
+                data.recent_folder = data.folders.first().cloned();
+            }
+        });
     }
 
     pub fn comparison(&self, key: &str) -> Option<Comparison> {
@@ -204,20 +230,47 @@ impl Settings {
         self.write(|data| data.wrap_lines = Some(wrap));
     }
 
+    /// `None` means detect an editor when a file opens.
+    pub fn editor(&self) -> Option<Editor> {
+        self.read(|data| data.editor.clone())
+    }
+
+    pub fn set_editor(&self, editor: Option<Editor>) {
+        self.write(|data| data.editor = editor);
+    }
+
     fn read<T>(&self, get: impl FnOnce(&Data) -> T) -> T {
         get(&self.data.lock().unwrap())
     }
 
+    /// Runs after every write that changes a value, on the thread that wrote it, with no lock held.
+    pub fn on_change(&self, listener: impl Fn() + Send + Sync + 'static) {
+        self.listeners.lock().unwrap().push(Box::new(listener));
+    }
+
     fn write(&self, change: impl FnOnce(&mut Data)) {
-        let mut data = self.data.lock().unwrap();
-        change(&mut data);
+        let changed = {
+            let mut data = self.data.lock().unwrap();
+            let before = data.clone();
+            change(&mut data);
+            self.save(&data);
+            *data != before
+        };
+        if changed {
+            for listener in self.listeners.lock().unwrap().iter() {
+                listener();
+            }
+        }
+    }
+
+    fn save(&self, data: &Data) {
         let Some(file) = &self.file else { return };
         if self.unreadable.swap(false, Ordering::SeqCst) {
             let mut aside = file.as_os_str().to_owned();
             aside.push(".bad");
             let _ = std::fs::rename(file, aside);
         }
-        let Ok(bytes) = serde_json::to_vec_pretty(&*data) else {
+        let Ok(bytes) = serde_json::to_vec_pretty(data) else {
             return;
         };
         let _ = write_atomically(file, &bytes);
@@ -227,8 +280,19 @@ impl Settings {
 impl Data {
     fn decode(mut fields: Map<String, Value>) -> Self {
         let mut take = |key: &str| fields.remove(key).unwrap_or(Value::Null);
+        let recent_folder: Option<PathBuf> = field(take("recentFolder"));
+        let mut folders: Vec<PathBuf> = Vec::new();
+        for folder in field::<Vec<PathBuf>>(take("folders")).unwrap_or_default() {
+            if !folders.contains(&folder) {
+                folders.push(folder);
+            }
+        }
+        if let Some(recent) = recent_folder.as_ref().filter(|recent| !folders.contains(recent)) {
+            folders.push(recent.clone());
+        }
         Self {
-            recent_folder: field(take("recentFolder")),
+            recent_folder,
+            folders,
             comparisons: entries(take("comparisons")),
             reviews_model: field(take("reviewsModel")).or_else(|| field(take("reviewModel"))),
             fixes_model: field(take("fixesModel")),
@@ -240,6 +304,7 @@ impl Data {
             open_last_repository: field(take("openLastRepository")),
             appearance: field(take("appearance")),
             wrap_lines: field(take("wrapLines")),
+            editor: field(take("editor")),
         }
     }
 }
@@ -337,6 +402,20 @@ mod tests {
     }
 
     #[test]
+    fn listeners_hear_changes_but_not_writes_of_the_same_value() {
+        let settings = Settings::in_memory();
+        let heard = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = heard.clone();
+        settings.on_change(move || {
+            count.fetch_add(1, Ordering::SeqCst);
+        });
+        settings.set_wrap_lines(true);
+        settings.set_wrap_lines(true);
+        settings.set_diff_mode(DiffMode::Split);
+        assert_eq!(heard.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
     fn recent_folder_is_none_with_nothing_stored() {
         assert_eq!(Settings::in_memory().recent_folder_with(None), None);
     }
@@ -346,6 +425,56 @@ mod tests {
         let settings = Settings::in_memory();
         settings.remember_folder(Path::new("/work/repo"));
         assert_eq!(settings.recent_folder_with(None), Some(PathBuf::from("/work/repo")));
+    }
+
+    #[test]
+    fn remembered_folders_keep_their_order_without_duplicates() {
+        let settings = Settings::in_memory();
+        for folder in ["/a", "/b", "/a", "/c"] {
+            settings.remember_folder(Path::new(folder));
+        }
+        let expected: Vec<PathBuf> = ["/a", "/b", "/c"].iter().map(PathBuf::from).collect();
+        assert_eq!(settings.folders(), expected);
+        assert_eq!(settings.recent_folder_with(None), Some(PathBuf::from("/c")));
+    }
+
+    #[test]
+    fn forgetting_the_active_folder_moves_to_the_first_left() {
+        let settings = Settings::in_memory();
+        settings.remember_folder(Path::new("/a"));
+        settings.remember_folder(Path::new("/b"));
+        settings.forget_folder(Path::new("/b"));
+        assert_eq!(settings.folders(), vec![PathBuf::from("/a")]);
+        assert_eq!(settings.recent_folder_with(None), Some(PathBuf::from("/a")));
+        settings.forget_folder(Path::new("/a"));
+        assert_eq!(settings.recent_folder_with(None), None);
+    }
+
+    #[test]
+    fn an_old_file_with_only_a_recent_folder_lists_it() {
+        let (_dir, file) = temp_file();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, r#"{"recentFolder":"/work/repo"}"#).unwrap();
+        let settings = Settings::at(file);
+        assert_eq!(settings.folders(), vec![PathBuf::from("/work/repo")]);
+    }
+
+    #[test]
+    fn a_saved_list_is_deduped_on_decode_and_keeps_the_active_folder_in_it() {
+        let (_dir, file) = temp_file();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, r#"{"folders":["/a","/b","/a"],"recentFolder":"/c"}"#).unwrap();
+        let settings = Settings::at(file);
+        let expected: Vec<PathBuf> = ["/a", "/b", "/c"].iter().map(PathBuf::from).collect();
+        assert_eq!(settings.folders(), expected);
+    }
+
+    #[test]
+    fn a_folder_list_of_the_wrong_type_is_dropped() {
+        let (_dir, file) = temp_file();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, r#"{"folders":"nope","recentFolder":"/a"}"#).unwrap();
+        assert_eq!(Settings::at(file).folders(), vec![PathBuf::from("/a")]);
     }
 
     #[test]
@@ -593,6 +722,30 @@ mod tests {
         assert_eq!(again.review_focuses(Path::new("/work/repo")), ["Tests"]);
         assert_eq!(again.review_focuses(Path::new("/other")), ["Security"]);
         assert!(!file.with_file_name("settings.json.bad").exists());
+    }
+
+    #[test]
+    fn the_editor_defaults_to_automatic_and_survives_a_reopen() {
+        let (_dir, file) = temp_file();
+        let settings = Settings::at(file.clone());
+        assert_eq!(settings.editor(), None);
+        settings.set_editor(Some(Editor::Custom("ed {file}".into())));
+        assert_eq!(
+            Settings::at(file.clone()).editor(),
+            Some(Editor::Custom("ed {file}".into()))
+        );
+        settings.set_editor(None);
+        assert_eq!(Settings::at(file).editor(), None);
+    }
+
+    #[test]
+    fn an_editor_this_build_cannot_read_falls_back_and_keeps_the_rest() {
+        let (_dir, file) = temp_file();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, r#"{"editor": "emacs", "wrapLines": true}"#).unwrap();
+        let settings = Settings::at(file);
+        assert_eq!(settings.editor(), None);
+        assert!(settings.wrap_lines());
     }
 
     #[test]

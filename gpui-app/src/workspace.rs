@@ -1,25 +1,56 @@
 use crate::bench::{self, Bench, Mark};
+use crate::folder_menu::{FolderMenu, FolderMenuEvent, SHORTCUT_SLOTS};
 use crate::repo_view::{Claude, RepoView};
 use diffpilot_core::diff::DiffMode;
 use diffpilot_core::settings::Settings;
+use diffpilot_core::store::Store;
 use diffpilot_core::viewed::ViewedStore;
 use diffpilot_ui_kit::Glyph;
 use gpui::prelude::*;
 use gpui::{
-    App, Context, Entity, IntoElement, Menu, MenuItem, ParentElement, PathPromptOptions, Render, Styled, Window,
-    WindowControlArea, actions, div, px,
+    App, Context, Entity, IntoElement, Menu, MenuItem, ParentElement, PathPromptOptions, Render, Styled, Subscription,
+    Window, WindowControlArea, actions, div, px,
 };
 use gpui_component::button::Button;
 use gpui_component::{ActiveTheme, Icon, Sizable, StyledExt, h_flex, v_flex};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-actions!(diffpilot, [OpenFolder, ToggleSidebar, UnifiedDiff, SplitDiff, Quit]);
+const MAX_LIVE_VIEWS: usize = 4;
+
+actions!(
+    diffpilot,
+    [
+        OpenFolder,
+        ToggleSidebar,
+        UnifiedDiff,
+        SplitDiff,
+        Quit,
+        Folder1,
+        Folder2,
+        Folder3,
+        Folder4,
+        Folder5,
+        Folder6,
+        Folder7,
+        Folder8,
+        Folder9
+    ]
+);
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         gpui::KeyBinding::new("cmd-o", OpenFolder, None),
         gpui::KeyBinding::new("cmd-q", Quit, None),
+        gpui::KeyBinding::new("ctrl-cmd-1", Folder1, None),
+        gpui::KeyBinding::new("ctrl-cmd-2", Folder2, None),
+        gpui::KeyBinding::new("ctrl-cmd-3", Folder3, None),
+        gpui::KeyBinding::new("ctrl-cmd-4", Folder4, None),
+        gpui::KeyBinding::new("ctrl-cmd-5", Folder5, None),
+        gpui::KeyBinding::new("ctrl-cmd-6", Folder6, None),
+        gpui::KeyBinding::new("ctrl-cmd-7", Folder7, None),
+        gpui::KeyBinding::new("ctrl-cmd-8", Folder8, None),
+        gpui::KeyBinding::new("ctrl-cmd-9", Folder9, None),
         gpui::KeyBinding::new("ctrl-cmd-s", ToggleSidebar, None),
     ]);
     crate::sidebar::bind_keys(cx);
@@ -53,24 +84,36 @@ pub fn init(cx: &mut App) {
 pub struct Workspace {
     settings: Arc<Settings>,
     viewed_store: Arc<ViewedStore>,
-    repo: Option<Entity<RepoView>>,
+    menu: Entity<FolderMenu>,
+    views: Vec<(PathBuf, Entity<RepoView>)>,
+    review_store: Arc<Store>,
     benching: bool,
+    _menu_events: Subscription,
 }
 
 impl Workspace {
     pub fn new(
         settings: Arc<Settings>,
         viewed_store: Arc<ViewedStore>,
+        review_store: Arc<Store>,
         folder: Option<PathBuf>,
         benching: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let menu = cx.new(|_| FolderMenu::new(settings.clone()));
+        let menu_events = cx.subscribe_in(&menu, window, |this, _, event, window, cx| match event {
+            FolderMenuEvent::Select(folder) => this.show_folder(folder.clone(), window, cx),
+            FolderMenuEvent::Add => this.open_folder(window, cx),
+        });
         let mut this = Self {
             settings,
             viewed_store,
-            repo: None,
+            menu,
+            views: Vec::new(),
+            review_store,
             benching,
+            _menu_events: menu_events,
         };
         if let Some(folder) = folder {
             this.show_folder(folder, window, cx);
@@ -82,11 +125,58 @@ impl Workspace {
     }
 
     fn show_folder(&mut self, folder: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        let settings = self.settings.clone();
-        let viewed_store = self.viewed_store.clone();
-        let claude = Claude::from_env(&folder, &settings);
-        self.repo = Some(cx.new(|cx| RepoView::new(folder, settings, viewed_store, claude, window, cx)));
+        let folder = folder.canonicalize().unwrap_or(folder);
+        self.settings.remember_folder(&folder);
+        match self.views.iter().position(|(path, _)| *path == folder) {
+            Some(index) => {
+                let view = self.views.remove(index);
+                self.views.insert(0, view);
+            }
+            None => {
+                let settings = self.settings.clone();
+                let viewed_store = self.viewed_store.clone();
+                let review_store = self.review_store.clone();
+                let claude = Claude::from_env(&folder, &settings);
+                let menu = self.menu.clone();
+                let path = folder.clone();
+                let view = cx.new(|cx| {
+                    let mut view = RepoView::new(path, settings, viewed_store, review_store, claude, window, cx);
+                    view.set_title(menu, cx);
+                    view
+                });
+                self.views.insert(0, (folder.clone(), view));
+                self.evict_extra_views(cx);
+            }
+        }
+        if let Some(name) = folder.file_name() {
+            window.set_window_title(&name.to_string_lossy());
+        }
+        let folders = self.settings.folders();
+        self.menu.update(cx, |menu, cx| menu.set_folders(folders, &folder, cx));
         cx.notify();
+    }
+
+    fn evict_extra_views(&mut self, cx: &App) {
+        while self.views.len() > MAX_LIVE_VIEWS {
+            let victim = (1..self.views.len())
+                .rev()
+                .find(|&index| !self.views[index].1.read(cx).review_running(cx))
+                .unwrap_or(self.views.len() - 1);
+            self.views.remove(victim);
+        }
+    }
+
+    fn active_view(&self) -> Option<&Entity<RepoView>> {
+        self.views.first().map(|(_, view)| view)
+    }
+
+    fn switch_to_index(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if index >= SHORTCUT_SLOTS {
+            return;
+        }
+        if let Some(folder) = self.settings.folders().into_iter().nth(index) {
+            self.show_folder(folder, window, cx);
+        }
     }
 
     pub fn open_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -99,23 +189,20 @@ impl Workspace {
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = picked.await else { return };
             let Some(folder) = paths.into_iter().next() else { return };
-            this.update_in(cx, |this, window, cx| {
-                this.settings.remember_folder(&folder);
-                this.show_folder(folder, window, cx);
-            })
-            .ok();
+            this.update_in(cx, |this, window, cx| this.show_folder(folder, window, cx))
+                .ok();
         })
         .detach();
     }
 
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
-        if let Some(repo) = &self.repo {
+        if let Some(repo) = self.active_view() {
             repo.update(cx, |repo, cx| repo.toggle_sidebar(cx));
         }
     }
 
     fn set_diff_mode(&mut self, mode: DiffMode, cx: &mut Context<Self>) {
-        if let Some(repo) = &self.repo {
+        if let Some(repo) = self.active_view() {
             repo.update(cx, |repo, cx| repo.set_diff_mode(mode, cx));
         }
     }
@@ -180,8 +267,7 @@ fn wait_for_bench(workspace: Entity<Workspace>, settle: usize, window: &mut Wind
     if settle >= 60 {
         let scroll = workspace
             .read(cx)
-            .repo
-            .as_ref()
+            .active_view()
             .and_then(|repo| repo.read(cx).sidebar_scroll(cx));
         if let Some((handle, rows)) = scroll {
             bench.begin_scroll(handle, rows);
@@ -194,7 +280,7 @@ fn wait_for_bench(workspace: Entity<Workspace>, settle: usize, window: &mut Wind
 
 impl Render for Workspace {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let content = match &self.repo {
+        let content = match self.active_view() {
             Some(repo) => repo.clone().into_any_element(),
             None => self.empty_state(cx).into_any_element(),
         };
@@ -205,6 +291,15 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &UnifiedDiff, _, cx| this.set_diff_mode(DiffMode::Unified, cx)))
             .on_action(cx.listener(|this, _: &SplitDiff, _, cx| this.set_diff_mode(DiffMode::Split, cx)))
+            .on_action(cx.listener(|this, _: &Folder1, window, cx| this.switch_to_index(0, window, cx)))
+            .on_action(cx.listener(|this, _: &Folder2, window, cx| this.switch_to_index(1, window, cx)))
+            .on_action(cx.listener(|this, _: &Folder3, window, cx| this.switch_to_index(2, window, cx)))
+            .on_action(cx.listener(|this, _: &Folder4, window, cx| this.switch_to_index(3, window, cx)))
+            .on_action(cx.listener(|this, _: &Folder5, window, cx| this.switch_to_index(4, window, cx)))
+            .on_action(cx.listener(|this, _: &Folder6, window, cx| this.switch_to_index(5, window, cx)))
+            .on_action(cx.listener(|this, _: &Folder7, window, cx| this.switch_to_index(6, window, cx)))
+            .on_action(cx.listener(|this, _: &Folder8, window, cx| this.switch_to_index(7, window, cx)))
+            .on_action(cx.listener(|this, _: &Folder9, window, cx| this.switch_to_index(8, window, cx)))
             .child(content)
             .when(self.benching, |this| this.child(bench::probe()))
     }

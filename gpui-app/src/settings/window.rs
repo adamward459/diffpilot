@@ -1,5 +1,6 @@
 use super::{accounts, claude_tab, general};
 use diffpilot_core::connection::{self, ClaudeStatus, McpState};
+use diffpilot_core::editor::{self, Editor};
 use diffpilot_core::github::auth::{Credentials, TokenSource};
 use diffpilot_core::github::client::AuthStatus;
 use diffpilot_core::github::http::{Http, UreqHttp};
@@ -107,6 +108,7 @@ pub enum Menu {
     Reviews,
     Fixes,
     EditPermission,
+    Editor,
 }
 
 /// What the window talks to outside the settings file. Tests pass fakes.
@@ -145,6 +147,8 @@ pub struct SettingsWindow {
     pub(super) github_op: Op,
     pub(super) menu: Option<Menu>,
     pub(super) token: Entity<InputState>,
+    pub(super) custom_editor: Entity<InputState>,
+    pub(super) detected_editor: Editor,
     claude_epoch: u64,
     _subscriptions: Vec<Subscription>,
 }
@@ -162,7 +166,23 @@ impl SettingsWindow {
                 .placeholder("ghp_… or github_pat_…")
                 .masked(true)
         });
+        let saved_template = match settings.editor() {
+            Some(Editor::Custom(template)) => template,
+            _ => String::new(),
+        };
+        let custom_editor = cx.new(|cx| {
+            let mut state = InputState::new(window, cx).placeholder("code -g {file}:{line}:{column}");
+            state.set_value(saved_template, window, cx);
+            state
+        });
         let subscriptions = vec![
+            cx.subscribe(&custom_editor, |this, input, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) && matches!(this.settings.editor(), Some(Editor::Custom(_))) {
+                    let template = input.read(cx).value().to_string();
+                    this.settings.set_editor(Some(Editor::Custom(template)));
+                    cx.notify();
+                }
+            }),
             cx.subscribe_in(&token, window, |this, _, event: &InputEvent, window, cx| {
                 if matches!(event, InputEvent::PressEnter { .. }) {
                     this.save_token(window, cx);
@@ -181,9 +201,13 @@ impl SettingsWindow {
             github_op: Op::Idle,
             menu: None,
             token,
+            custom_editor,
+            detected_editor: editor::detect(),
             claude_epoch: 0,
             _subscriptions: subscriptions,
         };
+        cx.observe_global::<super::SettingsChanged>(|_, cx| cx.notify())
+            .detach();
         window.set_window_title(tab.title());
         this.refresh_claude(cx);
         this.load_for_tab(cx);

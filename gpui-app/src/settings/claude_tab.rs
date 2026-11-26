@@ -181,7 +181,7 @@ fn model_picker(
                 match menu {
                     Menu::Reviews => this.settings.set_reviews_model(model),
                     Menu::Fixes => this.settings.set_fixes_model(model),
-                    Menu::EditPermission => {}
+                    Menu::EditPermission | Menu::Editor => {}
                 }
                 this.close_menu(cx);
             })

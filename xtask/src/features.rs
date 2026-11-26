@@ -62,13 +62,18 @@ const APP: &str = "diffpilot";
 const UI: &str = "diffpilot-ui-kit";
 const XTASK: &str = "xtask";
 
+/// Cargo refuses `--lib` when no selected package has a library, and xtask is only a binary.
+pub fn has_lib(package: &str) -> bool {
+    package != XTASK
+}
+
 use TestSel::{Lib, Target};
 
 pub const FEATURES: &[Feature] = &[
     Feature {
         name: "diff-pane",
         paths: &[
-            "core/src/{diff,file_kind,anchor}.rs",
+            "core/src/{diff,file_kind,anchor,editor}.rs",
             "gpui-app/src/diff_pane/**",
             "gpui-app/src/pane.rs",
             "gpui-app/examples/diff_pane.rs",
@@ -86,6 +91,10 @@ pub const FEATURES: &[Feature] = &[
             Lib {
                 package: CORE,
                 module: "anchor::",
+            },
+            Lib {
+                package: CORE,
+                module: "editor::",
             },
             Lib {
                 package: APP,
@@ -164,6 +173,8 @@ pub const FEATURES: &[Feature] = &[
             "gpui-app/src/review/**",
             "gpui-app/examples/review.rs",
             "gpui-app/tests/review_*.rs",
+            "gpui-app/src/runs.rs",
+            "gpui-app/tests/fix_threads.rs",
         ],
         tests: &[
             Lib {
@@ -193,6 +204,10 @@ pub const FEATURES: &[Feature] = &[
             Target {
                 package: APP,
                 test: "review_session",
+            },
+            Target {
+                package: APP,
+                test: "fix_threads",
             },
         ],
         bench: Some(Binary::app_example("review")),
@@ -407,7 +422,8 @@ pub const FEATURES: &[Feature] = &[
     Feature {
         name: "app-shell",
         paths: &[
-            "gpui-app/src/{main,lib,workspace,repo_view,bench,testing}.rs",
+            "gpui-app/src/{main,lib,workspace,repo_view,bench,testing,folder_menu}.rs",
+            "core/src/folder_status.rs",
             "gpui-app/tests/flows.rs",
             "gpui-app/tests/flows/**",
         ],
@@ -419,6 +435,10 @@ pub const FEATURES: &[Feature] = &[
             Lib {
                 package: APP,
                 module: "bench::",
+            },
+            Lib {
+                package: CORE,
+                module: "folder_status::",
             },
         ],
         bench: Some(Binary::App),

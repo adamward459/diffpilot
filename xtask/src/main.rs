@@ -9,7 +9,7 @@ mod select;
 mod visual;
 mod workspace;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -66,10 +66,14 @@ fn main() -> ExitCode {
     }
 }
 
+/// Found from the current folder, not `CARGO_MANIFEST_DIR`: worktrees share one build dir, so one xtask binary
+/// serves every worktree and a path baked in at build time points at whichever worktree built it.
 fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("xtask lives in the workspace")
+    let start = std::env::current_dir().expect("a current folder");
+    start
+        .ancestors()
+        .find(|dir| dir.join("xtask").join("Cargo.toml").is_file())
+        .unwrap_or_else(|| panic!("{} is not inside the diffpilot workspace", start.display()))
         .to_path_buf()
 }
 

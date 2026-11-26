@@ -9,6 +9,7 @@ use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{DiffLine, DiffMode, FileDiff, Hunk, LineKind};
 use diffpilot_core::review::{Finding, ReviewRequest, ReviewResult, Severity};
 use diffpilot_core::settings::Settings;
+use diffpilot_core::store::Store;
 use diffpilot_core::threads::{ReviewThread, Side, ThreadAnchor, ThreadId};
 use gpui::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext, point, px, size};
 use gpui_component::Root;
@@ -97,7 +98,16 @@ fn open(cx: &mut TestAppContext) -> (Opened, &mut VisualTestContext) {
     host.branch_name = Some("feature".into());
     let session = {
         let replier = replier.clone();
-        cx.new(move |_| ReviewSession::new(host, Arc::new(Settings::in_memory()), Arc::new(Stub(review())), replier))
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        cx.new(move |_| {
+            ReviewSession::new(
+                host,
+                Arc::new(Settings::in_memory()),
+                store,
+                Arc::new(Stub(review())),
+                replier,
+            )
+        })
     };
     let mut pane = None;
     let handle = cx.add_window({

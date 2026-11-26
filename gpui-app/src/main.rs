@@ -1,7 +1,9 @@
 use diffpilot::bench::{self, Bench};
+use diffpilot::runs::Runs;
 use diffpilot::settings;
 use diffpilot::workspace::{self, Workspace};
 use diffpilot_core::settings::Settings;
+use diffpilot_core::store::Store;
 use diffpilot_core::viewed::ViewedStore;
 use gpui::{
     Application, Bounds, TitlebarOptions, WindowBounds, WindowKind, WindowOptions, point, prelude::*, px, size,
@@ -40,13 +42,21 @@ fn main() {
             (Settings::open_default(), ViewedStore::from_env())
         };
         let settings = Arc::new(settings);
+        let review_store = Arc::new(open_review_store(bench.is_some()));
         let viewed_store = Arc::new(viewed_store);
         settings::init(settings.clone(), settings::Services::system(), cx);
+        if bench.is_none() {
+            cx.set_global(Runs::start(review_store.clone(), &settings));
+            let settings = settings.clone();
+            cx.observe_global::<settings::SettingsChanged>(move |cx| {
+                if let Some(runs) = cx.try_global::<Runs>() {
+                    runs.use_settings(&settings);
+                }
+            })
+            .detach();
+        }
         let folder = match folder_argument() {
-            Some(folder) => {
-                settings.remember_folder(&folder);
-                Some(folder)
-            }
+            Some(folder) => Some(folder),
             None => settings.launch_folder(),
         };
 
@@ -74,8 +84,17 @@ fn main() {
             };
             cx.open_window(options, move |window, cx| {
                 settings::install_theme(window, cx);
-                let workspace =
-                    cx.new(|cx| Workspace::new(settings, viewed_store, folder, bench.is_some(), window, cx));
+                let workspace = cx.new(|cx| {
+                    Workspace::new(
+                        settings,
+                        viewed_store,
+                        review_store,
+                        folder,
+                        bench.is_some(),
+                        window,
+                        cx,
+                    )
+                });
                 cx.new(|cx| Root::new(workspace, window, cx))
             })
             .expect("open the main window");
@@ -88,6 +107,17 @@ fn main() {
         .detach();
         cx.activate(true);
     });
+}
+
+fn open_review_store(in_memory: bool) -> Store {
+    let memory = || Store::open_in_memory().expect("an in-memory sqlite database opens");
+    if in_memory {
+        return memory();
+    }
+    Store::open_default().unwrap_or_else(|error| {
+        eprintln!("diffpilot: {error}. Review threads will not be saved.");
+        memory()
+    })
 }
 
 fn folder_argument() -> Option<PathBuf> {
