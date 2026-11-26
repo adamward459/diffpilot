@@ -1,6 +1,7 @@
 use crate::changes::FileStatus;
 use crate::comparison::Comparison;
-use crate::git::{self, GitError};
+use crate::git::GitError;
+use crate::git_diff::GitDiff;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -144,12 +145,8 @@ pub fn load(repo: &Path, comparison: &Comparison) -> Result<Vec<FileDiff>, GitEr
 }
 
 pub fn load_revisions(repo: &Path, revisions: &[String]) -> Result<Vec<FileDiff>, GitError> {
-    let args: Vec<&str> = DIFF_ARGS
-        .iter()
-        .copied()
-        .chain(revisions.iter().map(String::as_str))
-        .collect();
-    Ok(in_tree_order(parse(&git::run(repo, &args)?)))
+    let text = GitDiff::new(repo, revisions)?.run(&DIFF_ARGS, &[])?;
+    Ok(in_tree_order(parse(&text)))
 }
 
 /// Fingerprints of the files named in `paths`, for `ViewedFiles::clear_changed`.

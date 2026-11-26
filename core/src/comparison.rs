@@ -169,6 +169,9 @@ mod tests {
         write(repo, "staged.txt", "staged\n");
         run_git(repo, &["add", "staged.txt"]);
         write(repo, "base.txt", "base\nedited\n");
+        write(repo, ".gitignore", "ignored.txt\n");
+        write(repo, "ignored.txt", "ignored\n");
+        write(repo, "untracked.txt", "untracked\n");
         dir
     }
 
@@ -186,10 +189,13 @@ mod tests {
         let cases = [
             (
                 Comparison::checked_out("main", true),
-                vec!["base.txt", "committed.txt", "staged.txt"],
+                vec![".gitignore", "base.txt", "committed.txt", "staged.txt", "untracked.txt"],
             ),
             (Comparison::checked_out("main", false), vec!["committed.txt"]),
-            (Comparison::WorkingTree, vec!["base.txt", "staged.txt"]),
+            (
+                Comparison::WorkingTree,
+                vec![".gitignore", "base.txt", "staged.txt", "untracked.txt"],
+            ),
             (Comparison::Staged, vec!["staged.txt"]),
             (Comparison::branch("other", "main"), vec!["other.txt"]),
             (Comparison::checked_out("other", false), vec!["committed.txt"]),
@@ -204,9 +210,24 @@ mod tests {
         let dir = fixture();
         let all = changes::load(dir.path(), &Comparison::checked_out("main", true)).unwrap();
         let uncommitted: Vec<_> = all.iter().filter(|c| c.is_uncommitted).map(|c| &c.path).collect();
-        assert_eq!(uncommitted, ["base.txt", "staged.txt"]);
+        assert_eq!(uncommitted, [".gitignore", "base.txt", "staged.txt", "untracked.txt"]);
         let branch = changes::load(dir.path(), &Comparison::branch("feature", "main")).unwrap();
         assert!(branch.iter().all(|change| !change.is_uncommitted));
+    }
+
+    #[test]
+    fn untracked_files_show_as_added_without_touching_the_index() {
+        let dir = fixture();
+        let index_before = std::fs::read(dir.path().join(".git/index")).unwrap();
+        let all = changes::load(dir.path(), &Comparison::checked_out("main", true)).unwrap();
+        let untracked = all.iter().find(|change| change.path == "untracked.txt").unwrap();
+        assert_eq!(
+            (untracked.status, untracked.additions),
+            (crate::changes::FileStatus::Added, 1)
+        );
+        let files = crate::diff::load(dir.path(), &Comparison::WorkingTree).unwrap();
+        assert!(files.iter().any(|file| file.path == "untracked.txt"));
+        assert_eq!(std::fs::read(dir.path().join(".git/index")).unwrap(), index_before);
     }
 
     #[test]

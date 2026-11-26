@@ -512,6 +512,10 @@ pub const FEATURES: &[Feature] = &[
             },
             Lib {
                 package: CORE,
+                module: "git_diff::",
+            },
+            Lib {
+                package: CORE,
                 module: "paths::",
             },
             Lib {

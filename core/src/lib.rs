@@ -11,6 +11,7 @@ pub mod fix;
 pub mod folder_status;
 pub mod forge;
 pub mod git;
+pub mod git_diff;
 pub mod github;
 pub mod guard;
 pub mod guide;

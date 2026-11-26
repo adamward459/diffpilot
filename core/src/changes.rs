@@ -1,5 +1,6 @@
 use crate::comparison::Comparison;
-use crate::git::{self, GitError};
+use crate::git::GitError;
+use crate::git_diff::GitDiff;
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
@@ -72,20 +73,13 @@ impl ChangeSummary {
 
 pub fn load(repo: &Path, comparison: &Comparison) -> Result<Vec<FileChange>, GitError> {
     let revisions = comparison.revisions();
-    let run = |base: &[&str]| -> Result<String, GitError> {
-        let args: Vec<&str> = base
-            .iter()
-            .copied()
-            .chain(revisions.iter().map(String::as_str))
-            .collect();
-        git::run(repo, &args)
-    };
+    let diff = GitDiff::new(repo, &revisions)?;
     let (name_status, numstat, uncommitted) = std::thread::scope(|scope| {
-        let name_status = scope.spawn(|| run(&["diff", "-z", "-M", "--name-status"]));
-        let numstat = scope.spawn(|| run(&["diff", "-z", "-M", "--numstat"]));
+        let name_status = scope.spawn(|| diff.run(&["diff", "-z", "-M", "--name-status"], &[]));
+        let numstat = scope.spawn(|| diff.run(&["diff", "-z", "-M", "--numstat"], &[]));
         let uncommitted = comparison
             .includes_uncommitted()
-            .then(|| scope.spawn(|| git::run(repo, &["diff", "-z", "--name-only", "HEAD"])));
+            .then(|| scope.spawn(|| diff.uncommitted_paths()));
         let join = |handle: std::thread::ScopedJoinHandle<'_, _>| handle.join().expect("git thread panicked");
         (join(name_status), join(numstat), uncommitted.map(join))
     });

@@ -9,6 +9,7 @@ use crate::anchor;
 use crate::changes;
 use crate::diff::{self, FileDiff};
 use crate::git;
+use crate::git_diff::GitDiff;
 use crate::policy::{APPROVE_TOOL, EditPermission, mcp_tools};
 use crate::review::{FindingMeta, Severity};
 use crate::store::{NewComment, NewThread, SessionId, Store};
@@ -312,21 +313,12 @@ impl Ctx<'_> {
     }
 
     fn git_diff(&self, files: &[String]) -> Result<String, ToolError> {
-        let mut args: Vec<&str> = diff::DIFF_ARGS.to_vec();
-        args.extend(self.binding.revisions.iter().map(String::as_str));
-        if !files.is_empty() {
-            args.push("--");
-            args.extend(files.iter().map(String::as_str));
-        }
-        Ok(git::run(&self.binding.repo, &args)?)
+        Ok(GitDiff::new(&self.binding.repo, &self.binding.revisions)?.run(&diff::DIFF_ARGS, files)?)
     }
 
     fn file_list(&self) -> Result<String, ToolError> {
-        let run = |mode: &str| -> Result<String, ToolError> {
-            let mut args = vec!["diff", "-z", "-M", mode];
-            args.extend(self.binding.revisions.iter().map(String::as_str));
-            Ok(git::run(&self.binding.repo, &args)?)
-        };
+        let diff = GitDiff::new(&self.binding.repo, &self.binding.revisions)?;
+        let run = |mode: &str| diff.run(&["diff", "-z", "-M", mode], &[]);
         let files = changes::parse(&run("--name-status")?, &run("--numstat")?, "");
         let mut text = format!("Changed files ({}):\n", files.len());
         for file in files {
