@@ -6,7 +6,7 @@ use crate::diff_pane::layout::{
 use crate::diff_pane::lines::{
     self, CODE_SIZE, Column, Fonts, Frame, LineCache, LineKey, LineRequest, PaintFiller, Style, Thumb,
 };
-use crate::diff_pane::preview::{self, PreviewCard};
+use crate::diff_pane::preview::{self, ImageMode, PreviewCard, PreviewEvent};
 use crate::diff_pane::rows::{BlockId, BlockSlot, Notice, RowKind};
 use crate::diff_pane::state::{Geometry, PaneState};
 use crate::guide::note::{NoteCard, NoteEvent};
@@ -133,7 +133,8 @@ struct PreviewSource {
 struct Preview {
     file: Arc<FileDiff>,
     card: Option<Entity<PreviewCard>>,
-    measured: Option<f32>,
+    measured: Option<(f32, ImageMode)>,
+    _resized: Option<Subscription>,
 }
 
 struct Review {
@@ -737,6 +738,7 @@ impl DiffPane {
                     file: Arc::clone(&file),
                     card: None,
                     measured: None,
+                    _resized: None,
                 },
             );
             let task = cx.background_spawn({
@@ -760,27 +762,33 @@ impl DiffPane {
             return;
         }
         if let Some(loaded) = loaded {
-            entry.card = Some(cx.new(|_| PreviewCard::new(Arc::new(loaded), width)));
+            let card = cx.new(|_| PreviewCard::new(file.path.clone(), Arc::new(loaded), width));
+            entry._resized = Some(cx.subscribe(&card, |_, _, _: &PreviewEvent, cx| cx.notify()));
+            entry.card = Some(card);
         }
         cx.notify();
     }
 
     fn measure_previews(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let width = self.state.geometry().width;
-        let stale: Vec<(String, Entity<PreviewCard>)> = self
+        let stale: Vec<(String, Entity<PreviewCard>, ImageMode)> = self
             .previews
             .iter()
-            .filter(|(path, entry)| entry.measured != Some(width) && self.state.shows_preview(path))
-            .filter_map(|(path, entry)| Some((path.clone(), entry.card.clone()?)))
+            .filter(|(path, _)| self.state.shows_preview(path))
+            .filter_map(|(path, entry)| {
+                let card = entry.card.clone()?;
+                let mode = card.read(cx).mode();
+                (entry.measured != Some((width, mode))).then(|| (path.clone(), card, mode))
+            })
             .collect();
         let mut changed = false;
-        for (path, card) in stale {
+        for (path, card, mode) in stale {
             card.update(cx, |card, _| card.set_width(width));
             let loaded = card.read(cx).loaded();
-            let height = preview::height(&loaded, width, window, cx);
+            let height = preview::height(&loaded, width, mode, window, cx);
             changed |= self.state.set_preview_height(&path, height + 1.0);
             if let Some(entry) = self.previews.get_mut(&path) {
-                entry.measured = Some(width);
+                entry.measured = Some((width, mode));
             }
         }
         changed

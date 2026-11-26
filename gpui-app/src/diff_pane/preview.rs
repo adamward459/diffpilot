@@ -5,15 +5,21 @@ use diffpilot_core::diff::FileDiff;
 use diffpilot_core::preview::{PreviewKind, preview_kind, read_side};
 use diffpilot_core::threads::Side;
 use diffpilot_ui_kit::Theme;
+use diffpilot_ui_kit::components::{label_switch, tag};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AvailableSpace, Context, Div, FontStyle, FontWeight, Hsla, Image, ImageFormat, IntoElement,
     ObjectFit, ParentElement as _, Render, Size, StrikethroughStyle, Styled as _, StyledImage as _, StyledText,
     TextRun, UnderlineStyle, Window, div, font, img, px,
 };
+use gpui::{
+    Bounds, CursorStyle, EventEmitter, InteractiveElement as _, MouseButton, MouseMoveEvent, Pixels, Point, canvas,
+};
 use gpui_component::ActiveTheme;
+use std::cell::Cell;
 use std::io::Cursor;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 
 pub const PAD_X: f32 = 16.0;
@@ -29,6 +35,11 @@ const LINE: f32 = 20.0;
 const CODE: f32 = 12.0;
 const CODE_LINE: f32 = 18.0;
 const BLOCK_GAP: f32 = 10.0;
+const MODE_GAP: f32 = 12.0;
+const KNOB: f32 = 14.0;
+const ONION_TRACK: f32 = 200.0;
+const SLIDER_ROW: f32 = 34.0;
+const CAPTION_MIN: f32 = 380.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tone {
@@ -179,54 +190,333 @@ pub fn column_width(width: f32) -> f32 {
     ((width - 2.0 * PAD_X - GAP) / 2.0).max(40.0)
 }
 
-pub struct PreviewCard {
-    loaded: Arc<Loaded>,
-    width: f32,
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ImageMode {
+    #[default]
+    TwoUp,
+    Swipe,
+    Onion,
 }
 
+impl ImageMode {
+    const ALL: [ImageMode; 3] = [ImageMode::TwoUp, ImageMode::Swipe, ImageMode::Onion];
+    const LABELS: [&'static str; 3] = ["2-up", "Swipe", "Onion Skin"];
+
+    fn index(self) -> usize {
+        Self::ALL.iter().position(|mode| *mode == self).unwrap_or(0)
+    }
+}
+
+pub enum PreviewEvent {
+    Resized,
+}
+
+type OnMode = Rc<dyn Fn(usize, &mut Window, &mut App)>;
+type OnPick = Rc<dyn Fn(Point<Pixels>, &mut Window, &mut App)>;
+
+struct Controls {
+    path: String,
+    mode: ImageMode,
+    position: f32,
+    track: Rc<Cell<Option<Bounds<Pixels>>>>,
+    on_mode: OnMode,
+    on_pick: OnPick,
+}
+
+impl Controls {
+    fn inert(mode: ImageMode) -> Self {
+        Self {
+            path: String::new(),
+            mode,
+            position: 0.5,
+            track: Rc::default(),
+            on_mode: Rc::new(|_, _, _| {}),
+            on_pick: Rc::new(|_, _, _| {}),
+        }
+    }
+}
+
+pub struct PreviewCard {
+    path: String,
+    loaded: Arc<Loaded>,
+    width: f32,
+    mode: ImageMode,
+    position: f32,
+    track: Rc<Cell<Option<Bounds<Pixels>>>>,
+}
+
+impl EventEmitter<PreviewEvent> for PreviewCard {}
+
 impl PreviewCard {
-    pub fn new(loaded: Arc<Loaded>, width: f32) -> Self {
-        Self { loaded, width }
+    pub fn new(path: String, loaded: Arc<Loaded>, width: f32) -> Self {
+        Self {
+            path,
+            loaded,
+            width,
+            mode: ImageMode::default(),
+            position: 0.5,
+            track: Rc::default(),
+        }
     }
 
     pub fn loaded(&self) -> Arc<Loaded> {
         Arc::clone(&self.loaded)
     }
 
+    pub fn mode(&self) -> ImageMode {
+        self.mode
+    }
+
     pub fn set_width(&mut self, width: f32) {
         self.width = width;
+    }
+
+    fn set_mode(&mut self, mode: ImageMode, cx: &mut Context<Self>) {
+        if mode != self.mode {
+            self.mode = mode;
+            self.position = 0.5;
+            cx.emit(PreviewEvent::Resized);
+            cx.notify();
+        }
+    }
+
+    fn pick(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(track) = self.track.get() else { return };
+        let width = f32::from(track.size.width).max(1.0);
+        let position = (f32::from(at.x - track.origin.x) / width).clamp(0.0, 1.0);
+        if position != self.position {
+            self.position = position;
+            cx.notify();
+        }
     }
 }
 
 impl Render for PreviewCard {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        card(&self.loaded, &Theme::of(cx), self.width, cx)
+        let this = cx.entity();
+        let picker = this.clone();
+        let controls = Controls {
+            path: self.path.clone(),
+            mode: self.mode,
+            position: self.position,
+            track: self.track.clone(),
+            on_mode: Rc::new(move |index, _, cx| this.update(cx, |card, cx| card.set_mode(ImageMode::ALL[index], cx))),
+            on_pick: Rc::new(move |at, _, cx| picker.update(cx, |card, cx| card.pick(at, cx))),
+        };
+        card(&self.loaded, &Theme::of(cx), self.width, &controls, cx)
     }
 }
 
-pub fn height(loaded: &Loaded, width: f32, window: &mut Window, cx: &mut App) -> f32 {
+pub fn height(loaded: &Loaded, width: f32, mode: ImageMode, window: &mut Window, cx: &mut App) -> f32 {
     let theme = Theme::of(cx);
     let space = Size {
         width: AvailableSpace::Definite(px(width)),
         height: AvailableSpace::MinContent,
     };
-    let size = card(loaded, &theme, width, cx)
+    let size = card(loaded, &theme, width, &Controls::inert(mode), cx)
         .into_any_element()
         .layout_as_root(space, window, cx);
     f32::from(size.height)
 }
 
-fn card(loaded: &Loaded, theme: &Theme, width: f32, cx: &App) -> Div {
+fn usable(side: &LoadedSide) -> Option<&ImageBody> {
+    match &side.body {
+        Body::Image(image) if !image.broken && image.size.is_some() => Some(image),
+        _ => None,
+    }
+}
+
+fn pair(loaded: &Loaded) -> Option<(&ImageBody, &ImageBody)> {
+    match loaded.sides.as_slice() {
+        [old, new] => Some((usable(old)?, usable(new)?)),
+        _ => None,
+    }
+}
+
+fn card(loaded: &Loaded, theme: &Theme, width: f32, controls: &Controls, cx: &App) -> Div {
+    let frame = div().w(px(width)).px(px(PAD_X)).py(px(PAD_Y));
+    let Some((old, new)) = pair(loaded) else {
+        return two_up(frame, loaded, theme, width, cx);
+    };
+    let path = controls.path.clone();
+    let switch = div().flex().justify_center().pb(px(MODE_GAP)).child(label_switch(
+        theme,
+        "image-mode",
+        &ImageMode::LABELS,
+        controls.mode.index(),
+        move |index| format!("pane:image-mode:{path}:{}", ImageMode::LABELS[index]),
+        controls.on_mode.clone(),
+    ));
+    let frame = frame.flex().flex_col().child(switch);
+    match controls.mode {
+        ImageMode::TwoUp => two_up(frame, loaded, theme, width, cx),
+        ImageMode::Swipe => frame.child(stacked(old, new, theme, width, controls, true)),
+        ImageMode::Onion => frame.child(stacked(old, new, theme, width, controls, false)),
+    }
+}
+
+fn two_up(frame: Div, loaded: &Loaded, theme: &Theme, width: f32, cx: &App) -> Div {
     let column = column_width(width);
+    frame.child(
+        div()
+            .flex()
+            .flex_row()
+            .items_start()
+            .gap(px(GAP))
+            .children(loaded.sides.iter().map(|side| side_view(side, theme, column, cx))),
+    )
+}
+
+fn stacked(old: &ImageBody, new: &ImageBody, theme: &Theme, width: f32, controls: &Controls, swipe: bool) -> Div {
+    let inset = 2.0 * (IMAGE_PAD + 1.0);
+    let room = width - 2.0 * PAD_X - inset;
+    let fitted = |image: &ImageBody| fit(image.size.unwrap_or((1, 1)), room, MAX_IMAGE_HEIGHT);
+    let (old_size, new_size) = (fitted(old), fitted(new));
+    let stage_w = old_size.0.max(new_size.0) + inset;
+    let stage_h = old_size.1.max(new_size.1) + inset;
+    let layer = |image: &ImageBody, (w, h): (f32, f32)| {
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .w(px(stage_w))
+            .h(px(stage_h))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                img(image.image.clone())
+                    .w(px(w))
+                    .h(px(h))
+                    .object_fit(ObjectFit::Contain),
+            )
+    };
+    let position = controls.position;
+    let track = controls.track.clone();
+    let measure = canvas(move |bounds, _, _| track.set(Some(bounds)), |_, _, _, _| {})
+        .absolute()
+        .size_full();
+    let on_down = controls.on_pick.clone();
+    let on_move = controls.on_pick.clone();
+    let draggable = |element: Div| {
+        element
+            .cursor(CursorStyle::ResizeLeftRight)
+            .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                on_down(event.position, window, cx)
+            })
+            .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
+                if event.pressed_button == Some(MouseButton::Left) {
+                    on_move(event.position, window, cx)
+                }
+            })
+    };
+    let mut stage = tag(div(), || format!("pane:image-stage:{}", controls.path))
+        .relative()
+        .flex_none()
+        .w(px(stage_w))
+        .h(px(stage_h))
+        .overflow_hidden()
+        .border_1()
+        .border_color(theme.diff.line)
+        .rounded(px(6.0))
+        .bg(theme.diff.cap)
+        .child(layer(old, old_size));
+    let slider = if swipe {
+        let split = position * stage_w;
+        stage = draggable(
+            stage
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left(px(split))
+                        .w(px(stage_w - split))
+                        .h(px(stage_h))
+                        .overflow_hidden()
+                        .child(layer(new, new_size).left(px(-split))),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left(px(split - 1.0))
+                        .w(px(2.0))
+                        .h_full()
+                        .bg(theme.accent),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(stage_h / 2.0 - KNOB / 2.0))
+                        .left(px(split - KNOB / 2.0))
+                        .size(px(KNOB))
+                        .rounded_full()
+                        .bg(theme.accent),
+                )
+                .child(measure),
+        );
+        None
+    } else {
+        stage = stage.child(layer(new, new_size).opacity(position));
+        let track = draggable(
+            tag(div(), || format!("pane:onion-track:{}", controls.path))
+                .relative()
+                .w(px(ONION_TRACK))
+                .h(px(KNOB))
+                .flex()
+                .items_center()
+                .child(div().w_full().h(px(4.0)).rounded_full().bg(theme.diff.line))
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left(px(position * ONION_TRACK - KNOB / 2.0))
+                        .size(px(KNOB))
+                        .rounded_full()
+                        .bg(theme.accent),
+                )
+                .child(measure),
+        );
+        Some(
+            div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(10.0))
+                .h(px(SLIDER_ROW))
+                .text_size(px(12.0))
+                .text_color(theme.diff.muted)
+                .child("Before")
+                .child(track)
+                .child("After"),
+        )
+    };
+    let caption = |label: &'static str, image: &ImageBody| {
+        div()
+            .flex()
+            .gap(px(6.0))
+            .child(div().font_weight(FontWeight::SEMIBOLD).child(label))
+            .child(image_meta_text(image))
+    };
     div()
         .flex()
-        .flex_row()
-        .items_start()
-        .gap(px(GAP))
-        .w(px(width))
-        .px(px(PAD_X))
-        .py(px(PAD_Y))
-        .children(loaded.sides.iter().map(|side| side_view(side, theme, column, cx)))
+        .flex_col()
+        .items_center()
+        .child(stage)
+        .children(slider)
+        .child(
+            div()
+                .flex()
+                .justify_between()
+                .gap(px(GAP))
+                .w(px(stage_w.max(CAPTION_MIN)))
+                .h(px(META))
+                .pt(px(6.0))
+                .text_size(px(12.0))
+                .text_color(theme.diff.muted)
+                .child(caption("Before", old))
+                .child(caption("After", new)),
+        )
 }
 
 fn side_view(side: &LoadedSide, theme: &Theme, column: f32, cx: &App) -> Div {
@@ -296,11 +586,15 @@ fn image_box(image: &ImageBody, theme: &Theme, column: f32) -> Div {
     }
 }
 
-fn image_meta(image: &ImageBody, theme: &Theme) -> Div {
-    let text = match (image.broken, image.size) {
+fn image_meta_text(image: &ImageBody) -> String {
+    match (image.broken, image.size) {
         (false, Some((width, height))) => format!("{width} \u{d7} {height} \u{b7} {}", file_size(image.bytes)),
         _ => file_size(image.bytes),
-    };
+    }
+}
+
+fn image_meta(image: &ImageBody, theme: &Theme) -> Div {
+    let text = image_meta_text(image);
     div()
         .h(px(META))
         .pt(px(6.0))

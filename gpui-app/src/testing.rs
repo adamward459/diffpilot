@@ -121,6 +121,7 @@ pub fn preview_fixture() -> tempfile::TempDir {
     git(repo, &["commit", "-q", "-m", "base"]);
     git(repo, &["checkout", "-q", "-b", "feature"]);
     write_png(repo, "assets/logo.png", 20, 10, [40, 40, 200, 255]);
+    write_png(repo, "assets/icon.png", 8, 8, [40, 160, 40, 255]);
     write(repo, "notes.md", "# Notes\n\nSome **bold** words.\n\n- one\n- two\n");
     git(repo, &["add", "."]);
     git(repo, &["commit", "-q", "-m", "feature"]);
