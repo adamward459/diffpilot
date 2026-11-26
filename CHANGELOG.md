@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- The app is now named Diffpilot in the menu bar and the Dock.
+
 ### Added
 
 - Compare a branch with its base: another branch, a tag, a recent commit, only the working tree, or only the staged changes.

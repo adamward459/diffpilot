@@ -94,7 +94,7 @@ pub fn render(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
         Row::new(t, "Personal access token")
             .subtitle(caption(
                 t,
-                "Paste a token. diffpilot checks it with GitHub, then saves it in your keychain.",
+                "Paste a token. Diffpilot checks it with GitHub, then saves it in your keychain.",
             ))
             .control(token_field)
             .into_any_element(),
@@ -104,7 +104,7 @@ pub fn render(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindo
     }
     let hint: Div = caption(
         t,
-        "Without a token saved here, diffpilot uses the one the gh CLI holds. Sign out of gh with `gh auth logout`.",
+        "Without a token saved here, Diffpilot uses the one the gh CLI holds. Sign out of gh with `gh auth logout`.",
     );
     div()
         .flex()

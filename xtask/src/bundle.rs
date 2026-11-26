@@ -5,6 +5,7 @@ use std::process::Command;
 use crate::{Result, root, run, take_flag};
 
 const APP: &str = "diffpilot";
+const DISPLAY_NAME: &str = "Diffpilot";
 const BUNDLE_ID: &str = "com.adamward459.diffpilot";
 const BINS: [&str; 3] = ["diffpilot", "diffpilot-guard", "diffpilot-mcp"];
 const TARGETS: [&str; 2] = ["aarch64-apple-darwin", "x86_64-apple-darwin"];
@@ -125,8 +126,8 @@ fn info_plist(version: &str) -> String {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>{APP}</string>
-    <key>CFBundleDisplayName</key><string>{APP}</string>
+    <key>CFBundleName</key><string>{DISPLAY_NAME}</string>
+    <key>CFBundleDisplayName</key><string>{DISPLAY_NAME}</string>
     <key>CFBundleIdentifier</key><string>{BUNDLE_ID}</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleExecutable</key><string>{APP}</string>

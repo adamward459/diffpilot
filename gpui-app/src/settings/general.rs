@@ -30,7 +30,7 @@ fn launch(window: &SettingsWindow, t: &Theme, cx: &mut Context<SettingsWindow>) 
                 Row::new(t, "Open the last repository on launch")
                     .subtitle(caption(
                         t,
-                        "Without it, diffpilot starts with no folder until you press ⌘O.",
+                        "Without it, Diffpilot starts with no folder until you press ⌘O.",
                     ))
                     .control(
                         tag(switch(t, "open-last", open, true), || "open-last").on_click(cx.listener(
@@ -242,7 +242,7 @@ const NAMESPACES: [&str; 4] = ["diffpilot", "review_ui", "settings", "sidebar"];
 const TITLES: [(&str, &str); 9] = [
     ("diffpilot::OpenFolder", "Open Folder…"),
     ("diffpilot::ToggleSidebar", "Toggle Sidebar"),
-    ("diffpilot::Quit", "Quit diffpilot"),
+    ("diffpilot::Quit", "Quit Diffpilot"),
     ("settings::OpenSettings", "Settings…"),
     ("review_ui::StopReview", "Stop Review"),
     ("sidebar::SelectPrevious", "Previous file"),
