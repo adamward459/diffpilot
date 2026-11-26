@@ -9,6 +9,7 @@ pub mod editor;
 pub mod file_kind;
 pub mod fix;
 pub mod folder_status;
+pub mod forge;
 pub mod git;
 pub mod github;
 pub mod guard;

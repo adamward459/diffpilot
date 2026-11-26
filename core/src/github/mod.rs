@@ -10,7 +10,7 @@ pub mod remote;
 pub mod review;
 pub mod types;
 
-mod time;
+pub(crate) mod time;
 
 pub use client::Github;
 pub use error::GithubError;

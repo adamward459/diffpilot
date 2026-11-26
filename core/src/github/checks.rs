@@ -2,13 +2,7 @@ use super::client::Github;
 use super::error::GithubError;
 use super::log::{ParsedLog, parse_log};
 use super::remote::RepoSlug;
-use super::time::parse_timestamp;
-use crate::cancel::CancelToken;
 use serde::Deserialize;
-use std::collections::BTreeSet;
-use std::time::Duration;
-
-pub const POLL_INTERVAL: Duration = Duration::from_secs(15);
 
 const GITHUB_ACTIONS_SLUG: &str = "github-actions";
 
@@ -41,38 +35,6 @@ pub enum Conclusion {
     Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Outcome {
-    Queued,
-    Running,
-    Passed,
-    Failed,
-    Skipped,
-    Cancelled,
-    ActionRequired,
-}
-
-impl Outcome {
-    pub fn is_finished(self) -> bool {
-        !matches!(self, Self::Queued | Self::Running)
-    }
-}
-
-fn outcome_of(status: RunStatus, conclusion: Option<Conclusion>) -> Outcome {
-    match (status, conclusion) {
-        (RunStatus::InProgress, _) => Outcome::Running,
-        (RunStatus::Completed, Some(conclusion)) => match conclusion {
-            Conclusion::Success => Outcome::Passed,
-            Conclusion::Failure | Conclusion::TimedOut | Conclusion::StartupFailure => Outcome::Failed,
-            Conclusion::Cancelled => Outcome::Cancelled,
-            Conclusion::ActionRequired => Outcome::ActionRequired,
-            Conclusion::Neutral | Conclusion::Skipped | Conclusion::Stale | Conclusion::Unknown => Outcome::Skipped,
-        },
-        (RunStatus::Completed, None) => Outcome::Skipped,
-        _ => Outcome::Queued,
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckRun {
     pub id: u64,
@@ -89,27 +51,6 @@ pub struct CheckRun {
     /// Set for GitHub Actions jobs, which a log download and a re-run need.
     pub run_id: Option<u64>,
     pub job_id: Option<u64>,
-}
-
-impl CheckRun {
-    pub fn outcome(&self) -> Outcome {
-        outcome_of(self.status, self.conclusion)
-    }
-
-    pub fn is_actions_job(&self) -> bool {
-        self.job_id.is_some()
-    }
-
-    /// Seconds from start to end, or to `now` (epoch seconds) while the check still runs.
-    pub fn duration_seconds(&self, now: i64) -> Option<u64> {
-        let started = parse_timestamp(self.started_at.as_deref()?)?;
-        let ended = self
-            .completed_at
-            .as_deref()
-            .and_then(parse_timestamp)
-            .or_else(|| (!self.outcome().is_finished()).then_some(now))?;
-        u64::try_from(ended - started).ok()
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -132,94 +73,11 @@ pub struct CommitStatus {
     pub target_url: Option<String>,
 }
 
-impl CommitStatus {
-    pub fn outcome(&self) -> Outcome {
-        match self.state {
-            StatusState::Success => Outcome::Passed,
-            StatusState::Failure | StatusState::Error | StatusState::Unknown => Outcome::Failed,
-            StatusState::Pending => Outcome::Running,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Counts {
-    pub passed: u32,
-    pub failed: u32,
-    pub running: u32,
-    pub queued: u32,
-    pub other: u32,
-}
-
-impl Counts {
-    pub fn total(&self) -> u32 {
-        self.passed + self.failed + self.running + self.queued + self.other
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Overall {
-    None,
-    Passing,
-    Pending,
-    Failing,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChecksSnapshot {
     pub sha: String,
     pub runs: Vec<CheckRun>,
     pub statuses: Vec<CommitStatus>,
-}
-
-impl ChecksSnapshot {
-    fn outcomes(&self) -> impl Iterator<Item = Outcome> + '_ {
-        self.runs
-            .iter()
-            .map(CheckRun::outcome)
-            .chain(self.statuses.iter().map(CommitStatus::outcome))
-    }
-
-    pub fn counts(&self) -> Counts {
-        let mut counts = Counts::default();
-        for outcome in self.outcomes() {
-            match outcome {
-                Outcome::Passed => counts.passed += 1,
-                Outcome::Failed => counts.failed += 1,
-                Outcome::Running => counts.running += 1,
-                Outcome::Queued => counts.queued += 1,
-                _ => counts.other += 1,
-            }
-        }
-        counts
-    }
-
-    /// True when every check has finished. A commit without checks counts as finished.
-    pub fn is_complete(&self) -> bool {
-        self.outcomes().all(Outcome::is_finished)
-    }
-
-    pub fn overall(&self) -> Overall {
-        let counts = self.counts();
-        if counts.total() == 0 {
-            Overall::None
-        } else if counts.failed > 0 {
-            Overall::Failing
-        } else if !self.is_complete() {
-            Overall::Pending
-        } else {
-            Overall::Passing
-        }
-    }
-
-    pub fn failed_jobs(&self) -> impl Iterator<Item = &CheckRun> {
-        self.runs.iter().filter(|run| run.outcome() == Outcome::Failed)
-    }
-
-    pub fn failed_run_ids(&self) -> Vec<u64> {
-        let ids: BTreeSet<u64> = self.failed_jobs().filter_map(|run| run.run_id).collect();
-        ids.into_iter().collect()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -395,24 +253,6 @@ impl Github {
     }
 }
 
-/// Fetches the checks every `interval` until all have finished or `cancel` fires, and returns the last snapshot.
-pub fn poll_checks(
-    github: &Github,
-    slug: &RepoSlug,
-    sha: &str,
-    interval: Duration,
-    cancel: &CancelToken,
-    mut on_update: impl FnMut(&ChecksSnapshot),
-) -> Result<ChecksSnapshot, GithubError> {
-    loop {
-        let snapshot = github.checks(slug, sha)?;
-        on_update(&snapshot);
-        if snapshot.is_complete() || cancel.wait(interval) {
-            return Ok(snapshot);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,7 +266,6 @@ mod tests {
     const RUN: &str = include_str!("../../tests/fixtures/github/workflow_run.json");
     const LOG: &str = include_str!("../../tests/fixtures/github/job_log.txt");
     const SHA: &str = "3f2a91c0d4e5b6a7988776655443322110ffeedd";
-    const NOW: i64 = 1_795_601_000;
 
     fn slug() -> RepoSlug {
         RepoSlug {
@@ -457,35 +296,23 @@ mod tests {
         let http = snapshot_http();
         let snapshot = client(&http).checks(&slug(), SHA).unwrap();
         http.assert_done();
-        let names: Vec<(&str, Outcome)> = snapshot
+        let names: Vec<(&str, RunStatus, Option<Conclusion>)> = snapshot
             .runs
             .iter()
-            .map(|run| (run.name.as_str(), run.outcome()))
+            .map(|run| (run.name.as_str(), run.status, run.conclusion))
             .collect();
         assert_eq!(
             names,
             [
-                ("lint", Outcome::Passed),
-                ("unit tests", Outcome::Failed),
-                ("build", Outcome::Running),
-                ("e2e", Outcome::Skipped),
-                ("Vercel", Outcome::Passed),
-                ("deploy", Outcome::Queued),
+                ("lint", RunStatus::Completed, Some(Conclusion::Success)),
+                ("unit tests", RunStatus::Completed, Some(Conclusion::Failure)),
+                ("build", RunStatus::InProgress, None),
+                ("e2e", RunStatus::Completed, Some(Conclusion::Skipped)),
+                ("Vercel", RunStatus::Completed, Some(Conclusion::Success)),
+                ("deploy", RunStatus::Queued, None),
             ]
         );
         assert_eq!(snapshot.statuses.len(), 2);
-        assert_eq!(
-            snapshot.counts(),
-            Counts {
-                passed: 3,
-                failed: 1,
-                running: 2,
-                queued: 1,
-                other: 1
-            }
-        );
-        assert_eq!(snapshot.overall(), Overall::Failing);
-        assert!(!snapshot.is_complete());
     }
 
     #[test]
@@ -493,21 +320,10 @@ mod tests {
         let snapshot = client(&snapshot_http()).checks(&slug(), SHA).unwrap();
         let unit = &snapshot.runs[1];
         assert_eq!((unit.run_id, unit.job_id), (Some(1289), Some(5002)));
-        assert!(unit.is_actions_job());
         assert_eq!(unit.title.as_deref(), Some("1 test failed"));
         let vercel = &snapshot.runs[4];
         assert_eq!((vercel.run_id, vercel.job_id), (None, None));
         assert_eq!(vercel.app.as_deref(), Some("Vercel"));
-        assert_eq!(snapshot.failed_run_ids(), [1289]);
-        assert_eq!(snapshot.failed_jobs().count(), 1);
-    }
-
-    #[test]
-    fn measures_how_long_each_check_took() {
-        let snapshot = client(&snapshot_http()).checks(&slug(), SHA).unwrap();
-        assert_eq!(snapshot.runs[0].duration_seconds(NOW), Some(34));
-        assert_eq!(snapshot.runs[2].duration_seconds(NOW), Some(120));
-        assert_eq!(snapshot.runs[5].duration_seconds(NOW), None);
     }
 
     #[test]
@@ -527,20 +343,7 @@ mod tests {
         );
         let snapshot = client(&http).checks(&slug(), "abc").unwrap();
         assert_eq!(snapshot.runs.len(), 3);
-        assert_eq!(snapshot.overall(), Overall::Passing);
         http.assert_done();
-    }
-
-    #[test]
-    fn a_commit_without_checks_has_no_overall_state() {
-        let http = Arc::new(
-            FakeHttp::new()
-                .reply("check-runs", 200, r#"{"total_count":0,"check_runs":[]}"#)
-                .reply("/status", 200, r#"{"state":"pending","statuses":[]}"#),
-        );
-        let snapshot = client(&http).checks(&slug(), "abc").unwrap();
-        assert_eq!(snapshot.overall(), Overall::None);
-        assert!(snapshot.is_complete());
     }
 
     #[test]
@@ -615,70 +418,6 @@ mod tests {
         assert!(!github.rerun_failed_jobs(&slug(), 1289).unwrap());
         assert!(http.requests().is_empty());
         assert_eq!(log.mutations()[0].name, "rerunFailedJobs");
-    }
-
-    fn two_runs(status: &str, conclusion: &str) -> String {
-        format!(
-            r#"{{"total_count":1,"check_runs":[{{"id":1,"name":"build","status":"{status}","conclusion":{conclusion}}}]}}"#
-        )
-    }
-
-    #[test]
-    fn polling_stops_when_every_check_has_finished() {
-        let http = Arc::new(
-            FakeHttp::new()
-                .reply("check-runs", 200, &two_runs("in_progress", "null"))
-                .reply("/status", 200, r#"{"statuses":[]}"#)
-                .reply("check-runs", 200, &two_runs("in_progress", "null"))
-                .reply("/status", 200, r#"{"statuses":[]}"#)
-                .reply("check-runs", 200, &two_runs("completed", r#""success""#))
-                .reply("/status", 200, r#"{"statuses":[]}"#),
-        );
-        let mut seen = Vec::new();
-        let last = poll_checks(
-            &client(&http),
-            &slug(),
-            "abc",
-            Duration::ZERO,
-            &CancelToken::new(),
-            |snapshot| seen.push(snapshot.overall()),
-        )
-        .unwrap();
-        assert_eq!(seen, [Overall::Pending, Overall::Pending, Overall::Passing]);
-        assert!(last.is_complete());
-        http.assert_done();
-        assert_eq!(http.requests().len(), 6);
-    }
-
-    #[test]
-    fn polling_stops_when_cancelled() {
-        let http = Arc::new(
-            FakeHttp::new()
-                .reply("check-runs", 200, &two_runs("in_progress", "null"))
-                .reply("/status", 200, r#"{"statuses":[]}"#),
-        );
-        let cancel = CancelToken::new();
-        let stopper = cancel.clone();
-        let last = poll_checks(&client(&http), &slug(), "abc", Duration::from_secs(60), &cancel, |_| {
-            stopper.cancel();
-        })
-        .unwrap();
-        assert!(!last.is_complete());
-        assert_eq!(http.requests().len(), 2);
-    }
-
-    #[test]
-    fn polling_gives_up_on_an_error() {
-        let http = Arc::new(FakeHttp::new().reply("check-runs", 401, "{}"));
-        let result = poll_checks(
-            &client(&http),
-            &slug(),
-            "abc",
-            Duration::ZERO,
-            &CancelToken::new(),
-            |_| {},
-        );
-        assert_eq!(result, Err(GithubError::Unauthorized));
     }
 
     #[test]

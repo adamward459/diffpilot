@@ -57,6 +57,10 @@ pub fn init(settings: Arc<Settings>, services: Services, cx: &mut App) {
     });
 }
 
+pub fn services(cx: &App) -> Option<Services> {
+    cx.try_global::<Registry>().map(|registry| registry.services.clone())
+}
+
 /// Opens the window, or brings the open one to the front. `tab` selects a tab in either case.
 pub fn open(tab: Option<Tab>, cx: &mut App) -> Option<WindowHandle<Root>> {
     let registry = cx.try_global::<Registry>()?;

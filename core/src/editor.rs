@@ -205,6 +205,13 @@ pub fn open(editor: &Editor, target: &OpenTarget) -> Result<(), OpenError> {
     }
 }
 
+pub fn open_url(url: &str) -> Result<(), OpenError> {
+    spawn_detached(Path::new("open"), &[url.to_string()]).map_err(|source| OpenError::Spawn {
+        program: "open".into(),
+        source,
+    })
+}
+
 fn spawn_detached(program: &Path, args: &[String]) -> std::io::Result<()> {
     let mut child = Command::new(program)
         .args(args)

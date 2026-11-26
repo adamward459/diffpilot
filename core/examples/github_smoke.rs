@@ -22,14 +22,16 @@ fn main() {
     let prs = github.list_pull_requests(&slug).expect("list");
     if let Some(pr) = prs.first() {
         let checks = github.checks(&slug, &pr.head_sha).expect("checks");
-        println!("#{} {:?} {:?}", pr.number, checks.overall(), checks.counts());
+        println!(
+            "#{} {} runs, {} statuses",
+            pr.number,
+            checks.runs.len(),
+            checks.statuses.len()
+        );
         for run in &checks.runs {
             println!(
-                "  {} {:?} job={:?} run={:?}",
-                run.name,
-                run.outcome(),
-                run.job_id,
-                run.run_id
+                "  {} {:?}/{:?} job={:?} run={:?}",
+                run.name, run.status, run.conclusion, run.job_id, run.run_id
             );
         }
         if let Some(job_id) = checks.runs.iter().find_map(|run| run.job_id) {
