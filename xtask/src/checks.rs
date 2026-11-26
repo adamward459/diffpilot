@@ -287,7 +287,15 @@ fn parse(rest: &[String]) -> (Vec<&str>, bool) {
 }
 
 pub fn unit(rest: &[String]) -> Result {
-    let (names, force) = parse(rest);
+    let (all, rest) = crate::take_flag(rest, "--all");
+    let (names, force) = parse(&rest);
+    if names.is_empty() && !all {
+        return Err(
+            "name the features to test: run `cargo xtask related` and use the `unit` line it prints, \
+                    or pass --all to test every feature"
+                .into(),
+        );
+    }
     let features = resolve(&names)?;
     let ws = Workspace::load()?;
     let files = tracked_files()?;
@@ -421,14 +429,17 @@ pub fn related() -> Result {
             .filter(|p| p.feature.bench.is_some())
             .map(|p| p.feature.name)
             .collect();
-        if !benched.is_empty() {
-            println!("  cargo xtask perf {}", benched.join(" "));
-        }
         let scened: Vec<&str> = picks
             .iter()
             .filter(|p| !p.feature.scenes.is_empty())
             .map(|p| p.feature.name)
             .collect();
+        if !benched.is_empty() || !scened.is_empty() {
+            println!("These open windows. Run them only when the user asks:");
+        }
+        if !benched.is_empty() {
+            println!("  cargo xtask perf {}", benched.join(" "));
+        }
         if !scened.is_empty() {
             println!("  cargo xtask visual {} --compare", scened.join(" "));
         }
@@ -470,7 +481,7 @@ pub fn features() -> Result {
         .filter(|f| (f.starts_with("core/src/") || f.starts_with("gpui-app/src/")) && !listed(f))
         .collect();
     println!(
-        "\nUnlisted files under core/src and gpui-app/src (a change selects every feature in the crates that build them):"
+        "\nUnlisted files under core/src and gpui-app/src (a change selects the features that test, name, or hold a file of their top-level module):"
     );
     unlisted.iter().for_each(|f| println!("  {f}"));
     Ok(())

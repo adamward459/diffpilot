@@ -20,7 +20,7 @@ const USAGE: &str = "\
 cargo xtask fmt                 format all Rust code
 cargo xtask precommit           format, re-add the staged files, and check the staged Rust code
 cargo xtask fixture [--force]   build the fixture repo in .fixtures/large (only if its generator changed)
-cargo xtask unit [feature...] [--force]   cargo test for the features (default: all)
+cargo xtask unit <feature...> [--force]   cargo test for the features (--all: every feature)
 cargo xtask clippy [crate...] [--force]   cargo clippy --all-targets -- -D warnings
 cargo xtask flows               headless user flows through the whole app (gpui-app/tests/flows/)
 cargo xtask perf [feature...] [--base REF] [--force]

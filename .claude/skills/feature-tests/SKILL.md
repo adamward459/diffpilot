@@ -29,7 +29,17 @@ Unit tests sit next to the code (`#[cfg(test)]`) or in a crate's `tests/` folder
 | `shared` | tests for the files no feature lists (git, paths, store, `ui-kit`) |
 | `xtask` | the dev tooling |
 
-A change to a file that a feature lists selects that feature and every feature that uses it directly. A feature uses another when one of its Rust files names one of the other's modules through `crate::`, `super::`, `diffpilot_core::` or `diffpilot::`. `cargo xtask features` prints who uses each feature. Users of users are not followed, because the core modules use each other and that would select everything. Cargo still compiles whole crates, so a broken type or API anywhere fails the build. Run `cargo xtask unit` with no names to run every feature. A change to a file that no feature lists selects every feature in the crates that build it, because anything can depend on it. A change to the root Cargo files selects every feature. `xtask/**` selects only the `xtask` feature.
+A change selects features by module, not by whole feature:
+
+- A Rust file under `<crate>/src/` selects its owner and every feature that names its top-level module through `crate::`, `super::`, `diffpilot_core::`, `diffpilot::` or `diffpilot_ui_kit::`, tests that module, or lists a file inside its folder. So `core/src/viewed.rs` selects `sidebar` and `app-shell`, and `core/src/store/schema.rs` selects every feature that names `store`.
+- A test file selects only its owner.
+- Any other file selects its owner and every feature that uses the owner. `cargo xtask features` prints who uses each feature.
+- A crate root (`lib.rs`, `main.rs`), a module the crate root re-exports, the root Cargo files, and a file that no rule above covers select every feature in the crates that build them.
+- `xtask/**` selects only the `xtask` feature.
+
+Users of users are not followed, because the core modules use each other and that would select everything. Cargo still compiles whole crates, so a broken type or API anywhere fails the build.
+
+Run only what `cargo xtask related` prints. `cargo xtask unit` with no names fails. `cargo xtask unit --all` runs every feature; use it only when the user asks. If `related` misses a feature that a change can break, fix the table in `xtask/src/features.rs`.
 
 ## Flows
 
@@ -39,7 +49,7 @@ A change to a file that a feature lists selects that feature and every feature t
 
 1. Put new code in the crate that owns the feature. Put tests next to it. When you add a file, list it in the feature that owns it in `xtask/src/features.rs`, and add its tests there.
 2. When you add code on a hot path, such as scroll, resize, keystroke, launch, or large-diff code, make sure the bench of its feature measures it.
-3. Before you report the work as complete, run `cargo xtask related`. It prints the commands for the features and crates your changes touch, compared with the upstream branch, including uncommitted and untracked files: `cargo xtask unit <features>`, `cargo xtask clippy <crates>`, `cargo xtask flows`, and `cargo xtask perf <features>` for the chosen features that have a bench, and `cargo xtask visual <features> --compare` for the chosen features that have scenes.
+3. Before you report the work as complete, run `cargo xtask related`. It prints the commands for the features and crates your changes touch, compared with the upstream branch, including uncommitted and untracked files: `cargo xtask unit <features>`, `cargo xtask clippy <crates>`, and `cargo xtask flows`. Under "These open windows" it also prints `cargo xtask perf <features>` for the chosen features that have a bench, and `cargo xtask visual <features> --compare` for the chosen features that have scenes. Run those two only when the user asks.
 4. Run the commands that cover your change. Do not report the work as complete until they pass. If you skip a printed command, say which one and why.
 5. Before you open or update a PR, run `cargo xtask baseline` and commit `baselines/bench.json` in the PR.
 6. After you open or update a PR, run `cargo xtask pr-screenshots`. It captures the scenes of the features the PR touches, saves the images to `screenshots/<feature>/<scene>.png`, and pixel-diffs each one with the base branch's copy. It commits and pushes the images and puts them, grouped by feature, with the list of changed images, in a `## Screenshots

@@ -170,6 +170,7 @@ pub const FEATURES: &[Feature] = &[
             "gpui-app/tests/review_*.rs",
             "gpui-app/src/runs.rs",
             "gpui-app/tests/fix_threads.rs",
+            "core/src/store/rows.rs",
         ],
         tests: &[
             Lib {
@@ -223,6 +224,7 @@ pub const FEATURES: &[Feature] = &[
         name: "sidebar",
         paths: &[
             "core/src/{tree,viewed,changes}.rs",
+            "core/src/store/viewed.rs",
             "gpui-app/src/sidebar*.rs",
             "gpui-app/src/format.rs",
         ],
@@ -298,6 +300,7 @@ pub const FEATURES: &[Feature] = &[
             "core/src/{review_prompt,review_tools_step}.md",
             "core/src/mcp/**",
             "core/src/bin/**",
+            "core/src/store/runs.rs",
             "core/tests/{runs,mcp,mcp_stdio,guard_hook,e2e,smoke,process_groups}.rs",
         ],
         tests: &[
@@ -550,6 +553,17 @@ impl Feature {
     pub fn packages(&self) -> impl Iterator<Item = &'static str> {
         self.tests.iter().map(TestSel::package)
     }
+
+    pub fn tests_module(&self, home: &str, module: &str) -> bool {
+        self.tests.iter().any(|t| match t {
+            TestSel::Lib { package, module: m } => {
+                *package == home
+                    && m.strip_prefix(module)
+                        .is_some_and(|r| r.is_empty() || r.starts_with("::"))
+            }
+            TestSel::Target { .. } => false,
+        })
+    }
 }
 
 pub fn listed(path: &str) -> bool {
@@ -561,19 +575,20 @@ pub fn listed(path: &str) -> bool {
 /// following users of users reaches every feature, because the core modules use each other.
 pub struct Usage {
     users: Vec<BTreeSet<usize>>,
+    named: Vec<Vec<(String, BTreeSet<String>)>>,
 }
 
 impl Usage {
     pub fn scan(ws: &crate::workspace::Workspace, files: &[String]) -> Usage {
         let root = crate::root();
-        let named: Vec<Vec<(&str, BTreeSet<String>)>> = FEATURES
+        let named: Vec<Vec<(String, BTreeSet<String>)>> = FEATURES
             .iter()
             .map(|f| {
                 files
                     .iter()
                     .filter(|path| path.ends_with(".rs") && f.lists(path))
                     .filter_map(|path| {
-                        let package = ws.crates.iter().find(|c| c.contains(path))?.package.as_str();
+                        let package = ws.crates.iter().find(|c| c.contains(path))?.package.clone();
                         let source = std::fs::read_to_string(root.join(path)).ok()?;
                         Some((package, workspace_names(&source)))
                     })
@@ -595,11 +610,17 @@ impl Usage {
                     .collect()
             })
             .collect();
-        Usage { users }
+        Usage { users, named }
     }
 
     pub fn users(&self, owner: usize) -> &BTreeSet<usize> {
         &self.users[owner]
+    }
+
+    pub fn names(&self, ws: &crate::workspace::Workspace, feature: usize, home: &str, module: &str) -> bool {
+        self.named[feature]
+            .iter()
+            .any(|(package, names)| names.contains(module) && ws.closure(package).contains(home))
     }
 
     pub fn used_by(&self, user: usize) -> impl Iterator<Item = usize> + '_ {
@@ -621,7 +642,13 @@ impl Feature {
     }
 }
 
-const ROOTS: [&str; 4] = ["crate::", "super::", "diffpilot_core::", "diffpilot::"];
+const ROOTS: [&str; 5] = [
+    "crate::",
+    "super::",
+    "diffpilot_core::",
+    "diffpilot::",
+    "diffpilot_ui_kit::",
+];
 
 /// Identifiers that follow a workspace crate root, inside a `use` statement or in a qualified path.
 /// `std::sync::Arc` names no workspace module, so it does not count as using the `sync` module.

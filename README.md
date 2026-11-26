@@ -80,7 +80,7 @@ Common commands:
 git config core.hooksPath .githooks   # once per clone: format Rust on commit
 cargo run -p diffpilot                # debug build
 cargo xtask related                   # print the tests and checks for your change
-cargo xtask unit                      # run all tests
+cargo xtask unit --all                # run all tests
 cargo xtask perf                      # compare time and memory benchmarks with the base branch
 cargo xtask visual                    # capture the screenshot scenes of every feature
 ```
