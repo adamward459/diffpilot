@@ -309,6 +309,23 @@ async fn without_the_cli_the_section_says_so_and_never_runs_mcp_commands(cx: &mu
 }
 
 #[gpui::test]
+async fn opening_on_a_section_shows_its_heading_at_the_top(cx: &mut TestAppContext) {
+    let (rig, cx) = closed_rig(cx, &Options::default());
+    let workspace = rig.workspace.clone();
+    cx.update(|window, cx| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.open_settings(Some(Section::Diff), window, cx)
+        })
+    });
+    rig.settle(cx);
+    let heading = cx.debug_bounds("section:Diff").expect("the section is tagged");
+    let body = cx.debug_bounds("settings:body").expect("the list is tagged");
+    let gap = (heading.top() - body.top()).abs();
+    assert!(gap < px(8.), "Diff starts {gap:?} away from the top of the list");
+    assert_eq!(rig.top_section(cx), Some(Section::Diff));
+}
+
+#[gpui::test]
 async fn clicking_a_toc_item_scrolls_the_list_to_that_section(cx: &mut TestAppContext) {
     let (rig, cx) = rig(cx, Options::default());
     for section in Section::ALL {

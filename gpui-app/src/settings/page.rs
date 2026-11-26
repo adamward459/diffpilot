@@ -134,6 +134,7 @@ pub struct SettingsPage {
     services: Services,
     pub(super) search: Entity<InputState>,
     pub(super) scroll: ScrollHandle,
+    scroll_target: Option<Section>,
     pub(super) claude: Load<ClaudeStatus>,
     pub(super) mcp: Load<McpState>,
     pub(super) path_op: Op,
@@ -195,6 +196,7 @@ impl SettingsPage {
             services,
             search,
             scroll: ScrollHandle::new(),
+            scroll_target: Some(section),
             claude: Load::Idle,
             mcp: Load::Idle,
             path_op: Op::Idle,
@@ -211,7 +213,6 @@ impl SettingsPage {
             .detach();
         this.refresh_claude(cx);
         this.refresh_github(cx);
-        this.scroll_to_section(section, cx);
         this.focus_search(window, cx);
         this
     }
@@ -453,7 +454,17 @@ impl EventEmitter<PageEvent> for SettingsPage {}
 const TOC_WIDTH: f32 = 200.;
 
 impl Render for SettingsPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // gpui scrolls to an item using the scroll area's bounds from the last frame, which are empty
+        // before the first one; scrolling then overshoots by the height of the header.
+        if let Some(section) = self.scroll_target {
+            if self.scroll.bounds().size.height > px(0.) {
+                self.scroll_target = None;
+                self.scroll_to_section(section, cx);
+            } else {
+                window.request_animation_frame();
+            }
+        }
         let t = Theme::of(cx);
         let query = self.query(cx);
         let sections = self.visible_sections(cx);
