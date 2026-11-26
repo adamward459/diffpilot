@@ -640,11 +640,23 @@ impl ReviewSession {
         self.announce_run(cx);
     }
 
+    /// Threads Claude can fix now. Threads in the running or a queued fix run are left out.
     pub fn fixable(&self) -> Vec<ThreadId> {
+        let taken = self.taken_by_fix();
         self.store
             .threads()
-            .filter(|thread| fix::skip_reason(thread).is_none())
+            .filter(|thread| fix::skip_reason(thread).is_none() && !taken.contains(&thread.id))
             .map(|thread| thread.id)
+            .collect()
+    }
+
+    fn taken_by_fix(&self) -> HashSet<ThreadId> {
+        self.current
+            .iter()
+            .filter(|run| !run.state.is_finished())
+            .chain(&self.queued)
+            .filter(|run| run.kind == RunKind::FixComments)
+            .flat_map(|run| run.threads.iter().copied())
             .collect()
     }
 
@@ -664,9 +676,6 @@ impl ReviewSession {
     }
 
     pub fn fix_blocker(&self, cx: &App) -> Option<String> {
-        if self.fixing() {
-            return Some("Claude is already fixing comments.".into());
-        }
         let Some(runs) = cx.try_global::<Runs>() else {
             return Some(RUNS_UNAVAILABLE.into());
         };
@@ -703,6 +712,15 @@ impl ReviewSession {
             return;
         };
         self.refresh_threads(cx);
+        let taken = self.taken_by_fix();
+        let chosen: Vec<ThreadId> = if chosen.is_empty() {
+            self.fixable()
+        } else {
+            chosen.iter().copied().filter(|id| !taken.contains(id)).collect()
+        };
+        if chosen.is_empty() {
+            return self.fail_fix(NOTHING_TO_FIX_MESSAGE.into(), cx);
+        }
         let target = Target {
             repo,
             session: Self::thread_key(&self.host),
@@ -711,7 +729,7 @@ impl ReviewSession {
             edit_permission: self.settings.edit_permission(),
         };
         let threads: Vec<ReviewThread> = self.store.threads().cloned().collect();
-        let plan = match fix::fix_comments(&target, &threads, chosen) {
+        let plan = match fix::fix_comments(&target, &threads, &chosen) {
             Ok(plan) => plan,
             Err(_) => return self.fail_fix(NOTHING_TO_FIX_MESSAGE.into(), cx),
         };

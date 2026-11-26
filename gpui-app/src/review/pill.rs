@@ -53,11 +53,9 @@ pub struct ReviewPill {
     popover: Entity<ReviewPopover>,
     open: bool,
     result_for: Option<RunId>,
-    fix_result_for: Option<RunId>,
     needs_room: bool,
     ticker: Option<Task<()>>,
     result_timer: Option<Task<()>>,
-    fix_timer: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -81,11 +79,9 @@ impl ReviewPill {
             popover,
             open: false,
             result_for: None,
-            fix_result_for: None,
             needs_room: false,
             ticker: None,
             result_timer: None,
-            fix_timer: None,
             _subscriptions: subscriptions,
         };
         pill.run_changed(cx);
@@ -119,10 +115,6 @@ impl ReviewPill {
         self.result_for.is_some()
     }
 
-    pub fn shows_fix_result(&self) -> bool {
-        self.fix_result_for.is_some()
-    }
-
     fn show_review_problem(&mut self, cx: &mut Context<Self>) {
         if self.session.read(cx).review_problem().is_some() {
             self.open = true;
@@ -131,18 +123,13 @@ impl ReviewPill {
     }
 
     fn run_changed(&mut self, cx: &mut Context<Self>) {
-        let (running, done_review, done_fix) = {
-            let session = self.session.read(cx);
-            let current = session.current();
-            let done = |kind| {
-                current
-                    .filter(|run| run.kind == kind && run.state == RunState::Done)
-                    .map(|run| run.id)
-            };
+        let (running, done_review) = {
+            let current = self.session.read(cx).current();
             (
                 current.is_some_and(|run| !run.state.is_finished()),
-                done(RunKind::Review),
-                done(RunKind::FixComments),
+                current
+                    .filter(|run| run.kind == RunKind::Review && run.state == RunState::Done)
+                    .map(|run| run.id),
             )
         };
         if !running {
@@ -162,18 +149,6 @@ impl ReviewPill {
                 this.update(cx, |pill, cx| pill.hide_result(cx)).ok();
             }));
         }
-        if done_fix.is_none() {
-            self.fix_result_for = None;
-            self.fix_timer = None;
-        } else if self.fix_result_for != done_fix {
-            self.fix_result_for = done_fix;
-            self.fix_timer = Some(cx.spawn(async move |this, cx| {
-                cx.background_executor()
-                    .timer(Duration::from_secs(RESULT_SECONDS))
-                    .await;
-                this.update(cx, |pill, cx| pill.hide_fix_result(cx)).ok();
-            }));
-        }
         self.sync_room(cx);
         cx.notify();
     }
@@ -185,20 +160,13 @@ impl ReviewPill {
         cx.notify();
     }
 
-    fn hide_fix_result(&mut self, cx: &mut Context<Self>) {
-        self.fix_result_for = None;
-        self.fix_timer = None;
-        self.sync_room(cx);
-        cx.notify();
-    }
-
     fn sync_room(&mut self, cx: &mut Context<Self>) {
         let running = self
             .session
             .read(cx)
             .current()
             .is_some_and(|run| !run.state.is_finished());
-        let needs = running || self.shows_result() || self.shows_fix_result();
+        let needs = running || self.shows_result();
         if needs != self.needs_room {
             self.needs_room = needs;
             cx.emit(PillEvent::NeedsRoomChanged(needs));
@@ -283,81 +251,6 @@ impl ReviewPill {
         .into_any_element()
     }
 
-    fn fix_area(&self, session: &ReviewSession, theme: Theme, cx: &Context<Self>) -> Option<AnyElement> {
-        if session.current().is_some_and(|run| !run.state.is_finished()) {
-            return None;
-        }
-        let button = |id: &'static str| {
-            Button::new(id)
-                .look(Look::Ghost)
-                .regular()
-                .rounded_full()
-                .h(px(30.))
-                .gap(px(6.))
-        };
-        if let Some(problem) = session.fix_problem() {
-            return Some(
-                button("fix-failed")
-                    .icon_color(Glyph::TriangleAlert, 16., theme.amber)
-                    .label("Fix failed")
-                    .tooltip(problem)
-                    .on_click(cx.listener(|this, _, _, cx| this.dismiss_fix_problem(cx)))
-                    .into_any_element(),
-            );
-        }
-        if self.shows_fix_result()
-            && let Some((fixed, open)) = session.fix_outcome()
-        {
-            let text = if open == 0 {
-                format!("Fixed {fixed}")
-            } else {
-                format!("Fixed {fixed} · {open} open")
-            };
-            return Some(
-                tag(button("fix-result"), || "pill:fix-result")
-                    .child(filled_check(theme.ui.green, 16.))
-                    .child(div().child(text))
-                    .into_any_element(),
-            );
-        }
-        let count = session.fixable().len();
-        if count == 0 {
-            return None;
-        }
-        let blocker = session.fix_blocker(cx);
-        let tooltip = blocker
-            .clone()
-            .unwrap_or_else(|| "Ask Claude to fix the open comments".into());
-        Some(
-            tag(div(), || format!("pill:fix-ready:{count}"))
-                .child(
-                    tag(
-                        Button::new("fix-threads")
-                            .look(Look::Claude)
-                            .regular()
-                            .rounded_full()
-                            .h(px(30.))
-                            .gap(px(6.))
-                            .icon(Glyph::Pencil, 14.)
-                            .label(format!("Fix {count}"))
-                            .tooltip(tooltip)
-                            .disabled(blocker.is_some()),
-                        || "pill:fix-threads",
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| this.fix(cx))),
-                )
-                .into_any_element(),
-        )
-    }
-
-    pub fn fix(&mut self, cx: &mut Context<Self>) {
-        self.session.update(cx, |session, cx| session.fix_threads(&[], cx));
-    }
-
-    pub fn dismiss_fix_problem(&mut self, cx: &mut Context<Self>) {
-        self.session.update(cx, |session, cx| session.dismiss_fix_problem(cx));
-    }
-
     pub fn stop(&mut self, cx: &mut Context<Self>) {
         self.session.update(cx, |session, cx| session.stop_claude(cx));
     }
@@ -368,14 +261,13 @@ impl Render for ReviewPill {
         let theme = Theme::of(cx);
         let session = self.session.read(cx);
         let visible = session.host().visible_path.is_some();
-        let fix = self.fix_area(session, theme, cx);
         let claude = match session.current().filter(|run| !run.state.is_finished()) {
             Some(run) => self.working(run, theme, cx),
             None => Popover::new("review-popover")
                 .anchor(Corner::TopRight)
                 .open(self.open)
                 .on_open_change(cx.listener(|this, open: &bool, _, cx| {
-                    if *open && (this.shows_result() || this.shows_fix_result()) {
+                    if *open && this.shows_result() {
                         cx.emit(PillEvent::ShowArea);
                     } else {
                         this.set_open(*open, cx);
@@ -394,7 +286,6 @@ impl Render for ReviewPill {
             .text_size(px(13.))
             .text_color(cx.theme().foreground)
             .child(claude)
-            .children(fix)
     }
 }
 

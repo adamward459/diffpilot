@@ -8,8 +8,8 @@ use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, ClipboardItem, Context, Entity, EventEmitter, Focusable, FontWeight, Hsla,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Render, SharedString, Styled, StyledText,
-    Subscription, TextRun, Window, div, font, px,
+    InteractiveElement, IntoElement, KeyBinding, MouseButton, ParentElement, Pixels, Render, SharedString, Styled,
+    StyledText, Subscription, TextRun, Window, actions, div, font, px,
 };
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::{ActiveTheme, Icon, h_flex, v_flex};
@@ -46,6 +46,12 @@ pub mod metrics {
 }
 
 use metrics as m;
+
+actions!(review_card, [SendToClaude]);
+
+pub fn init(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new("secondary-shift-enter", SendToClaude, Some("Input"))]);
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CardEvent {
@@ -410,6 +416,20 @@ impl ThreadCard {
         composer.input.update(cx, |input, cx| input.set_value("", window, cx));
     }
 
+    fn send_to_claude(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(composer) = &self.composer else { return };
+        let text = composer.input.read(cx).value();
+        if text.trim().is_empty() {
+            return;
+        }
+        let id = self.id;
+        let mention = mentions_claude(&text);
+        self.submit(window, cx);
+        if !mention {
+            self.session.update(cx, |session, cx| session.fix_threads(&[id], cx));
+        }
+    }
+
     fn complete_mention(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(composer) = &self.composer else { return };
         let value = composer.input.read(cx).value();
@@ -658,6 +678,16 @@ impl ThreadCard {
                             row.child(
                                 self.button("Cancel", "cancel")
                                     .on_click(cx.listener(|this, _, _, cx| this.resolve(cx))),
+                            )
+                        })
+                        .when(has_text && !mention, |row| {
+                            row.child(
+                                self.button("Send to Claude", "send")
+                                    .look(Look::Claude)
+                                    .icon(Glyph::Sparkles, 12.)
+                                    .hint("⌘⇧↩")
+                                    .tooltip("Post this comment and ask Claude to fix it")
+                                    .on_click(cx.listener(|this, _, window, cx| this.send_to_claude(window, cx))),
                             )
                         })
                         .child(
@@ -924,7 +954,7 @@ fn tag_comment(element: gpui::Div, comment: Option<&ThreadComment>) -> gpui::Div
     }
 }
 
-fn card_key(thread: &ReviewThread) -> String {
+pub(crate) fn card_key(thread: &ReviewThread) -> String {
     match (&thread.finding, &thread.anchor) {
         (Some(finding), _) => finding.title.clone(),
         (None, ThreadAnchor::Line { path, line, .. }) => format!("{path}:{line}"),
@@ -984,6 +1014,7 @@ impl Render for ThreadCard {
             .font_family(cx.theme().font_family.clone())
             .text_size(px(m::TEXT_SIZE))
             .when(dismissed, |card| card.opacity(0.6))
+            .on_action(cx.listener(|this, _: &SendToClaude, window, cx| this.send_to_claude(window, cx)))
             .child(card)
             .into_any_element()
     }

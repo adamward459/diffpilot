@@ -8,10 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ### Added
 
+- Send to Claude in the comment box (also ⌘⇧↩) posts your comment and asks Claude to fix just that thread.
 - Link folders outside the repo to a guide by path. Claude reads them for context and can list code there that the change may break.
 
 ### Changed
 
+- Fix is now its own toolbar button, next to Ask Claude. It opens a list where you pick which comments to send, and it stays available while a review runs.
 - Glass controls now look like real glass: a sheen lit from the top, a crisp rim, and a shadow that sinks when you hover or press. Buttons are now capsules, and controls, toolbars, and text are larger.
 - The app is now named Diffpilot in the menu bar and the Dock.
 - Hunk actions (Stage Hunk, Revert, Open in Editor, Copy, Ask Claude) appear in a floating bar when you hover a hunk header, like the selection bar.

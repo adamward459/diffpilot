@@ -12,7 +12,7 @@ use crate::guide::stage::{GuideStage, StageEvent, banner};
 use crate::guide::text::CodeRef;
 use crate::pane::{DiffPane, DiffPaneEvent};
 use crate::remote::{RemoteCapsule, RemoteEvent, RemoteMenu, RemoteStatus, SyncKind};
-use crate::review::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
+use crate::review::{FixButton, FixEvent, PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
 use crate::sidebar::{LoadedChanges, Sidebar, SidebarEvent};
 use diffpilot_core::changes;
 use diffpilot_core::claude::{ClaudeCliReplier, Replier, ScriptedReplier};
@@ -198,6 +198,7 @@ struct Session {
     sidebar: Entity<Sidebar>,
     pane: Entity<DiffPane>,
     pill: Entity<ReviewPill>,
+    fix: Entity<FixButton>,
     area: Entity<ClaudeArea>,
     review: Entity<ReviewSession>,
     guide: Entity<GuideSession>,
@@ -344,6 +345,14 @@ impl RepoView {
             .is_some_and(|session| session.pill.read(cx).is_running(cx))
     }
 
+    fn sync_toolbar_room(&mut self, cx: &mut Context<Self>) {
+        let room = self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.pill.read(cx).needs_room() || session.fix.read(cx).needs_room());
+        self.set_compact_toolbar(room, cx);
+    }
+
     pub fn set_compact_toolbar(&mut self, compact: bool, cx: &mut Context<Self>) {
         if self.compact_toolbar != compact {
             self.compact_toolbar = compact;
@@ -453,6 +462,7 @@ impl RepoView {
         };
         pane.update(cx, |pane, cx| pane.set_review(review.clone(), window, cx));
         let pill = cx.new(|cx| ReviewPill::new(review.clone(), window, cx));
+        let fix = cx.new(|cx| FixButton::new(review.clone(), window, cx));
         let area = {
             let popover = pill.read(cx).popover();
             cx.new(|cx| ClaudeArea::new(review.clone(), popover, cx))
@@ -519,8 +529,11 @@ impl RepoView {
                 this.set_claude_area(false, cx)
             }),
             cx.subscribe(&pill, |this, _, event: &PillEvent, cx| match event {
-                PillEvent::NeedsRoomChanged(room) => this.set_compact_toolbar(*room, cx),
+                PillEvent::NeedsRoomChanged(_) => this.sync_toolbar_room(cx),
                 PillEvent::ShowArea => this.show_claude_log(cx),
+            }),
+            cx.subscribe(&fix, |this, _, FixEvent::NeedsRoomChanged(_), cx| {
+                this.sync_toolbar_room(cx)
             }),
             cx.subscribe_in(&sidebar, window, |this, _, event: &SidebarEvent, _, cx| match event {
                 SidebarEvent::Select(path) => {
@@ -559,6 +572,7 @@ impl RepoView {
             sidebar,
             pane,
             pill,
+            fix,
             area,
             review,
             guide,
@@ -1261,6 +1275,7 @@ impl RepoView {
                 .id("toolbar-claude-slot")
                 .px(px(6.))
                 .child(session.pill.clone())
+                .child(session.fix.clone())
         });
         let activity = self
             .remote

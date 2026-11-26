@@ -143,8 +143,9 @@ fn past_runs_lists_the_earlier_run_and_picking_it_shows_its_log(app: &mut TestAp
     wait_until_shows(cx, "claude:status:Review finished · 4 comments · 7 tool calls");
 
     fake.hold();
-    wait_until_shows(cx, "pill:fix-threads");
-    click(cx, "pill:fix-threads");
+    wait_until_shows(cx, "fix:open");
+    click(cx, "fix:open");
+    click(cx, "fix:send");
     fake.wait_for_launches(cx, 2);
     wait_until_shows(cx, "pill:stop-fix:working");
     click(cx, "pill:stop-fix:working");

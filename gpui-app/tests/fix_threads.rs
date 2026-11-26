@@ -3,7 +3,7 @@ mod common;
 use common::*;
 use diffpilot::review::pill::RESULT_SECONDS;
 use diffpilot::review::session::{FIX_NEEDS_DONT_ASK, FIX_NEEDS_WORKING_TREE, NOTHING_TO_FIX_MESSAGE};
-use diffpilot::review::{ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
+use diffpilot::review::{FixButton, ReviewEvent, ReviewHost, ReviewSession};
 use diffpilot::runs::Runs;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::mcp::McpBridge;
@@ -130,8 +130,12 @@ impl World {
     }
 
     fn comment(&self, cx: &mut TestAppContext, text: &str) -> ThreadId {
+        self.comment_on_line(cx, 1, text)
+    }
+
+    fn comment_on_line(&self, cx: &mut TestAppContext, line: u32, text: &str) -> ThreadId {
         self.session.update(cx, |session, cx| {
-            let id = session.create_thread(ThreadAnchor::line("src/a.ts", Side::New, 1), cx);
+            let id = session.create_thread(ThreadAnchor::line("src/a.ts", Side::New, line), cx);
             session.post(id, text, cx);
             id
         })
@@ -171,7 +175,7 @@ async fn a_fix_run_moves_through_its_states_and_the_threads_follow_it(cx: &mut T
 
     w.start_fix(cx);
     assert!(w.session.read_with(cx, |s, _| s.fixing()));
-    assert!(w.session.read_with(cx, |s, cx| s.fix_blocker(cx)).is_some());
+    assert!(w.session.read_with(cx, |s, _| s.fixable()).is_empty());
 
     let reply = w.tool("reply", json!({ "threadId": id.0, "body": "Renaming it." }));
     assert_eq!(reply["ok"], true, "{reply}");
@@ -200,6 +204,30 @@ async fn a_fix_run_moves_through_its_states_and_the_threads_follow_it(cx: &mut T
             .unwrap()
             .contains(&ReviewEvent::RunFinished(RunState::Done))
     );
+}
+
+#[gpui::test]
+async fn a_second_fix_queues_and_leaves_out_the_threads_the_first_one_has(cx: &mut TestAppContext) {
+    let w = world(cx, working_tree());
+    let first = w.comment(cx, "Rename this.");
+    w.start_fix(cx);
+    let second = w.comment_on_line(cx, 2, "And this.");
+    assert_eq!(w.session.read_with(cx, |s, _| s.fixable()), [second]);
+
+    w.session
+        .update(cx, |session, cx| session.fix_threads(&[first, second], cx));
+    let (queued, failure, fixable) = w.session.read_with(cx, |s, _| {
+        (
+            s.queued().iter().map(|run| run.threads.clone()).collect::<Vec<_>>(),
+            s.fix_failure().map(String::from),
+            s.fixable(),
+        )
+    });
+    assert_eq!(queued, [vec![second]]);
+    assert_eq!(failure, None);
+    assert!(fixable.is_empty());
+
+    w.session.update(cx, |session, cx| session.stop_claude(cx));
 }
 
 #[gpui::test]
@@ -352,39 +380,24 @@ async fn fix_with_no_open_comment_starts_no_run(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-async fn the_pill_follows_a_fix_run_and_shows_its_result_for_a_while(cx: &mut TestAppContext) {
+async fn the_fix_button_shows_a_fix_result_for_a_while(cx: &mut TestAppContext) {
     let w = world(cx, working_tree());
     w.comment(cx, "Rename this.");
     let session = w.session.clone();
-    let (pill, cx) = root_window(cx, |window, cx| ReviewPill::new(session, window, cx));
-    assert!(!pill.read_with(cx, |pill, _| pill.needs_room()));
+    let (button, cx) = root_window(cx, |window, cx| FixButton::new(session, window, cx));
+    assert!(!button.read_with(cx, |button, _| button.needs_room()));
 
-    pill.update(cx, |pill, cx| pill.fix(cx));
-    cx.executor().allow_parking();
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let ready = || {
-        let running = w
-            .session
-            .read_with(cx, |s, _| s.fix_run().map(|run| run.state) == Some(RunState::Running));
-        running && w.out("started").exists()
-    };
-    while !ready() {
-        assert!(Instant::now() < deadline, "the run did not start");
-        cx.run_until_parked();
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    assert!(pill.read_with(cx, |pill, _| pill.needs_room()));
+    w.session.update(cx, |session, cx| session.fix_threads(&[], cx));
+    wait_until(cx, "the run to start", |cx| {
+        w.state(cx) == Some(RunState::Running) && w.out("started").exists()
+    });
 
     std::fs::write(w.out("go"), "").unwrap();
-    while w.session.read_with(cx, |s, _| s.fix_run().map(|run| run.state)) != Some(RunState::Done) {
-        assert!(Instant::now() < deadline, "the run did not finish");
-        cx.run_until_parked();
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    assert!(pill.read_with(cx, |pill, _| pill.shows_fix_result()));
-    assert!(pill.read_with(cx, |pill, _| pill.needs_room()));
+    wait_until(cx, "the run to finish", |cx| w.state(cx) == Some(RunState::Done));
+    assert!(button.read_with(cx, |button, _| button.shows_result()));
+    assert!(button.read_with(cx, |button, _| button.needs_room()));
 
     cx.executor().advance_clock(Duration::from_secs(RESULT_SECONDS + 1));
-    assert!(!pill.read_with(cx, |pill, _| pill.shows_fix_result()));
-    assert!(!pill.read_with(cx, |pill, _| pill.needs_room()));
+    assert!(!button.read_with(cx, |button, _| button.shows_result()));
+    assert!(!button.read_with(cx, |button, _| button.needs_room()));
 }
