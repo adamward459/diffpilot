@@ -371,6 +371,13 @@ impl DiffPane {
         self.sync(cx);
     }
 
+    pub fn step_thread(&mut self, forward: bool, cx: &mut Context<Self>) {
+        if self.state.step_thread(forward, FILE_HEADER + HUNK) {
+            self.last_scroll = Some(Instant::now());
+            self.sync(cx);
+        }
+    }
+
     pub fn scroll_to(&mut self, y: f32, cx: &mut Context<Self>) {
         self.state.scroll_to(y);
         self.last_scroll = Some(Instant::now());
@@ -1067,7 +1074,7 @@ impl DiffPane {
             ))
             .child(self.more_menu(file, pinned, cx))
             .child(div().w(px(8.0)))
-            .child(
+            .child(tag(
                 viewed_toggle(
                     theme,
                     (if pinned { "pinned-viewed" } else { "viewed" }, file),
@@ -1077,7 +1084,8 @@ impl DiffPane {
                 .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
                     cx.emit(DiffPaneEvent::ToggleViewed(viewed_path.clone()))
                 })),
-            );
+                || format!("pane:viewed:{}", diff.path),
+            ));
         let bar = bar.id((id, file));
         match glass {
             Some(glass) => bar.border_b_1().border_color(theme.diff.line).bg(glass),

@@ -1,7 +1,7 @@
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use std::ops::Range;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Style {
     pub bold: bool,
     pub italic: bool,
@@ -10,7 +10,7 @@ pub struct Style {
     pub link: bool,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Rich {
     pub text: String,
     pub spans: Vec<(Range<usize>, Style)>,
@@ -26,7 +26,7 @@ impl Rich {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Block {
     Heading { level: u8, text: Rich },
     Paragraph(Rich),

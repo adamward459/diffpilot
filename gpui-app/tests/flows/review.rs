@@ -183,3 +183,38 @@ fn a_review_that_only_comments_replaces_the_old_findings(app: &mut TestAppContex
     fake.finish();
     wait_until_shows(cx, "jump-bar:threads:1");
 }
+
+#[gpui::test]
+fn the_thread_arrows_step_through_the_threads(app: &mut TestAppContext) {
+    let dir = fixture();
+    let fake = fake_claude(app);
+    fake.review_with(&result(
+        "",
+        vec![
+            finding("base.txt", Some(2), Severity::Nit, "First"),
+            finding("src/staged.rs", None, Severity::Nit, "Second"),
+        ],
+    ));
+    fake.finish();
+    let claude = Claude {
+        replier: Arc::new(StubReplier::default()),
+    };
+    let (_, cx) = open_repo(
+        app,
+        dir.path(),
+        Arc::new(Settings::in_memory()),
+        Arc::new(ViewedStore::in_memory()),
+        claude,
+    );
+    click(cx, "review:open");
+    click(cx, "review:start");
+    wait_until_shows(cx, "review:done");
+    wait_until_shows(cx, "jump-bar:threads:2");
+
+    assert!(!shows(cx, "jump-bar:path:src/staged.rs"));
+    click(cx, "jump-bar:thread-next");
+    assert!(
+        shows(cx, "jump-bar:path:src/staged.rs"),
+        "the first thread's file is in view"
+    );
+}

@@ -15,7 +15,7 @@ pub use bar::{
 };
 pub use button::{Button, Look, Scale, chip, icon_button};
 pub use card::card_shell;
-pub use check::{viewed_check, viewed_toggle};
+pub use check::viewed_toggle;
 pub use form::{
     Row, caption, glyph_icon, grouped, mono_text, note, picker, section, segmented_control, spinner, switch, tag,
 };

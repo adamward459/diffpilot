@@ -17,6 +17,7 @@ use gpui::{
 };
 use gpui_component::ActiveTheme;
 use std::cell::Cell;
+use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 use std::io::Cursor;
 use std::path::Path;
 use std::rc::Rc;
@@ -35,6 +36,7 @@ const LINE: f32 = 20.0;
 const CODE: f32 = 12.0;
 const CODE_LINE: f32 = 18.0;
 const BLOCK_GAP: f32 = 10.0;
+const MARK_INSET: f32 = 12.0;
 const MODE_GAP: f32 = 12.0;
 const KNOB: f32 = 14.0;
 const ONION_TRACK: f32 = 200.0;
@@ -55,14 +57,21 @@ pub struct ImageBody {
     pub broken: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Change {
+    Same,
+    Removed,
+    Added,
+}
+
 pub enum Body {
     Missing,
     Image(ImageBody),
-    Markdown(Vec<Block>),
+    Markdown(Vec<(Change, Block)>),
 }
 
 pub struct LoadedSide {
-    pub label: &'static str,
+    pub label: Option<&'static str>,
     pub tone: Tone,
     pub body: Body,
 }
@@ -75,7 +84,7 @@ pub fn load(repo: &Path, comparison: &Comparison, file: &FileDiff) -> Option<Loa
     let kind = preview_kind(&file.path)?;
     let old_path = file.old_path.as_deref().unwrap_or(&file.path);
     let side = |label, tone, side, path: &str| LoadedSide {
-        label,
+        label: Some(label),
         tone,
         body: match read_side(repo, comparison, side, path) {
             Some(bytes) => body(kind, bytes, path),
@@ -90,12 +99,68 @@ pub fn load(repo: &Path, comparison: &Comparison, file: &FileDiff) -> Option<Loa
             side("After", Tone::Neutral, Side::New, &file.path),
         ],
     };
-    Some(Loaded { sides })
+    Some(Loaded {
+        sides: merge_markdown(sides),
+    })
+}
+
+fn merge_markdown(sides: Vec<LoadedSide>) -> Vec<LoadedSide> {
+    match <[LoadedSide; 2]>::try_from(sides) {
+        Ok(
+            [
+                LoadedSide {
+                    body: Body::Markdown(old),
+                    ..
+                },
+                LoadedSide {
+                    body: Body::Markdown(new),
+                    ..
+                },
+            ],
+        ) => vec![LoadedSide {
+            label: None,
+            tone: Tone::Neutral,
+            body: Body::Markdown(block_changes(old, new)),
+        }],
+        Ok(pair) => pair.into(),
+        Err(sides) => sides,
+    }
+}
+
+fn block_changes(old: Vec<(Change, Block)>, new: Vec<(Change, Block)>) -> Vec<(Change, Block)> {
+    let old: Vec<Block> = old.into_iter().map(|(_, block)| block).collect();
+    let new: Vec<Block> = new.into_iter().map(|(_, block)| block).collect();
+    let hashes = |blocks: &[Block]| -> Vec<u64> {
+        blocks
+            .iter()
+            .map(|block| {
+                let mut hasher = DefaultHasher::new();
+                block.hash(&mut hasher);
+                hasher.finish()
+            })
+            .collect()
+    };
+    let mut out = Vec::with_capacity(new.len());
+    for op in similar::capture_diff_slices(similar::Algorithm::Myers, &hashes(&old), &hashes(&new)) {
+        let (tag, removed, added) = op.as_tag_tuple();
+        if tag == similar::DiffTag::Equal {
+            out.extend(new[added].iter().map(|block| (Change::Same, block.clone())));
+            continue;
+        }
+        out.extend(old[removed].iter().map(|block| (Change::Removed, block.clone())));
+        out.extend(new[added].iter().map(|block| (Change::Added, block.clone())));
+    }
+    out
 }
 
 fn body(kind: PreviewKind, bytes: Vec<u8>, path: &str) -> Body {
     match kind {
-        PreviewKind::Markdown => Body::Markdown(markdown::parse(&String::from_utf8_lossy(&bytes))),
+        PreviewKind::Markdown => Body::Markdown(
+            markdown::parse(&String::from_utf8_lossy(&bytes))
+                .into_iter()
+                .map(|block| (Change::Same, block))
+                .collect(),
+        ),
         PreviewKind::Image => Body::Image(image_body(bytes, path)),
     }
 }
@@ -186,8 +251,9 @@ fn file_size(bytes: usize) -> String {
     }
 }
 
-pub fn column_width(width: f32) -> f32 {
-    ((width - 2.0 * PAD_X - GAP) / 2.0).max(40.0)
+fn column_width(width: f32, sides: usize) -> f32 {
+    let sides = sides.max(1) as f32;
+    ((width - 2.0 * PAD_X - GAP * (sides - 1.0)) / sides).max(40.0)
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -356,7 +422,7 @@ fn card(loaded: &Loaded, theme: &Theme, width: f32, controls: &Controls, cx: &Ap
 }
 
 fn two_up(frame: Div, loaded: &Loaded, theme: &Theme, width: f32, cx: &App) -> Div {
-    let column = column_width(width);
+    let column = column_width(width, loaded.sides.len());
     frame.child(
         div()
             .flex()
@@ -525,13 +591,15 @@ fn side_view(side: &LoadedSide, theme: &Theme, column: f32, cx: &App) -> Div {
         Tone::Added => theme.success,
         Tone::Deleted => theme.danger,
     };
-    let label = div()
-        .h(px(LABEL))
-        .text_size(px(12.5))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(tint)
-        .child(side.label);
-    let shell = div().flex().flex_col().flex_none().w(px(column)).child(label);
+    let label = side.label.map(|label| {
+        div()
+            .h(px(LABEL))
+            .text_size(px(12.5))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(tint)
+            .child(label)
+    });
+    let shell = div().flex().flex_col().flex_none().w(px(column)).children(label);
     match &side.body {
         Body::Missing => shell.child(note(theme, "Not available.")),
         Body::Image(image) => shell
@@ -608,12 +676,34 @@ struct Fonts {
     mono: gpui::Font,
 }
 
-fn document(blocks: &[Block], theme: &Theme, cx: &App) -> Div {
+fn document(blocks: &[(Change, Block)], theme: &Theme, cx: &App) -> Div {
     let fonts = Fonts {
         base: font(cx.theme().font_family.clone()),
         mono: font(cx.theme().mono_font_family.clone()),
     };
-    stack(blocks, theme, &fonts)
+    let marked = blocks.iter().any(|(change, _)| *change != Change::Same);
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(BLOCK_GAP))
+        .min_w_0()
+        .children(blocks.iter().map(|(change, block)| {
+            let view = block_view(block, theme, &fonts);
+            let tint = match change {
+                Change::Same if !marked => return view,
+                Change::Same => return div().pl(px(MARK_INSET)).child(view).into_any_element(),
+                Change::Removed => theme.danger,
+                Change::Added => theme.success,
+            };
+            div()
+                .pl(px(MARK_INSET - 2.0))
+                .py(px(4.0))
+                .border_l_2()
+                .border_color(tint)
+                .bg(tint.opacity(0.08))
+                .child(view)
+                .into_any_element()
+        }))
 }
 
 fn stack(blocks: &[Block], theme: &Theme, fonts: &Fonts) -> Div {
@@ -785,6 +875,46 @@ mod tests {
         assert_eq!(fit((40, 30), 400.0, 320.0), (40.0, 30.0));
         assert_eq!(fit((800, 400), 400.0, 320.0), (400.0, 200.0));
         assert_eq!(fit((100, 1000), 400.0, 320.0), (32.0, 320.0));
+    }
+
+    #[test]
+    fn a_changed_markdown_file_becomes_one_document_with_marked_blocks() {
+        let side = |text: &str| LoadedSide {
+            label: Some("Side"),
+            tone: Tone::Neutral,
+            body: body(PreviewKind::Markdown, text.as_bytes().to_vec(), "notes.md"),
+        };
+        let merged = merge_markdown(vec![
+            side("# Title\n\nold line\n\nkept"),
+            side("# Title\n\nnew line\n\nkept"),
+        ]);
+        let [only] = merged.as_slice() else {
+            panic!("expected one document, got {}", merged.len())
+        };
+        assert_eq!(only.label, None);
+        let Body::Markdown(blocks) = &only.body else {
+            panic!("expected markdown")
+        };
+        let text = |block: &Block| match block {
+            Block::Heading { text, .. } | Block::Paragraph(text) => text.text.clone(),
+            other => panic!("unexpected block {other:?}"),
+        };
+        let changes: Vec<(Change, String)> = blocks.iter().map(|(change, block)| (*change, text(block))).collect();
+        assert_eq!(
+            changes,
+            vec![
+                (Change::Same, "Title".into()),
+                (Change::Removed, "old line".into()),
+                (Change::Added, "new line".into()),
+                (Change::Same, "kept".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn one_side_fills_the_card_and_two_sides_share_it() {
+        assert_eq!(column_width(1000.0, 1), 1000.0 - 2.0 * PAD_X);
+        assert_eq!(column_width(1000.0, 2), (1000.0 - 2.0 * PAD_X - GAP) / 2.0);
     }
 
     #[test]

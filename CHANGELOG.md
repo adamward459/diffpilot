@@ -16,14 +16,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - The app is now named Diffpilot in the menu bar and the Dock.
 - Hunk actions (Stage Hunk, Revert, Open in Editor, Copy, Ask Claude) appear in a floating bar when you hover a hunk header, like the selection bar.
 - Copy Path and Reveal in Finder are now buttons in each file header, so you no longer need the More menu for them.
+- Markdown Preview now fills the whole width. A changed file shows as one document, like GitHub's rich diff: added blocks are marked green and removed blocks red.
 
 ### Removed
 
 - The comment button next to Ask Claude in the toolbar. Use Comment on file in each file header instead.
 - The Diff/Edit switch in file headers. Edit was never available; files that can show a preview still have the Preview/Diff switch.
+- The Viewed checkbox on file rows in the sidebar. Mark a file as viewed from its file header. Viewed files still show dimmed in the sidebar.
 
 ### Fixed
 
+- The Previous and Next thread arrows in the top bar now jump to the thread above or below. Before, they were always disabled.
 - Comment on file in a file header now opens a comment on that file.
 
 ### Added

@@ -522,18 +522,13 @@ impl RepoView {
                 PillEvent::NeedsRoomChanged(room) => this.set_compact_toolbar(*room, cx),
                 PillEvent::ShowArea => this.show_claude_log(cx),
             }),
-            cx.subscribe_in(
-                &sidebar,
-                window,
-                |this, _, event: &SidebarEvent, window, cx| match event {
-                    SidebarEvent::Select(path) => {
-                        if let Some(session) = &this.session {
-                            session.pane.update(cx, |pane, cx| pane.reveal(path, cx));
-                        }
+            cx.subscribe_in(&sidebar, window, |this, _, event: &SidebarEvent, _, cx| match event {
+                SidebarEvent::Select(path) => {
+                    if let Some(session) = &this.session {
+                        session.pane.update(cx, |pane, cx| pane.reveal(path, cx));
                     }
-                    SidebarEvent::ToggleViewed(path) => this.toggle_viewed(path.clone(), window, cx),
-                },
-            ),
+                }
+            }),
             cx.subscribe_in(
                 &pane,
                 window,
@@ -1167,28 +1162,40 @@ impl RepoView {
                     )
                     .child(threads.to_string()),
             )
-            .child(bar_button(
-                &tokens,
-                "thread-previous",
-                Glyph::ChevronUp,
-                "Previous thread",
-                false,
-                false,
-                nothing,
+            .child(tag(
+                bar_button(
+                    &tokens,
+                    "thread-previous",
+                    Glyph::ChevronUp,
+                    "Previous thread",
+                    threads > 0,
+                    false,
+                    cx.listener(|this, _, _, cx| this.step_thread(false, cx)),
+                ),
+                || "jump-bar:thread-previous".to_string(),
             ))
-            .child(bar_button(
-                &tokens,
-                "thread-next",
-                Glyph::ChevronDown,
-                "Next thread",
-                false,
-                false,
-                nothing,
+            .child(tag(
+                bar_button(
+                    &tokens,
+                    "thread-next",
+                    Glyph::ChevronDown,
+                    "Next thread",
+                    threads > 0,
+                    false,
+                    cx.listener(|this, _, _, cx| this.step_thread(true, cx)),
+                ),
+                || "jump-bar:thread-next".to_string(),
             ))
             .child(div().w(px(4.)))
             .child(self.diff_mode_switch(cx))
             .child(self.wrap_button(cx))
             .into_any_element()
+    }
+
+    fn step_thread(&mut self, forward: bool, cx: &mut Context<Self>) {
+        if let Some(session) = &self.session {
+            session.pane.update(cx, |pane, cx| pane.step_thread(forward, cx));
+        }
     }
 
     fn bottom_bar(&self, cx: &mut Context<Self>) -> gpui::AnyElement {

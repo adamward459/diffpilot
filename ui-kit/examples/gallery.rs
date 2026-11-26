@@ -3,7 +3,7 @@
 use diffpilot_core::review::Severity;
 use diffpilot_ui_kit::components::{
     BadgeTone, Button, Fills, Look, State, avatar, capsule, card_shell, chip, filled_check, filter_field, glass_button,
-    icon_button, interactive, segmented, segmented_control, severity_badge, status_badge, toggle_capsule, viewed_check,
+    icon_button, interactive, segmented, segmented_control, severity_badge, status_badge, toggle_capsule,
     viewed_toggle,
 };
 use diffpilot_ui_kit::{Assets, Glyph, Theme, painted};
@@ -199,28 +199,6 @@ fn checks(theme: &Theme) -> impl IntoElement {
     h_flex()
         .gap(px(16.))
         .items_center()
-        .child(
-            h_flex()
-                .group("row")
-                .gap(px(6.))
-                .items_center()
-                .child(viewed_check(
-                    "v-on",
-                    true,
-                    theme.chrome.secondary,
-                    theme.ui.line,
-                    "row",
-                    |_, _, _| {},
-                ))
-                .child(viewed_check(
-                    "v-off",
-                    false,
-                    theme.chrome.secondary,
-                    theme.ui.line,
-                    "row",
-                    |_, _, _| {},
-                )),
-        )
         .child(viewed_toggle(theme, "toggle-off", false, State::Normal).ml_0())
         .child(viewed_toggle(theme, "toggle-on", true, State::Normal).ml_0())
 }

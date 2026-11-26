@@ -599,6 +599,27 @@ impl PaneState {
         }
         true
     }
+
+    pub fn step_thread(&mut self, forward: bool, inset: f32) -> bool {
+        let max = self.max_scroll();
+        let targets = self.blocks.iter().enumerate().filter_map(|(slot, block)| {
+            if !matches!(block.id, BlockId::Thread(_)) {
+                return None;
+            }
+            let top = self.tops.top(self.rows.block_row(slot as u32)?);
+            let file = self.file_index(block.anchor.path())?;
+            let header = self.tops.top(self.rows.header_index(file)?);
+            Some((top - inset).max(header).clamp(0.0, max))
+        });
+        let target = if forward {
+            targets.filter(|y| *y > self.scroll + 0.5).min_by(f32::total_cmp)
+        } else {
+            targets.filter(|y| *y < self.scroll - 0.5).max_by(f32::total_cmp)
+        };
+        let Some(target) = target else { return false };
+        self.scroll_to(target);
+        true
+    }
 }
 
 #[cfg(test)]
@@ -969,6 +990,33 @@ mod tests {
         assert!(state.reveal_block(BlockId::Thread(ThreadId(1)), 66.0));
         assert_eq!(state.scroll(), shown);
         assert!(!state.reveal_block(BlockId::Thread(ThreadId(9)), 66.0));
+    }
+
+    #[test]
+    fn stepping_through_threads_moves_down_and_back_up_and_stops_at_the_ends() {
+        let mut state = state(three_files());
+        state.set_blocks(vec![line_thread(2, "f1.ts", 5), line_thread(1, "f0.ts", 5)]);
+        let top = |state: &PaneState, id| state.block_top(BlockId::Thread(ThreadId(id))).unwrap() - 10.0;
+        let (first, second) = (top(&state, 1), top(&state, 2));
+
+        assert!(state.step_thread(true, 10.0));
+        assert_eq!(state.scroll(), first);
+        assert!(state.step_thread(true, 10.0));
+        assert_eq!(state.scroll(), second);
+        assert!(!state.step_thread(true, 10.0));
+
+        assert!(state.step_thread(false, 10.0));
+        assert_eq!(state.scroll(), first);
+        assert!(!state.step_thread(false, 10.0));
+    }
+
+    #[test]
+    fn stepping_to_a_file_thread_stops_at_its_file_header() {
+        let mut state = state(three_files());
+        state.set_blocks(vec![slot(1, ThreadAnchor::file("f1.ts"))]);
+        assert!(state.step_thread(true, FILE_HEADER + HUNK));
+        assert_eq!(state.scroll(), state.tops.top(state.rows.header_index(1).unwrap()));
+        assert_eq!(state.visible_path(), Some("f1.ts"));
     }
 
     #[test]

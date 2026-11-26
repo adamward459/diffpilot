@@ -6,7 +6,7 @@ use crate::sidebar_rows::{
 use diffpilot_core::changes::{ChangeSummary, FileChange};
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::tree::{FileEntry, FileFilter, Folder, SidebarMode};
-use diffpilot_ui_kit::components::{BadgeTone, State, filter_field, glass_button, status_badge, tag, viewed_check};
+use diffpilot_ui_kit::components::{BadgeTone, State, filter_field, glass_button, status_badge, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::{
     AnyElement, App, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
@@ -37,7 +37,6 @@ pub fn bind_keys(cx: &mut App) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SidebarEvent {
     Select(String),
-    ToggleViewed(String),
 }
 
 pub struct LoadedChanges {
@@ -524,7 +523,6 @@ impl Sidebar {
                     tokens.tint(file_kind(&entry.name).tint())
                 };
                 let name_color = if viewed && !on_accent { secondary } else { primary };
-                let toggle_path = path.clone();
                 let tone = if on_accent {
                     BadgeTone::OnAccent
                 } else if change.is_uncommitted {
@@ -532,7 +530,6 @@ impl Sidebar {
                 } else {
                     BadgeTone::Plain
                 };
-                let hover_border = if on_accent { secondary } else { cx.theme().border };
                 base.child(div().w(px(14.)))
                     .child(
                         Icon::new(Glyph::for_file(&entry.name))
@@ -570,20 +567,6 @@ impl Sidebar {
                                 .child(comments.to_string()),
                         )
                     })
-                    .child(tag(
-                        viewed_check(
-                            ("viewed", index),
-                            viewed,
-                            secondary,
-                            hover_border,
-                            "row",
-                            cx.listener(move |_, _: &ClickEvent, _, cx| {
-                                cx.stop_propagation();
-                                cx.emit(SidebarEvent::ToggleViewed(toggle_path.clone()));
-                            }),
-                        ),
-                        || format!("sidebar:viewed:{path}"),
-                    ))
                     .child(status_badge(
                         change.status.code(),
                         tone,

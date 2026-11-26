@@ -1,39 +1,8 @@
 use super::interaction::{Fills, State, interactive};
-use crate::icons::Glyph;
 use crate::painted;
 use crate::theme::{Rise, Theme};
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, Div, ElementId, Hsla, Stateful, Window, div, px};
-use gpui_component::Icon;
-
-/// A borderless check that shows a border while its row group is hovered. For sidebar rows.
-pub fn viewed_check(
-    id: impl Into<ElementId>,
-    viewed: bool,
-    color: Hsla,
-    hover_border: Hsla,
-    group: &'static str,
-    click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-) -> Stateful<Div> {
-    div()
-        .id(id)
-        .size(px(16.))
-        .flex_shrink_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(4.))
-        .when(!viewed, |this| {
-            this.border_1()
-                .border_color(hover_border)
-                .opacity(0.)
-                .group_hover(group, |style| style.opacity(1.))
-        })
-        .on_click(click)
-        .when(viewed, |this| {
-            this.child(Icon::new(Glyph::Check).size(px(12.)).text_color(color))
-        })
-}
+use gpui::{Div, ElementId, Stateful, div, px};
 
 /// A filled checkbox with a "Viewed" label. For file headers.
 pub fn viewed_toggle(theme: &Theme, id: impl Into<ElementId>, viewed: bool, state: State) -> Stateful<Div> {

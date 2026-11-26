@@ -27,7 +27,7 @@ fn a_viewed_file_stays_viewed_when_the_repo_is_reopened(app: &mut TestAppContext
         "the toolbar shows the open file"
     );
 
-    click(cx, "sidebar:viewed:src/staged.rs");
+    click(cx, "pane:viewed:src/staged.rs");
     assert!(
         shows(cx, "sidebar:summary:1/1 viewed"),
         "the sidebar counts the file as viewed"
