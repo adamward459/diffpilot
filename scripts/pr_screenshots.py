@@ -58,8 +58,8 @@ def main(argv: list[str]) -> int:
     else:
         sh("git", "fetch", "--quiet", "origin", pr["baseRefName"])
         crates = tests.workspace()
-        touched = tests.touched_crates(crates, tests.changed_files(f"origin/{pr['baseRefName']}"))
-        names = tests.screenshot_crates(touched)
+        _, built = tests.touched_crates(crates, tests.changed_files(f"origin/{pr['baseRefName']}"))
+        names = tests.screenshot_crates(built)
     if not names:
         print("No touched crate has a window to capture.", file=sys.stderr)
         return 0

@@ -55,10 +55,10 @@ fn setup() -> Smoke {
     let work = dir.path().join("work");
     let bridge = McpBridge::start(socket_path_for(&work), store.clone()).unwrap();
     let mut config = diffpilot_core::runner::EngineConfig::new(store.clone());
-    config.guard_binary = PathBuf::from(env!("CARGO_BIN_EXE_diffpilot-guard"));
+    config.guard_binary = bin("diffpilot-guard");
     config.run_dir = work.join("runs");
     let mut mcp = McpLaunch::new(bridge);
-    mcp.binary = PathBuf::from(env!("CARGO_BIN_EXE_diffpilot-mcp"));
+    mcp.binary = bin("diffpilot-mcp");
     config.mcp = Some(mcp);
     Smoke {
         _dir: dir,

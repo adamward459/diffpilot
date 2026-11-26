@@ -11,7 +11,6 @@ use diffpilot_core::runner::{EngineError, McpLaunch, RunEngine, RunEvent};
 use diffpilot_core::store::{SessionId, Store};
 use diffpilot_core::threads::Side;
 use serde_json::{Value, json};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -136,7 +135,7 @@ fn world(calls: &[Value]) -> World {
     let claude = mcp_claude(work.path(), &recorded(calls), calls, "");
     let mut config = config(store.clone(), claude, work.path());
     let mut mcp = McpLaunch::new(bridge);
-    mcp.binary = PathBuf::from(env!("CARGO_BIN_EXE_diffpilot-mcp"));
+    mcp.binary = bin("diffpilot-mcp");
     config.mcp = Some(mcp);
     World {
         engine: RunEngine::new(config),

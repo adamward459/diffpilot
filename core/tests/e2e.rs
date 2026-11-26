@@ -33,7 +33,7 @@ fn world(claude: impl FnOnce(&Path) -> PathBuf) -> World {
     let bridge = McpBridge::start(work.path().join("mcp.sock"), store.clone()).unwrap();
     let mut config = config(store.clone(), claude(work.path()), work.path());
     let mut mcp = McpLaunch::new(bridge.clone());
-    mcp.binary = PathBuf::from(env!("CARGO_BIN_EXE_diffpilot-mcp"));
+    mcp.binary = bin("diffpilot-mcp");
     config.mcp = Some(mcp);
     World {
         engine: RunEngine::new(config),
@@ -219,7 +219,7 @@ fn a_fix_run_answers_the_comments_through_mcp_and_records_the_change() {
     let config: Value =
         serde_json::from_str(&std::fs::read_to_string(out(world.work.path()).join("mcp.json")).unwrap()).unwrap();
     let server = &config["mcpServers"]["diffpilot"];
-    assert_eq!(server["command"], env!("CARGO_BIN_EXE_diffpilot-mcp"));
+    assert_eq!(server["command"], bin("diffpilot-mcp").to_str().unwrap());
     let token = server["args"][3].as_str().unwrap();
     assert!(
         world.bridge.call(token, "list_threads", json!({})).is_err(),

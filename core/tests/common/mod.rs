@@ -51,7 +51,7 @@ pub fn fake_claude(dir: &Path, script: &str) -> PathBuf {
 pub fn config(store: Arc<Store>, claude: PathBuf, work: &Path) -> EngineConfig {
     let mut config = EngineConfig::new(store);
     config.claude_binary = Some(claude);
-    config.guard_binary = PathBuf::from(env!("CARGO_BIN_EXE_diffpilot-guard"));
+    config.guard_binary = bin("diffpilot-guard");
     config.run_dir = work.join("runs");
     config
 }
@@ -148,3 +148,8 @@ pub const FIX_STREAM: &str = r#"{"type":"system","subtype":"init","cwd":"/r","se
 {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_3","content":"The file REPO/a.ts has been updated."}]}}
 {"type":"result","subtype":"success","is_error":false,"duration_ms":2100,"duration_api_ms":1800,"num_turns":4,"result":"Renamed x to count.","session_id":"11111111-2222-3333-4444-555555555555","total_cost_usd":0.012}
 "#;
+
+// Not env!(): the worktrees share one build dir, so a test binary compiled in another worktree keeps that worktree's path.
+pub fn bin(name: &str) -> PathBuf {
+    PathBuf::from(std::env::var(format!("CARGO_BIN_EXE_{name}")).unwrap())
+}

@@ -19,7 +19,7 @@ struct Server {
 
 impl Server {
     fn start(socket: &std::path::Path, token: &str) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_diffpilot-mcp"))
+        let mut child = Command::new(bin("diffpilot-mcp"))
             .args(["--socket", &socket.to_string_lossy(), "--token", token])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -152,7 +152,7 @@ fn the_binary_reports_an_unreachable_app_as_a_tool_error() {
 
 #[test]
 fn the_binary_needs_a_socket_and_a_token() {
-    let status = Command::new(env!("CARGO_BIN_EXE_diffpilot-mcp"))
+    let status = Command::new(bin("diffpilot-mcp"))
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .status()

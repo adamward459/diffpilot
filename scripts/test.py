@@ -2,8 +2,9 @@
 """Run diffpilot checks per Cargo crate.
 
 A crate is a workspace member: core (logic), ui-kit (theme, icons, shared components), diff-pane,
-review-ui, gpui-app (app shell, sidebar, comparison). Crates are named by package (diffpilot-core) or folder (core). A change in a crate
-also touches the crates that depend on it; a change to the root Cargo files touches all crates.
+review-ui, gpui-app (app shell, sidebar, comparison). Crates are named by package (diffpilot-core) or folder (core). A change in a crate's
+src/, assets/, Cargo.toml or build.rs also touches the crates that depend on it; a change to its tests/, examples/ or benches/ touches
+only that crate. A change to the root Cargo files touches all crates.
 
   scripts/test.py unit [crate...] [--force]     cargo test, in one call for all the crates
   scripts/test.py clippy [crate...] [--force]   cargo clippy --all-targets -- -D warnings
@@ -20,8 +21,8 @@ also touches the crates that depend on it; a change to the root Cargo files touc
   scripts/test.py related                  print the commands that match the current changes
   scripts/test.py lint                     check the workspace layout and the formatting of the scripts
 
-unit and clippy skip a crate that already passed with the same inputs: its sources, the sources of
-the workspace crates it depends on, the root Cargo files, the toolchain, and the flags. The pass
+unit and clippy skip a crate that already passed with the same inputs: its files, the src/, assets/, Cargo.toml
+and build.rs of the workspace crates it depends on, the root Cargo files, the toolchain, and the flags. The pass
 records live in ~/Library/Caches/diffpilot/passes, so they are shared by all worktrees.
 
 A bench mode prints one JSON object of numeric metrics on stdout; nested objects are flattened to
@@ -164,11 +165,22 @@ def closure(crates: list[Crate], start: list[Crate]) -> list[Crate]:
     return sorted(seen.values(), key=lambda c: c.folder)
 
 
-def touched_crates(crates: list[Crate], files: list[str]) -> list[Crate]:
-    touched = {c.package for c in crates for f in files if f.startswith(c.folder + "/")}
+def builds_into_dependents(crate: Crate, path: str) -> bool:
+    return path.startswith((f"{crate.folder}/src/", f"{crate.folder}/assets/")) or path in (
+        f"{crate.folder}/Cargo.toml",
+        f"{crate.folder}/build.rs",
+    )
+
+
+def touched_crates(crates: list[Crate], files: list[str]) -> tuple[list[Crate], list[Crate]]:
+    """Crates whose tests the files can change, and the subset whose binaries or benches they can change."""
     if any(f in ROOT_FILES for f in files):
-        touched = {c.package for c in crates}
-    return [c for c in crates if touched & {d.package for d in closure(crates, [c])}]
+        return crates, crates
+    lib = {c.package for c in crates for f in files if builds_into_dependents(c, f)}
+    own = {c.package for c in crates for f in files if f.startswith(c.folder + "/")}
+    shipped = {c.package for c in crates for f in files if f.startswith(c.folder + "/") and "/tests/" not in f}
+    built = [c for c in crates if c.package in shipped or lib & {d.package for d in closure(crates, [c])}]
+    return [c for c in crates if c in built or c.package in own], built
 
 
 def cargo(*args: str, cwd: Path = ROOT, env: dict | None = None) -> int:
@@ -183,8 +195,13 @@ def select(crates: list[Crate]) -> list[str]:
 
 
 def inputs_hash(crates: list[Crate], crate: Crate, check: str) -> str:
-    folders = [c.folder for c in closure(crates, [crate])]
-    files = sorted(set(sh("git", "ls-files", "-z", "-co", "--exclude-standard", "--", *folders).split("\0")) - {""})
+    deps = [c for c in closure(crates, [crate]) if c != crate]
+    listed = sh("git", "ls-files", "-z", "-co", "--exclude-standard", "--", crate.folder, *(d.folder for d in deps))
+    files = sorted(
+        f
+        for f in set(listed.split("\0")) - {""}
+        if f.startswith(crate.folder + "/") or any(builds_into_dependents(d, f) for d in deps)
+    )
     digest = hashlib.sha256()
     digest.update(f"{check}\0{crate.package}\0{' '.join(crate.feature_flags())}\0".encode())
     digest.update(sh("rustc", "-vV").encode())
@@ -674,7 +691,7 @@ def screenshot_crates(crates: list[Crate]) -> list[str]:
 def related() -> None:
     crates = workspace()
     files = changed_files(upstream())
-    touched = touched_crates(crates, files)
+    touched, built = touched_crates(crates, files)
     py = [f for f in files if f.endswith(".py")]
     if not touched and not py:
         print("No changes in crates or scripts.")
@@ -684,15 +701,15 @@ def related() -> None:
         todo = unpassed(crates, touched, check, force=False)
         if todo:
             print(f"  scripts/test.py {check} {' '.join(c.folder for c in touched if c.package in todo)}")
-    for c in touched:
+    for c in built:
         if c.package in BENCH_ARGS:
             print(f"  scripts/test.py hotpath {c.folder}")
     if py:
         print("  scripts/test.py lint")
-    if any(c.package in BENCH_ARGS for c in touched):
+    if any(c.package in BENCH_ARGS for c in built):
         print("Before you open or update the PR (then commit baselines/bench.json):")
         print("  scripts/test.py baseline")
-    if screenshot_crates(touched):
+    if screenshot_crates(built):
         print("After you open or update the PR:")
         print("  scripts/pr_screenshots.py")
 
@@ -705,6 +722,14 @@ def lint() -> None:
             raise LintError(f"{name} names {stale}, which is not a workspace member")
     if not (ROOT / "rustfmt.toml").is_file():
         raise LintError("rustfmt.toml is missing")
+    baked = subprocess.run(
+        ["git", "grep", "-l", 'env!("CARGO_BIN_EXE_', "--", "*.rs"], cwd=ROOT, capture_output=True, text=True
+    ).stdout.split()
+    if baked:
+        raise LintError(
+            f'{", ".join(baked)}: use std::env::var("CARGO_BIN_EXE_<name>") at run time; with the shared build dir, '
+            "env! keeps the path of the worktree that compiled the test"
+        )
     done = subprocess.run(
         ["uvx", "ruff", "format", "--check", "scripts", ".githooks"],
         check=False,

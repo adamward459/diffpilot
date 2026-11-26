@@ -15,7 +15,7 @@ The Cargo workspace is split by crate:
 | `review-ui` (`diffpilot-review-ui`) | review UI components |
 | `gpui-app` (`diffpilot`) | app shell, sidebar, comparison; the binary |
 
-Unit tests sit next to the code (`#[cfg(test)]`) or in a crate's `tests/` folder. A change in a crate also touches the crates that depend on it. A change to `Cargo.toml`, `Cargo.lock`, or `rustfmt.toml` touches all of them.
+Unit tests sit next to the code (`#[cfg(test)]`) or in a crate's `tests/` folder. A change to a crate's `src/`, `assets/`, `Cargo.toml`, or `build.rs` also touches the crates that depend on it. A change to its `tests/`, `examples/`, or `benches/` touches only that crate. A change to `tests/` alone runs no hot path checks or screenshots. A change to the root `Cargo.toml`, `Cargo.lock`, or `rustfmt.toml` touches all of them.
 
 `scripts/test.py lint` fails when the bench or screenshot tables in the script name a crate that is not in the workspace, or when ruff finds a problem in the scripts.
 
@@ -36,7 +36,7 @@ The merged PR leaves `baselines/` and `screenshots/` on the base branch, so they
 
 - All worktrees share one Cargo build dir, `~/.cargo/build/diffpilot`, set in `.cargo/config.toml`. Dependencies build once. A setting of `CARGO_TARGET_DIR` only moves the final binaries. `rust-toolchain.toml` pins the nightly, because the shared build dir and its checksum freshness need every worktree on the same toolchain.
 - `unit` runs `cargo test` once for all the crates it needs, so Cargo builds them in parallel. It holds a lock for the build and the run, so tests in two worktrees wait for each other instead of replacing each other's test binaries.
-- `unit` and `clippy` skip a crate that already passed with the same inputs and print `skipped (passed at <hash>)`. The inputs are the crate's files, the files of the workspace crates it depends on, the root Cargo files, `.cargo/config.toml`, the toolchain, and the features. Records live in `~/Library/Caches/diffpilot/passes`. Use `--force` to run again.
+- `unit` and `clippy` skip a crate that already passed with the same inputs and print `skipped (passed at <hash>)`. The inputs are the crate's files, the `src/`, `assets/`, `Cargo.toml`, and `build.rs` of the workspace crates it depends on, the root Cargo files, `.cargo/config.toml`, the toolchain, and the features. Records live in `~/Library/Caches/diffpilot/passes`. Use `--force` to run again.
 
 ## Screenshots
 

@@ -1,3 +1,6 @@
+mod common;
+
+use common::bin;
 use serde_json::json;
 use std::io::Write;
 use std::path::Path;
@@ -16,7 +19,7 @@ fn hook(cwd: &Path, tool: &str, command: &str) -> Outcome {
         "tool_name": tool,
         "tool_input": { "command": command },
     });
-    let mut child = Command::new(env!("CARGO_BIN_EXE_diffpilot-guard"))
+    let mut child = Command::new(bin("diffpilot-guard"))
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -106,7 +109,7 @@ fn the_hook_command_lets_safe_commands_through_with_exit_code_0() {
 #[test]
 fn garbage_on_stdin_is_blocked() {
     let dir = repo();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_diffpilot-guard"))
+    let mut child = Command::new(bin("diffpilot-guard"))
         .current_dir(dir.path())
         .stdin(Stdio::piped())
         .stderr(Stdio::piped())
