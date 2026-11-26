@@ -219,25 +219,6 @@ pub fn status_dot(color: Hsla) -> Div {
     div().size(px(8.)).flex_none().rounded_full().bg(color)
 }
 
-pub fn label_segment(theme: &Theme, id: &'static str, items: &[(&'static str, bool)], selected: usize) -> Div {
-    glass_surface(
-        h_flex().h(px(CONTROL_HEIGHT)).p(px(3.)).gap(px(2.)).rounded_full(),
-        theme,
-    )
-    .children(items.iter().enumerate().map(|(index, (label, enabled))| {
-        h_flex()
-            .id((id, index))
-            .h_full()
-            .px(px(12.))
-            .rounded_full()
-            .text_size(px(14.))
-            .text_color(theme.chrome.label)
-            .when(index == selected, |this| thumb(this, theme, None))
-            .when(!enabled, |this| this.opacity(DISABLED_OPACITY))
-            .child(*label)
-    }))
-}
-
 pub fn label_switch(
     theme: &Theme,
     id: &'static str,

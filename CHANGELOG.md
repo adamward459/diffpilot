@@ -15,10 +15,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - Glass controls now look like real glass: a sheen lit from the top, a crisp rim, and a shadow that sinks when you hover or press. Buttons are now capsules, and controls, toolbars, and text are larger.
 - The app is now named Diffpilot in the menu bar and the Dock.
 - Hunk actions (Stage Hunk, Revert, Open in Editor, Copy, Ask Claude) appear in a floating bar when you hover a hunk header, like the selection bar.
+- Copy Path and Reveal in Finder are now buttons in each file header, so you no longer need the More menu for them.
 
 ### Removed
 
 - The comment button next to Ask Claude in the toolbar. Use Comment on file in each file header instead.
+- The Diff/Edit switch in file headers. Edit was never available; files that can show a preview still have the Preview/Diff switch.
 
 ### Fixed
 

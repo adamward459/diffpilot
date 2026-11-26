@@ -20,8 +20,7 @@ use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use diffpilot_ui_kit::Glyph;
 use diffpilot_ui_kit::components::menu::{MenuAt, MenuItem, MenuSection, menu_at, menu_button};
 use diffpilot_ui_kit::components::{
-    BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, label_segment, label_switch, status_badge, tag,
-    viewed_toggle,
+    BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, label_switch, status_badge, tag, viewed_toggle,
 };
 use diffpilot_ui_kit::{Theme, painted};
 use gpui::{
@@ -952,6 +951,8 @@ impl DiffPane {
         let viewed_path = diff.path.clone();
         let open_path = diff.path.clone();
         let comment_path = diff.path.clone();
+        let copy_path = diff.path.clone();
+        let reveal_path = diff.path.clone();
         let open_line = diff.first_changed_new_line();
         let can_open = diff.status != FileStatus::Deleted;
         let threads = self
@@ -1003,8 +1004,36 @@ impl DiffPane {
                     .contains(&diff.path)
                     .then(|| chip_label(theme, "Uncommitted", ChipTone::Amber).mr(px(10.0))),
             )
-            .child(self.view_switch(file, pinned, cx))
-            .child(div().w(px(6.0)))
+            .children(
+                self.view_switch(file, pinned, cx)
+                    .map(|switch| div().flex().items_center().child(switch).child(div().w(px(6.0)))),
+            )
+            .child(tag(
+                bar_button(
+                    theme,
+                    "file-copy-path",
+                    Glyph::Copy,
+                    "Copy Path",
+                    true,
+                    false,
+                    move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy_path.clone())),
+                ),
+                || format!("pane:copy-path:{}", diff.path),
+            ))
+            .child(tag(
+                bar_button(
+                    theme,
+                    "file-reveal",
+                    Glyph::Folder,
+                    "Reveal in Finder",
+                    can_open,
+                    false,
+                    cx.listener(move |_, _: &ClickEvent, _, cx| {
+                        cx.emit(DiffPaneEvent::RevealInFinder(reveal_path.clone()))
+                    }),
+                ),
+                || format!("pane:reveal-in-finder:{}", diff.path),
+            ))
             .child(tag(
                 bar_button(
                     theme,
@@ -1056,22 +1085,17 @@ impl DiffPane {
         }
     }
 
-    fn view_switch(&self, file: usize, pinned: bool, cx: &mut Context<Self>) -> Div {
+    fn view_switch(&self, file: usize, pinned: bool, cx: &mut Context<Self>) -> Option<Div> {
         let theme = &self.theme;
         let path = self.state.files[file].path.clone();
         if !self.state.previewable(&path) {
-            return label_segment(
-                theme,
-                if pinned { "pinned-edit-mode" } else { "edit-mode" },
-                &[("Diff", true), ("Edit", false)],
-                0,
-            );
+            return None;
         }
         const LABELS: [&str; 2] = ["Preview", "Diff"];
         let selected = if self.state.shows_preview(&path) { 0 } else { 1 };
         let pane = cx.entity();
         let target = path.clone();
-        label_switch(
+        Some(label_switch(
             theme,
             if pinned {
                 "pinned-preview-switch"
@@ -1084,7 +1108,7 @@ impl DiffPane {
             Rc::new(move |index, _, cx| {
                 pane.update(cx, |pane, cx| pane.set_preview(&target, index == 0, cx));
             }),
-        )
+        ))
     }
 
     fn preview_row(&self, file: usize, height: f32) -> impl IntoElement {
@@ -1132,25 +1156,11 @@ impl DiffPane {
                 let pane = pane.clone();
                 move |_: &mut Window, cx: &mut App| pane.update(cx, |_, cx| cx.emit(event.clone()))
             };
-            let path = diff.path.clone();
-            let copy_path = MenuItem::new("Copy Path", move |_, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(path.clone()))
-            })
-            .icon(Glyph::Copy, None);
             let patch = file_patch(&diff);
             let copy_diff = MenuItem::new("Copy Diff", move |_, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(patch.clone()))
-            });
-            let mut files = vec![copy_path.into(), copy_diff.into()];
-            if diff.status != FileStatus::Deleted {
-                files.push(
-                    MenuItem::new(
-                        "Reveal in Finder",
-                        emit(DiffPaneEvent::RevealInFinder(diff.path.clone())),
-                    )
-                    .into(),
-                );
-            }
+            })
+            .icon(Glyph::Copy, None);
             let toggle_path = diff.path.clone();
             let toggle_pane = pane.clone();
             let collapse = MenuItem::new(if collapsed { "Expand File" } else { "Collapse File" }, move |_, cx| {
@@ -1161,7 +1171,7 @@ impl DiffPane {
                 emit(DiffPaneEvent::ToggleViewed(diff.path.clone())),
             );
             vec![
-                MenuSection::new(files),
+                MenuSection::new(vec![copy_diff.into()]),
                 MenuSection::new(vec![collapse.into(), mark.into()]),
             ]
         })

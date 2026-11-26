@@ -11,7 +11,7 @@ pub mod menu;
 pub use badge::{BadgeTone, avatar, filled_check, severity_badge, status_badge};
 pub use bar::{
     BAR_HEIGHT, ChipTone, Crumb, IconSegment, SwitchItem, activity_capsule, bar_button, chip_label, crumbs,
-    icon_switch, jump_bar, label_segment, label_switch, status_bar, status_dot, switch_bar,
+    icon_switch, jump_bar, label_switch, status_bar, status_dot, switch_bar,
 };
 pub use button::{Button, Look, Scale, chip, icon_button};
 pub use card::card_shell;
