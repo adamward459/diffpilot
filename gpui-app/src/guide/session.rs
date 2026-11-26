@@ -4,9 +4,9 @@ use crate::review::session::NO_REPO_MESSAGE;
 use crate::runs::Runs;
 use diffpilot_core::diff::FileDiff;
 use diffpilot_core::fix::Target;
-use diffpilot_core::guide::prompt;
 use diffpilot_core::guide::reading::{ChapterKey, Reading, ReadingChapter, reading};
 use diffpilot_core::guide::stale::{self, Staleness};
+use diffpilot_core::guide::{Diagram, prompt};
 use diffpilot_core::policy::EditPermission;
 use diffpilot_core::run::{RunKind, RunState};
 use diffpilot_core::runner::{RunEngine, RunEvent};
@@ -104,6 +104,23 @@ impl GuideSession {
 
     pub fn reading(&self) -> &Reading {
         &self.reading
+    }
+
+    pub fn overview_diagrams(&self) -> Vec<Diagram> {
+        self.stored
+            .as_ref()
+            .map(|stored| stored.guide.diagrams.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn chapter_diagrams(&self) -> Vec<Diagram> {
+        let (Some(chapter), Some(stored)) = (self.chapter(), &self.stored) else {
+            return Vec::new();
+        };
+        match chapter.key {
+            ChapterKey::Guide(index) => stored.guide.chapters[index].diagrams.clone(),
+            ChapterKey::Extra => Vec::new(),
+        }
     }
 
     pub fn run(&self) -> &GuideRun {

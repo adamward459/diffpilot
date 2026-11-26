@@ -1,3 +1,4 @@
+use crate::guide::diagram::diagram_card;
 use crate::guide::rich::{self, Body, OnRef};
 use crate::guide::session::{GuideEvent, GuideSession, Step};
 use crate::guide::text::{CodeRef, Inline};
@@ -52,8 +53,24 @@ fn heading(tokens: &Theme, text: &'static str) -> impl IntoElement {
 }
 
 impl Render for GuideInspector {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Theme::of(cx);
+        let step_key = format!("{:?}", self.guide.read(cx).step());
+        let diagrams: Vec<AnyElement> = self
+            .guide
+            .read(cx)
+            .chapter_diagrams()
+            .iter()
+            .enumerate()
+            .map(|(index, diagram)| {
+                diagram_card(
+                    &format!("guide-chapter-diagram-{step_key}-{index}"),
+                    diagram,
+                    window,
+                    cx,
+                )
+            })
+            .collect();
         let on_ref: OnRef = {
             let this = cx.entity();
             Rc::new(move |code, _, cx| this.update(cx, |_, cx| cx.emit(InspectorEvent::Open(code.clone()))))
@@ -133,6 +150,7 @@ impl Render for GuideInspector {
                 );
             }
         }
+        column = column.children(diagrams);
         let critical: Vec<_> = chapter.notes.iter().filter(|note| note.critical).collect();
         if !critical.is_empty() {
             let mut care = v_flex()

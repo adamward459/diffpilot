@@ -4,6 +4,7 @@ use diffpilot::repo_view::{Nav, RepoView};
 use diffpilot::runs::Runs;
 use diffpilot::testing::{canned_claude, demo_guide, fixture, open_repo_in};
 use diffpilot_core::diff::FileDiff;
+use diffpilot_core::guide::{Diagram, DiagramKind, FlowStep, Guide};
 use diffpilot_core::mcp::McpBridge;
 use diffpilot_core::review::ReviewModel;
 use diffpilot_core::run::RunKind;
@@ -96,8 +97,13 @@ fn diff_files(world: &World, cx: &mut VisualTestContext) -> Vec<FileDiff> {
 }
 
 fn store_guide(world: &World, cx: &mut VisualTestContext) {
+    store_guide_with(world, cx, |_| {});
+}
+
+fn store_guide_with(world: &World, cx: &mut VisualTestContext, edit: impl FnOnce(&mut Guide)) {
     let files = diff_files(world, cx);
-    let guide = demo_guide(world.repo.path(), &files);
+    let mut guide = demo_guide(world.repo.path(), &files);
+    edit(&mut guide);
     let (review, guide_session) = world.view.read_with(cx, |view, _| (view.review(), view.guide()));
     let session = review.read_with(cx, |review, _| review.session_id());
     world
@@ -280,4 +286,87 @@ fn the_chapter_keys_step_through_the_chapters_and_back_to_the_overview(app: &mut
 
     world.view.update(cx, |view, cx| view.step_chapter(-1, cx));
     assert_eq!(step(cx), Step::Overview, "the keys do nothing outside a chapter");
+}
+
+fn flowchart() -> Diagram {
+    Diagram {
+        title: Some("Undo path".into()),
+        kind: DiagramKind::Flowchart,
+        source: "flowchart LR\n  A[Browser]:::changed -->|POST| B{Valid}\n  B --> C(Handler):::added".into(),
+        flow: vec![
+            FlowStep {
+                node: "A".into(),
+                text: "The browser sends the request.".into(),
+            },
+            FlowStep {
+                node: "B".into(),
+                text: "The request is checked.".into(),
+            },
+        ],
+    }
+}
+
+#[gpui::test]
+fn a_flowchart_is_drawn_on_the_overview_and_the_source_switch_shows_its_text(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    store_guide_with(&world, cx, |guide| guide.diagrams = vec![flowchart()]);
+    show_guide(&world, cx);
+
+    let canvas = cx.debug_bounds("guide-diagram-canvas").expect("the diagram is drawn");
+    assert!(
+        canvas.size.width > gpui::px(50.) && canvas.size.height > gpui::px(20.),
+        "{canvas:?}"
+    );
+    assert!(cx.debug_bounds("guide-diagram-source").is_none());
+
+    click(cx, "guide-diagram-view:Source");
+    assert!(cx.debug_bounds("guide-diagram-source").is_some());
+}
+
+#[gpui::test]
+fn the_walkthrough_shows_the_step_text_under_the_diagram(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    store_guide_with(&world, cx, |guide| guide.diagrams = vec![flowchart()]);
+    show_guide(&world, cx);
+    assert!(cx.debug_bounds("guide-diagram-step-text").is_none());
+
+    click(cx, "guide-diagram-next");
+    assert!(cx.debug_bounds("guide-diagram-step-text").is_some());
+}
+
+#[gpui::test]
+fn a_diagram_that_cannot_be_drawn_falls_back_to_its_source_with_a_note(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    store_guide_with(&world, cx, |guide| {
+        guide.diagrams = vec![Diagram {
+            title: None,
+            kind: DiagramKind::Other("gantt".into()),
+            source: "gantt\n  title Plan".into(),
+            flow: vec![],
+        }];
+    });
+    show_guide(&world, cx);
+    assert!(cx.debug_bounds("guide-diagram-canvas").is_none());
+    assert!(cx.debug_bounds("guide-diagram-note").is_some());
+    assert!(cx.debug_bounds("guide-diagram-source").is_some());
+    assert!(
+        cx.debug_bounds("guide-diagram-view:Source").is_none(),
+        "nothing to switch to"
+    );
+}
+
+#[gpui::test]
+fn a_chapter_diagram_is_drawn_in_the_inspector(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    store_guide_with(&world, cx, |guide| {
+        guide.chapters[0].diagrams = vec![Diagram {
+            title: Some("Retry".into()),
+            kind: DiagramKind::Sequence,
+            source: "sequenceDiagram\n  A->>B: request\n  B-->>A: reply".into(),
+            flow: vec![],
+        }];
+    });
+    show_guide(&world, cx);
+    click(cx, "guide-start-reading");
+    assert!(cx.debug_bounds("guide-diagram-canvas").is_some());
 }

@@ -1,4 +1,5 @@
 pub mod chrome;
+pub mod diagram;
 pub mod inspector;
 pub mod navigator;
 pub mod note;

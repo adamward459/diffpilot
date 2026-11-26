@@ -1,8 +1,9 @@
+use crate::guide::diagram::diagram_card;
 use crate::guide::rich::{self, Body, OnRef};
 use crate::guide::session::{GuideEvent, GuideRun, GuideSession, Step};
 use crate::guide::text::{CodeRef, Inline};
+use diffpilot_core::guide::Attention;
 use diffpilot_core::guide::reading::{ChapterKey, ReadingChapter, phase_groups};
-use diffpilot_core::guide::{Attention, Diagram};
 use diffpilot_core::settings::Settings;
 use diffpilot_ui_kit::components::{Button, ChipTone, Look, card_shell, chip_label, glyph_icon, spinner, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
@@ -160,43 +161,6 @@ impl GuideStage {
         rich::element(id, &Inline::parse(text), body, Some(on_ref.clone()), cx)
     }
 
-    fn diagram(diagram: &Diagram, tokens: &Theme, index: usize) -> AnyElement {
-        let kind = match &diagram.kind {
-            diffpilot_core::guide::DiagramKind::Flowchart => "Flowchart".to_string(),
-            diffpilot_core::guide::DiagramKind::Sequence => "Sequence".to_string(),
-            diffpilot_core::guide::DiagramKind::Other(name) => name.clone(),
-        };
-        card_shell(tokens, tokens.ui.line)
-            .id(("guide-diagram", index))
-            .gap(px(8.))
-            .p(px(12.))
-            .child(
-                h_flex()
-                    .gap(px(8.))
-                    .child(
-                        div()
-                            .text_size(px(13.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(SharedString::from(
-                                diagram.title.clone().unwrap_or_else(|| "Diagram".into()),
-                            )),
-                    )
-                    .child(chip_label(tokens, kind, ChipTone::Blue))
-                    .child(div().text_size(px(12.)).text_color(tokens.ui.muted).child("Source")),
-            )
-            .child(
-                div()
-                    .rounded(px(8.))
-                    .bg(tokens.ui.raised)
-                    .p(px(10.))
-                    .font_family("Menlo")
-                    .text_size(px(12.))
-                    .text_color(tokens.ui.text2)
-                    .child(SharedString::from(diagram.source.clone())),
-            )
-            .into_any_element()
-    }
-
     fn chapter_row(&self, index: usize, chapter: &ReadingChapter, tokens: &Theme, cx: &App) -> AnyElement {
         let guide = self.guide.read(cx);
         let read = guide.is_read(chapter);
@@ -289,8 +253,16 @@ impl GuideStage {
             .into_any_element()
     }
 
-    fn overview(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn overview(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let tokens = Theme::of(cx);
+        let diagrams: Vec<AnyElement> = self
+            .guide
+            .read(cx)
+            .overview_diagrams()
+            .iter()
+            .enumerate()
+            .map(|(index, diagram)| diagram_card(&format!("guide-diagram-{index}"), diagram, window, cx))
+            .collect();
         let on_ref = Self::on_ref(cx);
         let guide = self.guide.read(cx);
         let Some(stored) = guide.stored() else {
@@ -364,9 +336,7 @@ impl GuideStage {
                     .child(side("AFTER", &overview.after, true)),
             );
         }
-        for (index, diagram) in stored.guide.diagrams.iter().enumerate() {
-            article = article.child(Self::diagram(diagram, &tokens, index));
-        }
+        article = article.children(diagrams);
         let count = guide.reading().guided();
         article = article.child(
             h_flex()
@@ -487,7 +457,7 @@ pub fn banner(guide: &Entity<GuideSession>, tokens: &Theme, cx: &App) -> Option<
 }
 
 impl Render for GuideStage {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (run, has_guide) = {
             let guide = self.guide.read(cx);
             (guide.run().clone(), guide.stored().is_some())
@@ -496,7 +466,7 @@ impl Render for GuideStage {
             GuideRun::Writing { chapters, .. } => self.writing_card(chapters, cx),
             GuideRun::Failed(message) if !has_guide => self.start_card(Some(&message), cx),
             _ if !has_guide => self.start_card(None, cx),
-            _ => self.overview(cx),
+            _ => self.overview(window, cx),
         }
     }
 }
