@@ -32,7 +32,7 @@ fn a_comment_a_review_and_a_reply_end_up_as_threads_in_the_pane(app: &mut TestAp
     );
 
     click(cx, "sidebar:row:docs/committed.md");
-    click(cx, "pill:comment-on-file");
+    click(cx, "pane:comment-on-file:docs/committed.md");
     type_text(cx, "Why this file?");
     press(cx, "cmd-enter");
     assert!(

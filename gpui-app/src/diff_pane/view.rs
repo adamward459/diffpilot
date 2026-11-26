@@ -619,6 +619,14 @@ impl DiffPane {
         self.focus_thread(id, window, cx);
     }
 
+    pub fn comment_on_file(&mut self, path: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(review) = &self.review else { return };
+        let id = review
+            .session
+            .update(cx, |session, cx| session.create_thread(ThreadAnchor::file(path), cx));
+        self.focus_thread(id, window, cx);
+    }
+
     pub fn highlighted_files(&self) -> usize {
         self.highlights
             .iter()
@@ -820,6 +828,7 @@ impl DiffPane {
         let collapse_path = diff.path.clone();
         let viewed_path = diff.path.clone();
         let open_path = diff.path.clone();
+        let comment_path = diff.path.clone();
         let open_line = diff.first_changed_new_line();
         let can_open = diff.status != FileStatus::Deleted;
         let threads = self
@@ -879,14 +888,19 @@ impl DiffPane {
                 0,
             ))
             .child(div().w(px(6.0)))
-            .child(bar_button(
-                theme,
-                "file-comment",
-                Glyph::MessageSquarePlus,
-                "Comment on file",
-                false,
-                false,
-                nothing,
+            .child(tag(
+                bar_button(
+                    theme,
+                    "file-comment",
+                    Glyph::MessageSquarePlus,
+                    "Comment on file",
+                    self.review.is_some(),
+                    false,
+                    cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        this.comment_on_file(&comment_path, window, cx)
+                    }),
+                ),
+                || format!("pane:comment-on-file:{}", diff.path),
             ))
             .child(tag(
                 bar_button(

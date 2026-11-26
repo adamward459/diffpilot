@@ -5,7 +5,6 @@ use diffpilot::review::pill::RESULT_SECONDS;
 use diffpilot::review::{PillEvent, ReviewPill, StopReview};
 use diffpilot_core::claude::ReviewError;
 use diffpilot_core::review::ReviewRun;
-use diffpilot_core::threads::ThreadAnchor;
 use gpui::{Entity, TestAppContext, VisualTestContext};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -91,22 +90,6 @@ async fn a_failed_run_opens_the_popover_and_a_new_run_can_close_it(cx: &mut Test
     assert!(!p.needs_room(cx), "a failure keeps the toolbar compact");
     p.pill.update(cx, |pill, cx| pill.set_open(false, cx));
     assert!(!p.pill.read_with(cx, |pill, _| pill.is_open()));
-}
-
-#[gpui::test]
-async fn the_comment_button_opens_a_file_thread_and_tells_the_host(cx: &mut TestAppContext) {
-    let (p, cx) = pill(cx, Ok(two_findings()));
-    p.pill.update(cx, |pill, cx| pill.comment_on_file(cx));
-    let threads =
-        p.f.session
-            .read_with(cx, |s, _| s.threads().cloned().collect::<Vec<_>>());
-    assert_eq!(threads.len(), 1);
-    assert_eq!(threads[0].anchor, ThreadAnchor::file("src/a.ts"));
-    assert_eq!(*p.events.borrow(), [PillEvent::CommentOnFile(threads[0].id)]);
-
-    p.f.session.update(cx, |session, cx| session.set_visible_path(None, cx));
-    p.pill.update(cx, |pill, cx| pill.comment_on_file(cx));
-    assert_eq!(p.f.session.read_with(cx, |s, _| s.thread_count()), 1);
 }
 
 #[gpui::test]

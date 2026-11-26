@@ -77,12 +77,9 @@ impl Gallery {
                 }
                 _ => {}
             }),
-            cx.subscribe(&pill, |this, _, event, cx| match event {
-                PillEvent::NeedsRoomChanged(room) => {
-                    this.room = *room;
-                    cx.notify();
-                }
-                PillEvent::CommentOnFile(_) => {}
+            cx.subscribe(&pill, |this, _, PillEvent::NeedsRoomChanged(room), cx| {
+                this.room = *room;
+                cx.notify();
             }),
         ];
         Self {

@@ -395,21 +395,6 @@ async fn a_second_thread_on_the_same_anchor_is_the_first_one(cx: &mut TestAppCon
 }
 
 #[gpui::test]
-async fn commenting_on_the_visible_file_opens_a_file_thread(cx: &mut TestAppContext) {
-    let f = fixture(cx, Ok(two_findings()));
-    let id = f
-        .session
-        .update(cx, |session, cx| session.comment_on_visible_file(cx))
-        .unwrap();
-    assert_eq!(f.thread(cx, id).unwrap().anchor, ThreadAnchor::file("src/a.ts"));
-    f.session.update(cx, |session, cx| session.set_visible_path(None, cx));
-    assert_eq!(
-        f.session.update(cx, |session, cx| session.comment_on_visible_file(cx)),
-        None
-    );
-}
-
-#[gpui::test]
 async fn the_title_follows_the_comparison_and_file_count(cx: &mut TestAppContext) {
     let f = fixture(cx, Ok(two_findings()));
     f.session

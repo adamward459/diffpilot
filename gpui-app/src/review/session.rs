@@ -408,11 +408,6 @@ impl ReviewSession {
         thread.id
     }
 
-    pub fn comment_on_visible_file(&mut self, cx: &mut Context<Self>) -> Option<ThreadId> {
-        let path = self.host.visible_path.clone()?;
-        Some(self.create_thread(ThreadAnchor::file(&path), cx))
-    }
-
     /// Blank text is ignored. `@claude` in the text starts a reply.
     pub fn post(&mut self, id: ThreadId, text: &str, cx: &mut Context<Self>) {
         let text = text.trim();

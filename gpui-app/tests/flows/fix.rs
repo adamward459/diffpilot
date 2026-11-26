@@ -22,7 +22,7 @@ fn fix_with_claude_runs_on_the_comments_and_command_period_stops_it(app: &mut Te
     );
 
     click(cx, "sidebar:row:docs/committed.md");
-    click(cx, "pill:comment-on-file");
+    click(cx, "pane:comment-on-file:docs/committed.md");
     type_text(cx, "Rename this.");
     press(cx, "cmd-enter");
     assert!(shows(cx, "pill:fix-ready:1"), "the pill offers to fix the open comment");
@@ -33,7 +33,7 @@ fn fix_with_claude_runs_on_the_comments_and_command_period_stops_it(app: &mut Te
 
     press(cx, "cmd-.");
     click(cx, "sidebar:row:src/staged.rs");
-    click(cx, "pill:comment-on-file");
+    click(cx, "pane:comment-on-file:src/staged.rs");
     type_text(cx, "Rename that.");
     press(cx, "cmd-enter");
     wait_until_shows(cx, "pill:fix-ready:2");

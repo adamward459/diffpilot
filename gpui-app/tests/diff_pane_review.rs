@@ -432,14 +432,13 @@ fn a_file_comment_opens_its_composer_in_view(cx: &mut TestAppContext) {
     opened.pane.update(cx, |pane, cx| pane.reveal("c.ts", cx));
     cx.run_until_parked();
     draw(&opened.pane, cx);
-    let id = opened.pane.update_in(cx, |pane, window, cx| {
-        let created = opened
-            .session
-            .update(cx, |session, cx| session.comment_on_visible_file(cx))
-            .expect("a visible file");
-        pane.focus_thread(created, window, cx);
-        created
-    });
+    opened
+        .pane
+        .update_in(cx, |pane, window, cx| pane.comment_on_file("c.ts", window, cx));
+    let id = opened
+        .session
+        .read_with(cx, |session, _| session.threads().last().map(|thread| thread.id))
+        .expect("a file thread");
     cx.run_until_parked();
     draw(&opened.pane, cx);
     opened.pane.read_with(cx, |pane, _| {

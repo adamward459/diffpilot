@@ -11,6 +11,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - Glass controls now look like real glass: a sheen lit from the top, a crisp rim, and a shadow that sinks when you hover or press. Buttons are now capsules, and controls, toolbars, and text are larger.
 - The app is now named Diffpilot in the menu bar and the Dock.
 
+### Removed
+
+- The comment button next to Ask Claude in the toolbar. Use Comment on file in each file header instead.
+
+### Fixed
+
+- Comment on file in a file header now opens a comment on that file.
+
 ### Added
 
 - Compare a branch with its base: another branch, a tag, a recent commit, only the working tree, or only the staged changes.

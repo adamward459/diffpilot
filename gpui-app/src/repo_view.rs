@@ -492,13 +492,8 @@ impl RepoView {
                     this.show_comment_counts(review, cx);
                 }
             }),
-            cx.subscribe_in(&pill, window, |this, _, event: &PillEvent, window, cx| match event {
-                PillEvent::NeedsRoomChanged(room) => this.set_compact_toolbar(*room, cx),
-                PillEvent::CommentOnFile(id) => {
-                    if let Some(session) = &this.session {
-                        session.pane.update(cx, |pane, cx| pane.focus_thread(*id, window, cx));
-                    }
-                }
+            cx.subscribe(&pill, |this, _, PillEvent::NeedsRoomChanged(room), cx| {
+                this.set_compact_toolbar(*room, cx)
             }),
             cx.subscribe_in(
                 &sidebar,
@@ -1783,19 +1778,5 @@ mod tests {
             .advance_clock(Duration::from_secs(crate::review::pill::RESULT_SECONDS + 1));
         cx.run_until_parked();
         assert!(!compact(cx), "the result is gone");
-    }
-
-    #[gpui::test]
-    fn the_pill_comments_on_the_top_file_and_the_pane_shows_the_thread(cx: &mut TestAppContext) {
-        let (opened, cx) = open(cx);
-        let (pill, pane) = opened.view.read_with(cx, |view, _| {
-            let session = view.current();
-            (session.pill.clone(), session.pane.clone())
-        });
-        pill.update(cx, |pill, cx| pill.comment_on_file(cx));
-        cx.run_until_parked();
-        let review = review_session(&opened, cx);
-        let id = review.read_with(cx, |session, _| session.threads().next().map(|thread| thread.id));
-        assert!(pane.read_with(cx, |pane, _| pane.card(id.expect("a thread")).is_some()));
     }
 }

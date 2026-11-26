@@ -2,7 +2,6 @@ use crate::review::popover::{PopoverEvent, ReviewPopover};
 use crate::review::session::{ReviewEvent, ReviewSession};
 use diffpilot_core::review::{ReviewRun, Severity};
 use diffpilot_core::run::{Progress, RunState};
-use diffpilot_core::threads::ThreadId;
 use diffpilot_ui_kit::components::{Button, Look, filled_check, severity_badge, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
@@ -46,7 +45,6 @@ pub fn init(cx: &mut App) {
 pub enum PillEvent {
     /// The pill wants more toolbar width: while a review runs and while its result shows.
     NeedsRoomChanged(bool),
-    CommentOnFile(ThreadId),
 }
 
 pub struct ReviewPill {
@@ -207,15 +205,6 @@ impl ReviewPill {
                 }
             }
         })
-    }
-
-    pub fn comment_on_file(&mut self, cx: &mut Context<Self>) {
-        let created = self
-            .session
-            .update(cx, |session, cx| session.comment_on_visible_file(cx));
-        if let Some(id) = created {
-            cx.emit(PillEvent::CommentOnFile(id));
-        }
     }
 
     fn trigger(&self, run: &ReviewRun, visible: bool, theme: Theme) -> Button {
@@ -387,7 +376,6 @@ impl Render for ReviewPill {
         let session = self.session.read(cx);
         let run = session.run().clone();
         let visible = session.host().visible_path.is_some();
-        let count = session.thread_count();
         let fix = self.fix_area(session, theme, cx);
         let claude = match &run {
             ReviewRun::Running { since } => self.running(*since, theme, cx).into_any_element(),
@@ -409,23 +397,6 @@ impl Render for ReviewPill {
             .text_color(cx.theme().foreground)
             .child(claude)
             .children(fix)
-            .child(div().w(px(1.)).h(px(16.)).mx_0p5().bg(theme.ui.line))
-            .child(
-                tag(
-                    Button::new("comment-on-file")
-                        .look(Look::Ghost)
-                        .regular()
-                        .rounded_full()
-                        .h(px(30.))
-                        .gap(px(6.))
-                        .icon(Glyph::MessageSquare, 16.)
-                        .label(count.to_string())
-                        .tooltip("Comment on file")
-                        .disabled(!visible),
-                    || "pill:comment-on-file",
-                )
-                .on_click(cx.listener(|this, _, _, cx| this.comment_on_file(cx))),
-            )
     }
 }
 
