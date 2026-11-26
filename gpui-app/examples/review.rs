@@ -12,6 +12,7 @@ use diffpilot_core::claude::{Replier, Reviewer, ScriptedReplier, ScriptedReviewe
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{DiffLine, FileDiff, Hunk, LineKind};
 use diffpilot_core::settings::Settings;
+use diffpilot_core::store::Store;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use gpui::{
     App, AppContext, Application, AsyncApp, Bounds, Context, Entity, InteractiveElement, IntoElement, ParentElement,
@@ -157,7 +158,8 @@ fn session(cx: &mut App, reviewer: Arc<dyn Reviewer>, replier: Arc<dyn Replier>)
     host.branch_name = Some("feature".into());
     host.files = Arc::from([Arc::new(archive_file())]);
     host.visible_path = Some("docs/archive.md".into());
-    cx.new(|_| ReviewSession::new(host, Arc::new(Settings::in_memory()), reviewer, replier))
+    let store = Arc::new(Store::open_in_memory().expect("an in-memory store opens"));
+    cx.new(|_| ReviewSession::new(host, Arc::new(Settings::in_memory()), store, reviewer, replier))
 }
 
 fn open_gallery(

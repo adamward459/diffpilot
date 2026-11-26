@@ -1,6 +1,8 @@
 use crate::review::markup::{Markup, SpanKind, pending_mention};
 use crate::review::session::{ReviewEvent, ReviewSession, ThreadChange};
-use diffpilot_core::threads::{CLAUDE_NAME, ReviewThread, ThreadAnchor, ThreadComment, ThreadId, mentions_claude};
+use diffpilot_core::threads::{
+    CLAUDE_NAME, ReviewThread, ThreadAnchor, ThreadComment, ThreadId, ThreadStatus, mentions_claude,
+};
 use diffpilot_ui_kit::components::{Button, Look, avatar, card_shell, icon_button, severity_badge};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
@@ -39,6 +41,7 @@ pub mod metrics {
     pub const ACTIONS: f32 = 24.0;
     pub const ACTIONS_GAP: f32 = 8.0;
     pub const SUGGEST: f32 = 26.0;
+    pub const STATUS_BAND: f32 = 32.0;
     pub const MAX_ROWS: usize = 6;
 }
 
@@ -54,6 +57,14 @@ enum Kind {
     Finding,
     Summary,
     Plain,
+}
+
+fn shows_status_band(thread: &ReviewThread) -> bool {
+    match thread.status {
+        ThreadStatus::Dismissed => true,
+        ThreadStatus::Open => thread.addressed.is_some(),
+        ThreadStatus::Resolved => false,
+    }
 }
 
 fn kind_of(thread: &ReviewThread) -> Kind {
@@ -273,6 +284,9 @@ impl ThreadCard {
                         .skip(1)
                         .map(|c| comment_height(c, false))
                         .sum::<f32>();
+                    if shows_status_band(thread) {
+                        total += m::STATUS_BAND;
+                    }
                     if self.shows_composer(kind) {
                         total += self.composer_height(thread, cx);
                     }
@@ -287,6 +301,9 @@ impl ThreadCard {
                     .skip(1)
                     .map(|c| comment_height(c, false))
                     .sum::<f32>();
+                if shows_status_band(thread) {
+                    total += m::STATUS_BAND;
+                }
                 if self.shows_composer(kind) {
                     total += self.composer_height(thread, cx);
                 }
@@ -299,6 +316,9 @@ impl ThreadCard {
                     .enumerate()
                     .map(|(index, c)| comment_height(c, index == 0))
                     .sum::<f32>();
+                if shows_status_band(thread) {
+                    total += m::STATUS_BAND;
+                }
                 total += self.composer_height(thread, cx);
             }
         }
@@ -398,7 +418,12 @@ impl ThreadCard {
 
     fn resolve(&mut self, cx: &mut Context<Self>) {
         let id = self.id;
-        self.session.update(cx, |session, cx| session.remove_thread(id, cx));
+        self.session.update(cx, |session, cx| session.resolve_thread(id, cx));
+    }
+
+    fn reopen(&mut self, cx: &mut Context<Self>) {
+        let id = self.id;
+        self.session.update(cx, |session, cx| session.reopen_thread(id, cx));
     }
 
     fn toggle_collapsed(&mut self, cx: &mut Context<Self>) {
@@ -439,6 +464,68 @@ impl ThreadCard {
             .look(Look::Claude)
             .icon(Glyph::Sparkles, 12.)
             .disabled(busy)
+    }
+
+    fn status_band(&self, thread: &ReviewThread, theme: Theme, cx: &Context<Self>) -> Option<AnyElement> {
+        if !shows_status_band(thread) {
+            return None;
+        }
+        let dismissed = thread.status == ThreadStatus::Dismissed;
+        let chip = if dismissed {
+            "Dismissed by Claude"
+        } else {
+            "Addressed by Claude"
+        };
+        let summary = thread
+            .addressed
+            .as_ref()
+            .map(|mark| mark.summary.clone())
+            .filter(|summary| !summary.is_empty());
+        Some(
+            h_flex()
+                .h(px(m::STATUS_BAND))
+                .px(px(m::SIDE))
+                .gap_2()
+                .items_center()
+                .border_t_1()
+                .border_color(theme.ui.line)
+                .child(
+                    h_flex()
+                        .flex_none()
+                        .gap_1()
+                        .px_2()
+                        .h(px(20.))
+                        .items_center()
+                        .rounded_full()
+                        .bg(theme.ui.claude_bg)
+                        .text_color(theme.ui.claude)
+                        .text_size(px(11.))
+                        .child(Icon::new(Glyph::Sparkles).size(px(11.)))
+                        .child(chip),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        .text_size(px(12.))
+                        .text_color(theme.ui.muted)
+                        .children(summary),
+                )
+                .when(!dismissed, |row| {
+                    row.child(
+                        self.button("Reopen", "reopen")
+                            .on_click(cx.listener(|this, _, _, cx| this.reopen(cx))),
+                    )
+                })
+                .child(
+                    self.button("Resolve", "band-resolve")
+                        .on_click(cx.listener(|this, _, _, cx| this.resolve(cx))),
+                )
+                .into_any_element(),
+        )
     }
 
     fn comment(&self, comment: &ThreadComment, first: bool, fonts: &Fonts) -> AnyElement {
@@ -675,6 +762,7 @@ impl ThreadCard {
                         .children(place.map(|place| format!("·  {place}"))),
                 )
                 .children(thread.comments.iter().skip(1).map(|c| self.comment(c, false, fonts)))
+                .children(self.status_band(thread, theme, cx))
                 .when(self.replying, |col| {
                     col.child(self.composer_view(thread, theme, window, cx))
                 })
@@ -732,6 +820,7 @@ impl ThreadCard {
                 |c| fonts.text(&self.markup_of(c)),
             )))
             .children(thread.comments.iter().skip(1).map(|c| self.comment(c, false, fonts)))
+            .children(self.status_band(thread, theme, cx))
             .when(self.replying, |col| {
                 col.child(self.composer_view(thread, theme, window, cx))
             })
@@ -803,6 +892,7 @@ impl ThreadCard {
                     .enumerate()
                     .map(|(index, c)| self.comment(c, index == 0, fonts)),
             )
+            .children(self.status_band(thread, theme, cx))
             .child(self.composer_view(thread, theme, window, cx))
             .into_any_element()
     }
@@ -853,10 +943,12 @@ impl Render for ThreadCard {
             Kind::Summary => self.summary_card(thread, &fonts, window, cx),
             Kind::Plain => self.plain_card(thread, &fonts, window, cx),
         };
+        let dismissed = thread.status == ThreadStatus::Dismissed;
         div()
             .w_full()
             .font_family(cx.theme().font_family.clone())
             .text_size(px(m::TEXT_SIZE))
+            .when(dismissed, |card| card.opacity(0.6))
             .child(card)
             .into_any_element()
     }

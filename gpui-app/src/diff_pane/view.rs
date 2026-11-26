@@ -9,22 +9,25 @@ use crate::diff_pane::lines::{
 use crate::diff_pane::rows::{Notice, RowKind, ThreadSlot};
 use crate::diff_pane::state::{Geometry, PaneState};
 use crate::review::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange};
+use diffpilot_core::changes::FileStatus;
 use diffpilot_core::diff::{DiffMode, FileDiff, LineKind};
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use diffpilot_ui_kit::Glyph;
 use diffpilot_ui_kit::components::{
-    BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, label_segment, status_badge, viewed_toggle,
+    BadgeTone, Button, ChipTone, Look, MenuEntry, MenuItem, State, backdrop, bar_button, chip_label, label_segment,
+    menu, status_badge, viewed_toggle,
 };
 use diffpilot_ui_kit::{Theme, painted};
 use gpui::ClipboardItem;
 use gpui::{
     AnyView, App, AppContext as _, ClickEvent, Context, Div, Entity, EventEmitter, FontWeight, Hsla,
-    InteractiveElement as _, IntoElement, MouseMoveEvent, ParentElement as _, Pixels, Render, ScrollWheelEvent,
-    SharedString, Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled as _, Subscription, Window,
-    canvas, div, font, px,
+    InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement as _, Pixels,
+    Render, ScrollWheelEvent, SharedString, Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled as _,
+    Subscription, Window, canvas, div, font, px,
 };
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -35,8 +38,19 @@ pub enum DiffPaneEvent {
     VisibleFile(String),
     ToggleViewed(String),
     FirstPaint,
+    OpenInEditor {
+        path: String,
+        line: Option<u32>,
+    },
     /// The mode the rows are drawn in changed. A split pane that is too narrow draws unified rows.
     ShownMode(DiffMode),
+}
+
+struct LineMenu {
+    x: Pixels,
+    y: Pixels,
+    path: String,
+    line: Option<u32>,
 }
 
 #[derive(Clone)]
@@ -109,6 +123,7 @@ pub struct DiffPane {
     first_paint: FirstPaint,
     uncommitted: HashSet<String>,
     last_scroll: Option<Instant>,
+    line_menu: Option<LineMenu>,
     pub probe: Probe,
 }
 
@@ -165,6 +180,7 @@ impl DiffPane {
             first_paint: FirstPaint::Waiting,
             uncommitted: HashSet::new(),
             last_scroll: None,
+            line_menu: None,
             probe: Probe::default(),
         }
     }
@@ -363,6 +379,10 @@ impl DiffPane {
     fn hovered(&self) -> Option<Hovered> {
         self.review.as_ref()?;
         let (x, y) = self.mouse?;
+        self.line_at(x, y)
+    }
+
+    fn line_at(&self, x: Pixels, y: Pixels) -> Option<Hovered> {
         let row = self.state.tops.row_at(self.state.scroll() + f32::from(y))?;
         match self.state.rows.rows[row].kind {
             RowKind::Line { hunk, line } => Some(Hovered {
@@ -387,6 +407,97 @@ impl DiffPane {
             }
             _ => None,
         }
+    }
+
+    fn under_sticky(&self, y: Pixels) -> bool {
+        let Some(sticky) = self.state.position().and_then(|position| position.sticky) else {
+            return false;
+        };
+        let height = FILE_HEADER + sticky.hunk.map_or(0.0, |_| HUNK);
+        let y = f32::from(y);
+        y >= sticky.push && y < sticky.push + height
+    }
+
+    fn open_line(&self, hovered: Hovered) -> Option<(String, Option<u32>)> {
+        let file = &self.state.files[self.state.rows.rows[hovered.row].file as usize];
+        if file.status == FileStatus::Deleted {
+            return None;
+        }
+        let line = file.hunks[hovered.hunk as usize].new_line_near(hovered.line as usize);
+        Some((file.path.clone(), line))
+    }
+
+    fn open_menu(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        let (x, y) = (event.position.x - self.origin.0, event.position.y - self.origin.1);
+        if self.under_sticky(y) {
+            return;
+        }
+        let target = self.line_at(x, y).and_then(|hovered| self.open_line(hovered));
+        self.line_menu = target.map(|(path, line)| LineMenu { x, y, path, line });
+        cx.notify();
+    }
+
+    fn open_from_gutter(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        let (x, y) = (event.position.x - self.origin.0, event.position.y - self.origin.1);
+        if self.under_sticky(y) {
+            return;
+        }
+        let Some(hovered) = self.line_at(x, y) else { return };
+        let numbers = if hovered.column == Column::Unified { 2.0 } else { 1.0 };
+        let left = self.column_span(hovered.column).0;
+        if f32::from(x) - left >= NUMBER_COLUMN * numbers {
+            return;
+        }
+        if let Some((path, line)) = self.open_line(hovered) {
+            cx.emit(DiffPaneEvent::OpenInEditor { path, line });
+        }
+    }
+
+    fn line_menu(&self, menu_state: &LineMenu, cx: &mut Context<Self>) -> Div {
+        const WIDTH: f32 = 200.0;
+        let theme = &self.theme;
+        let label = match menu_state.line {
+            Some(line) => format!("Open in Editor at Line {line}"),
+            None => "Open in Editor".to_string(),
+        };
+        let pane = cx.entity();
+        let (path, line) = (menu_state.path.clone(), menu_state.line);
+        let select = {
+            let pane = pane.clone();
+            Rc::new(move |_: &mut Window, cx: &mut App| {
+                pane.update(cx, |pane, cx| {
+                    pane.line_menu = None;
+                    cx.emit(DiffPaneEvent::OpenInEditor {
+                        path: path.clone(),
+                        line,
+                    });
+                    cx.notify();
+                })
+            })
+        };
+        let entries = vec![MenuEntry::Item(MenuItem {
+            label: label.into(),
+            checked: false,
+            on_select: select,
+        })];
+        let width = self.state.geometry().width;
+        let left = f32::from(menu_state.x).min(width - WIDTH).max(0.0);
+        div()
+            .child(backdrop(move |_, cx| {
+                pane.update(cx, |pane, cx| {
+                    pane.line_menu = None;
+                    cx.notify();
+                })
+            }))
+            .child(
+                div()
+                    .absolute()
+                    .left(px(left))
+                    .top(px(f32::from(menu_state.y) - 22.0))
+                    .w(px(WIDTH))
+                    .h(px(0.0))
+                    .child(menu(theme, "line-menu", entries)),
+            )
     }
 
     fn add_comment(&mut self, hovered: Hovered, window: &mut Window, cx: &mut Context<Self>) {
@@ -606,6 +717,9 @@ impl DiffPane {
         let viewed = self.state.viewed.contains(&diff.path);
         let collapse_path = diff.path.clone();
         let viewed_path = diff.path.clone();
+        let open_path = diff.path.clone();
+        let open_line = diff.first_changed_new_line();
+        let can_open = diff.status != FileStatus::Deleted;
         let threads = self
             .state
             .threads
@@ -676,10 +790,15 @@ impl DiffPane {
                 theme,
                 "file-open",
                 Glyph::ExternalLink,
-                "Open in editor",
+                "Open in Editor",
+                can_open,
                 false,
-                false,
-                nothing,
+                cx.listener(move |_, _: &ClickEvent, _, cx| {
+                    cx.emit(DiffPaneEvent::OpenInEditor {
+                        path: open_path.clone(),
+                        line: open_line,
+                    })
+                }),
             ))
             .child(bar_button(
                 theme,
@@ -730,6 +849,19 @@ impl DiffPane {
             .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(patch.clone()))
             }));
+        let file_diff = &self.state.files[file];
+        let (open_path, open_line) = (file_diff.path.clone(), source.first_new_line());
+        let open = Button::new(("hunk-open", file * 4096 + hunk))
+            .label("Open in Editor")
+            .look(Look::Plain)
+            .icon(Glyph::ExternalLink, 11.0)
+            .disabled(file_diff.status == FileStatus::Deleted)
+            .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                cx.emit(DiffPaneEvent::OpenInEditor {
+                    path: open_path.clone(),
+                    line: open_line,
+                })
+            }));
         let action =
             |id: &'static str, label: &'static str| Button::new(id).label(label).look(Look::Plain).disabled(true);
         let bar = div()
@@ -756,6 +888,7 @@ impl DiffPane {
                     .gap(px(4.0))
                     .child(action("hunk-stage", "Stage Hunk"))
                     .child(action("hunk-revert", "Revert\u{2026}"))
+                    .child(open)
                     .child(copy)
                     .child(action("hunk-ask", "Ask Claude")),
             );
@@ -929,6 +1062,18 @@ impl Render for DiffPane {
                     cx.notify();
                 }
             }))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, event: &MouseDownEvent, _, cx| this.open_menu(event, cx)),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                    if event.modifiers.platform {
+                        this.open_from_gutter(event, cx);
+                    }
+                }),
+            )
             .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                 if !hovered && this.mouse.take().is_some() {
                     cx.notify();
@@ -989,6 +1134,9 @@ impl Render for DiffPane {
         }
         if let Some(sticky) = self.state.position().and_then(|position| position.sticky) {
             root = root.child(self.sticky(sticky, cx));
+        }
+        if let Some(menu_state) = &self.line_menu {
+            root = root.child(self.line_menu(menu_state, cx));
         }
         root
     }

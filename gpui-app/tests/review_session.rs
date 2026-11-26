@@ -7,9 +7,12 @@ use diffpilot_core::cancel::CancelToken;
 use diffpilot_core::claude::ReviewError;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::review::{Effort, ModelName, ReviewModel, ReviewRun, ReviewScope, Severity};
+use diffpilot_core::store::Store;
+use diffpilot_core::threads::ThreadStatus;
 use diffpilot_core::threads::{CLAUDE_NAME, Side, ThreadAnchor, ThreadId, USER_NAME};
 use gpui::TestAppContext;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[gpui::test]
 async fn a_run_ends_done_with_threads_planned_from_the_findings(cx: &mut TestAppContext) {
@@ -447,4 +450,65 @@ async fn dropping_the_session_cancels_a_streaming_reply(cx: &mut TestAppContext)
     cx.update(|_| {});
     cx.run_until_parked();
     assert!(token.is_cancelled());
+}
+
+fn texts(cx: &mut TestAppContext, session: &gpui::Entity<diffpilot::review::ReviewSession>) -> Vec<String> {
+    session.read_with(cx, |session, _| {
+        session
+            .threads()
+            .flat_map(|thread| thread.comments.iter().map(|comment| comment.body.clone()))
+            .collect()
+    })
+}
+
+#[gpui::test]
+async fn threads_survive_opening_the_same_review_again(cx: &mut TestAppContext) {
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let first = session_on(cx, &store, Comparison::checked_out("main", true));
+    let id = first.update(cx, |session, cx| {
+        let id = session.create_thread(ThreadAnchor::line("src/a.ts", Side::New, 1), cx);
+        session.post(id, "Rename this.", cx);
+        id
+    });
+    drop(first);
+    cx.run_until_parked();
+
+    let second = session_on(cx, &store, Comparison::checked_out("main", true));
+    assert_eq!(texts(cx, &second), ["Rename this."]);
+    assert_eq!(
+        second.read_with(cx, |session, _| session.thread(id).map(|t| t.id)),
+        Some(id)
+    );
+}
+
+#[gpui::test]
+async fn two_comparisons_keep_separate_threads(cx: &mut TestAppContext) {
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let against_main = session_on(cx, &store, Comparison::checked_out("main", true));
+    let against_develop = session_on(cx, &store, Comparison::checked_out("develop", true));
+    against_main.update(cx, |session, cx| {
+        let id = session.create_thread(ThreadAnchor::file("src/a.ts"), cx);
+        session.post(id, "On main.", cx);
+    });
+    assert_eq!(texts(cx, &against_main), ["On main."]);
+    assert!(texts(cx, &against_develop).is_empty());
+}
+
+#[gpui::test]
+async fn resolving_keeps_the_thread_in_the_store_and_out_of_the_counts(cx: &mut TestAppContext) {
+    let f = fixture(cx, Ok(two_findings()));
+    let id = f.user_thread(cx);
+    f.post(cx, id, "Fix this.");
+    assert_eq!(f.session.read_with(cx, |s, _| s.thread_count()), 1);
+
+    f.session.update(cx, |session, cx| session.resolve_thread(id, cx));
+
+    assert!(f.threads(cx).is_empty());
+    assert_eq!(f.session.read_with(cx, |s, _| s.thread_count()), 0);
+    assert!(f.session.read_with(cx, |s, _| s.comment_counts().is_empty()));
+    assert_eq!(f.thread(cx, id).unwrap().status, ThreadStatus::Resolved);
+    assert_eq!(
+        f.events.borrow().last(),
+        Some(&ReviewEvent::ThreadsChanged(ThreadChange::Removed(id)))
+    );
 }

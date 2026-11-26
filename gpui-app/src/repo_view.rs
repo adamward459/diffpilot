@@ -1,6 +1,7 @@
 use crate::bench::{Bench, Mark};
 use crate::comparison_control::{Select, comparison_control};
 use crate::diff_pane::layout::SPLIT_MIN_WIDTH;
+use crate::folder_menu::FolderMenu;
 use crate::pane::{DiffPane, DiffPaneEvent};
 use crate::review::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
 use crate::sidebar::{LoadedChanges, Sidebar, SidebarEvent};
@@ -10,10 +11,12 @@ use diffpilot_core::claude::{
 };
 use diffpilot_core::comparison::{self, Comparison};
 use diffpilot_core::diff::{self, DiffMode, FileDiff};
+use diffpilot_core::editor;
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::refs::Refs;
 use diffpilot_core::run::RunKind;
 use diffpilot_core::settings::{self, Settings};
+use diffpilot_core::store::Store;
 use diffpilot_core::sync::{self, BranchStatus};
 use diffpilot_core::tree;
 use diffpilot_core::viewed::{ViewedFiles, ViewedKey, ViewedStore};
@@ -25,7 +28,7 @@ use diffpilot_ui_kit::components::{
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{
-    Context, Entity, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render,
+    App, Context, Entity, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render,
     SharedString, Styled, Subscription, Task, Window, WindowControlArea, div, px,
 };
 use gpui_component::{ActiveTheme, Icon, InteractiveElementExt as _, StyledExt, h_flex, v_flex};
@@ -193,6 +196,7 @@ struct Session {
     sidebar: Entity<Sidebar>,
     pane: Entity<DiffPane>,
     pill: Entity<ReviewPill>,
+    review: Entity<ReviewSession>,
     load_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -200,8 +204,10 @@ struct Session {
 pub struct RepoView {
     repo: PathBuf,
     folder_name: SharedString,
+    folder_menu: Option<Entity<FolderMenu>>,
     settings: Arc<Settings>,
     viewed_store: Arc<ViewedStore>,
+    review_store: Arc<Store>,
     claude: Claude,
     viewed_states: HashMap<ViewedKey, Arc<ViewedState>>,
     refs: Option<Refs>,
@@ -229,6 +235,7 @@ impl RepoView {
         repo: PathBuf,
         settings: Arc<Settings>,
         viewed_store: Arc<ViewedStore>,
+        review_store: Arc<Store>,
         claude: Claude,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -243,8 +250,10 @@ impl RepoView {
         let mut this = Self {
             repo,
             folder_name: folder_name.into(),
+            folder_menu: None,
             settings,
             viewed_store,
+            review_store,
             claude,
             viewed_states: HashMap::new(),
             refs: None,
@@ -266,9 +275,46 @@ impl RepoView {
             status_task: None,
             _watch_task: None,
         };
+        cx.observe_global::<crate::settings::SettingsChanged>(|this, cx| this.apply_settings(cx))
+            .detach();
         this.load_refs(window, cx);
         this.start_watching(window, cx);
         this
+    }
+
+    fn apply_settings(&mut self, cx: &mut Context<Self>) {
+        let mode = settings::diff_mode_override().unwrap_or_else(|| self.settings.diff_mode());
+        self.show_diff_mode(mode, cx);
+        self.show_wrap(self.settings.wrap_lines(), cx);
+        self.claude = Claude::from_env(&self.repo, &self.settings);
+        if let Some(session) = &self.session {
+            let claude = self.claude.clone();
+            session.review.update(cx, |review, cx| {
+                review.use_settings(claude.reviewer, claude.replier, cx)
+            });
+        }
+    }
+
+    fn show_wrap(&mut self, wrap: bool, cx: &mut Context<Self>) {
+        if wrap == self.wrap {
+            return;
+        }
+        self.wrap = wrap;
+        if let Some(session) = &self.session {
+            session.pane.update(cx, |pane, cx| pane.set_wrap(wrap, cx));
+        }
+        cx.notify();
+    }
+
+    pub fn set_title(&mut self, menu: Entity<FolderMenu>, cx: &mut Context<Self>) {
+        self.folder_menu = Some(menu);
+        cx.notify();
+    }
+
+    pub fn review_running(&self, cx: &App) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| session.pill.read(cx).is_running(cx))
     }
 
     pub fn set_compact_toolbar(&mut self, compact: bool, cx: &mut Context<Self>) {
@@ -288,6 +334,11 @@ impl RepoView {
     }
 
     pub fn set_diff_mode(&mut self, mode: DiffMode, cx: &mut Context<Self>) {
+        self.show_diff_mode(mode, cx);
+        self.settings.set_diff_mode(mode);
+    }
+
+    fn show_diff_mode(&mut self, mode: DiffMode, cx: &mut Context<Self>) {
         if mode == self.mode {
             return;
         }
@@ -295,9 +346,6 @@ impl RepoView {
         if let Some(session) = &self.session {
             session.pane.update(cx, |pane, cx| pane.set_mode(mode, cx));
         }
-        let settings = self.settings.clone();
-        cx.background_spawn(async move { settings.set_diff_mode(mode) })
-            .detach();
         cx.notify();
     }
 
@@ -381,8 +429,8 @@ impl RepoView {
         let mut host = ReviewHost::new(Some(self.repo.clone()), comparison);
         host.branch_name = branch_name;
         let review = {
-            let (settings, claude) = (self.settings.clone(), self.claude.clone());
-            cx.new(|_| ReviewSession::new(host, settings, claude.reviewer, claude.replier))
+            let (settings, claude, store) = (self.settings.clone(), self.claude.clone(), self.review_store.clone());
+            cx.new(|_| ReviewSession::new(host, settings, store, claude.reviewer, claude.replier))
         };
         pane.update(cx, |pane, cx| pane.set_review(review.clone(), window, cx));
         let pill = cx.new(|cx| ReviewPill::new(review.clone(), window, cx));
@@ -424,6 +472,7 @@ impl RepoView {
                             cx.notify();
                         }
                     }
+                    DiffPaneEvent::OpenInEditor { path, line } => this.open_in_editor(path, *line, cx),
                     DiffPaneEvent::FirstPaint => Bench::mark_now(cx, Mark::FirstDiffPaint),
                     DiffPaneEvent::ShownMode(_) => cx.notify(),
                 },
@@ -440,6 +489,7 @@ impl RepoView {
             sidebar,
             pane,
             pill,
+            review,
             load_task: None,
             _subscriptions: subscriptions,
         });
@@ -633,6 +683,22 @@ impl RepoView {
         session.pane.update(cx, |pane, cx| pane.set_viewed(paths, cx));
     }
 
+    fn open_in_editor(&self, path: &str, line: Option<u32>, cx: &mut Context<Self>) {
+        let target = editor::OpenTarget {
+            path: self.repo.join(path),
+            line,
+            column: None,
+        };
+        let settings = self.settings.clone();
+        cx.background_spawn(async move {
+            let choice = settings.editor().unwrap_or_else(editor::detect);
+            if let Err(error) = editor::open(&choice, &target) {
+                eprintln!("diffpilot: {error}");
+            }
+        })
+        .detach();
+    }
+
     fn toggle_viewed(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = &self.session else { return };
         let Some(state) = session.viewed.clone() else { return };
@@ -752,12 +818,9 @@ impl RepoView {
             true,
             self.wrap,
             cx.listener(|this, _, _, cx| {
-                this.wrap = !this.wrap;
-                let wrap = this.wrap;
-                if let Some(session) = &this.session {
-                    session.pane.update(cx, |pane, cx| pane.set_wrap(wrap, cx));
-                }
-                cx.notify();
+                let wrap = !this.wrap;
+                this.show_wrap(wrap, cx);
+                this.settings.set_wrap_lines(wrap);
             }),
         )
         .into_any_element()
@@ -939,7 +1002,7 @@ impl RepoView {
         .child(
             h_flex()
                 .min_w(px(110.))
-                .max_w(px(220.))
+                .max_w(px(300.))
                 .flex_shrink()
                 .pl(px(if self.sidebar_open { 20. } else { TRAFFIC_LIGHTS }))
                 .gap_2()
@@ -947,14 +1010,16 @@ impl RepoView {
                 .child(
                     v_flex()
                         .min_w_0()
-                        .child(
-                            div()
+                        .child(match &self.folder_menu {
+                            Some(menu) => menu.clone().into_any_element(),
+                            None => div()
                                 .text_size(px(15.))
                                 .font_semibold()
                                 .text_color(tokens.ui.text)
                                 .whitespace_nowrap()
-                                .child(self.folder_name.clone()),
-                        )
+                                .child(self.folder_name.clone())
+                                .into_any_element(),
+                        })
                         .child(
                             div()
                                 .text_size(px(12.))

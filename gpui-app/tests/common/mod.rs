@@ -8,6 +8,7 @@ use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{DiffLine, FileDiff, Hunk, LineKind};
 use diffpilot_core::review::{Finding, ReviewRequest, ReviewResult, ReviewRun, Severity};
 use diffpilot_core::settings::Settings;
+use diffpilot_core::store::Store;
 use diffpilot_core::threads::{ReviewThread, Side, ThreadAnchor, ThreadId};
 use gpui::{AppContext, Context, Entity, Render, TestAppContext, VisualTestContext, Window};
 use gpui_component::Root;
@@ -129,6 +130,7 @@ pub struct Fixture {
     pub reviewer: Arc<StubReviewer>,
     pub replier: Arc<StubReplier>,
     pub settings: Arc<Settings>,
+    pub store: Arc<Store>,
     pub events: Rc<RefCell<Vec<ReviewEvent>>>,
 }
 
@@ -136,12 +138,13 @@ pub fn fixture(cx: &mut TestAppContext, outcome: Result<ReviewResult, ReviewErro
     let reviewer = StubReviewer::new(outcome);
     let replier = Arc::new(StubReplier::default());
     let settings = Arc::new(Settings::in_memory());
+    let store = Arc::new(Store::open_in_memory().unwrap());
     let mut host = ReviewHost::new(Some(PathBuf::from("/repo")), Comparison::checked_out("main", true));
     host.files = Arc::from([Arc::new(file())]);
     host.visible_path = Some("src/a.ts".into());
     let session = {
-        let (reviewer, replier, settings) = (reviewer.clone(), replier.clone(), settings.clone());
-        cx.new(move |_| ReviewSession::new(host, settings, reviewer, replier))
+        let (reviewer, replier, settings, store) = (reviewer.clone(), replier.clone(), settings.clone(), store.clone());
+        cx.new(move |_| ReviewSession::new(host, settings, store, reviewer, replier))
     };
     let events = Rc::new(RefCell::new(Vec::new()));
     let sink = events.clone();
@@ -156,8 +159,19 @@ pub fn fixture(cx: &mut TestAppContext, outcome: Result<ReviewResult, ReviewErro
         reviewer,
         replier,
         settings,
+        store,
         events,
     }
+}
+
+pub fn session_on(cx: &mut TestAppContext, store: &Arc<Store>, comparison: Comparison) -> Entity<ReviewSession> {
+    let mut host = ReviewHost::new(Some(PathBuf::from("/repo")), comparison);
+    host.branch_name = Some("feature".into());
+    host.files = Arc::from([Arc::new(file())]);
+    let (store, settings) = (store.clone(), Arc::new(Settings::in_memory()));
+    let reviewer = StubReviewer::new(Ok(result("", vec![])));
+    let replier = Arc::new(StubReplier::default());
+    cx.new(move |_| ReviewSession::new(host, settings, store, reviewer, replier))
 }
 
 impl Fixture {

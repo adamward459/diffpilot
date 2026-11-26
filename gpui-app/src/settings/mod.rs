@@ -17,6 +17,12 @@ use std::sync::Arc;
 
 actions!(settings, [OpenSettings]);
 
+/// Updated after any settings value changes, from any window or thread. Observe it to stay in sync.
+#[derive(Default)]
+pub struct SettingsChanged;
+
+impl Global for SettingsChanged {}
+
 struct Registry {
     settings: Arc<Settings>,
     services: Services,
@@ -27,6 +33,19 @@ impl Global for Registry {}
 
 pub fn init(settings: Arc<Settings>, services: Services, cx: &mut App) {
     appearance::init(settings.appearance(), cx);
+    let (changed, heard) = async_channel::unbounded::<()>();
+    settings.on_change(move || {
+        let _ = changed.try_send(());
+    });
+    cx.spawn(async move |cx| {
+        while heard.recv().await.is_ok() {
+            while heard.try_recv().is_ok() {}
+            if cx.update(|cx| cx.set_global(SettingsChanged)).is_err() {
+                break;
+            }
+        }
+    })
+    .detach();
     cx.set_global(Registry {
         settings,
         services,

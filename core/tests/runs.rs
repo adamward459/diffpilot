@@ -380,6 +380,32 @@ fn an_editing_run_is_snapshotted_and_its_changes_can_be_shown_and_undone() {
 }
 
 #[test]
+fn an_editing_run_takes_no_snapshot_when_none_are_kept() {
+    let repo = temp_repo();
+    let work = tempfile::tempdir().unwrap();
+    let mut config = config(
+        Arc::new(Store::open_in_memory().unwrap()),
+        recording_claude(work.path(), repo.path(), true),
+        work.path(),
+    );
+    config.keep_snapshots = 0;
+    let engine = diffpilot_core::runner::RunEngine::new(config);
+    let rx = engine.subscribe();
+    let id = engine.submit(request(repo.path(), RunKind::FixComments)).unwrap();
+    let (state, _) = wait_finished(&rx, id, WITHIN);
+    assert_eq!(state, RunState::Done);
+
+    let run = engine.run(id).unwrap();
+    assert!(run.snapshot.is_none());
+    assert!(run.error.is_none());
+    assert_eq!(git(repo.path(), &["for-each-ref", "refs/diffpilot"]), "");
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("a.ts")).unwrap(),
+        "const count = 1;\nexport { count };\n"
+    );
+}
+
+#[test]
 fn a_review_does_not_snapshot() {
     let repo = temp_repo();
     let work = tempfile::tempdir().unwrap();

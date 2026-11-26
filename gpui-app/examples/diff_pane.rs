@@ -8,6 +8,7 @@ use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{self, DiffMode, FileDiff, LineKind};
 use diffpilot_core::git;
 use diffpilot_core::settings::{self, Settings};
+use diffpilot_core::store::Store;
 use diffpilot_core::threads::{Side, ThreadAnchor};
 use diffpilot_ui_kit::Assets;
 use gpui::{
@@ -507,6 +508,7 @@ fn run_window(repo: PathBuf, launch: Instant, bench: Option<Drive>) {
                         ReviewSession::new(
                             host,
                             Arc::new(Settings::in_memory()),
+                            Arc::new(Store::open_in_memory().expect("an in-memory store opens")),
                             Arc::from(reviewer_from_env()),
                             Arc::new(ScriptedReplier::default()),
                         )
@@ -545,7 +547,7 @@ fn run_window(repo: PathBuf, launch: Instant, bench: Option<Drive>) {
                         start_bench(&pane, repo.clone(), launch, Drive::Vsync, handle, cx);
                     }
                 }
-                DiffPaneEvent::VisibleFile(_) | DiffPaneEvent::ShownMode(_) => {}
+                DiffPaneEvent::VisibleFile(_) | DiffPaneEvent::ShownMode(_) | DiffPaneEvent::OpenInEditor { .. } => {}
                 DiffPaneEvent::ToggleViewed(path) => {
                     let mut viewed = viewed.borrow_mut();
                     if !viewed.remove(path) {

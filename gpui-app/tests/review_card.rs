@@ -3,7 +3,8 @@ mod common;
 use common::*;
 use diffpilot::review::{ReviewSession, ThreadCard, metrics};
 use diffpilot_core::review::Severity;
-use diffpilot_core::threads::{CLAUDE_NAME, ThreadAnchor, ThreadId};
+use diffpilot_core::store::RunId;
+use diffpilot_core::threads::{Addressed, CLAUDE_NAME, ThreadAnchor, ThreadId};
 use gpui::{Entity, TestAppContext, VisualTestContext, px};
 
 fn card(
@@ -114,4 +115,58 @@ async fn typing_in_a_draft_and_pressing_command_return_posts_and_asks_claude(cx:
     assert_eq!(thread.comments[0].body, "@claude is this needed?");
     assert_eq!(thread.comments[1].author, CLAUDE_NAME);
     assert_eq!(f.replier.asked(), 1);
+}
+
+#[gpui::test]
+async fn an_addressed_thread_gets_a_status_band_and_reopening_takes_it_away(cx: &mut TestAppContext) {
+    let (f, card, cx) = card(cx, |f, cx| {
+        let id = f.user_thread(cx);
+        f.post(cx, id, "Fix this.");
+        id
+    });
+    let id = card.read_with(cx, |card, _| card.thread_id());
+    let plain = f32::from(cx.update(|window, cx| card.read(cx).height(px(500.), window, cx)));
+
+    f.store
+        .mark_addressed(
+            id,
+            &Addressed {
+                run: RunId(1),
+                summary: "Fixed: renamed it.".into(),
+                files: vec![],
+            },
+        )
+        .unwrap();
+    f.session.update(cx, |session, cx| session.refresh_threads(cx));
+    cx.run_until_parked();
+    let addressed = f32::from(cx.update(|window, cx| card.read(cx).height(px(500.), window, cx)));
+    assert_eq!(addressed, plain + metrics::STATUS_BAND);
+
+    f.session.update(cx, |session, cx| session.reopen_thread(id, cx));
+    cx.run_until_parked();
+    assert!(f.thread(cx, id).unwrap().addressed.is_none());
+    let reopened = f32::from(cx.update(|window, cx| card.read(cx).height(px(500.), window, cx)));
+    assert_eq!(reopened, plain);
+}
+
+#[gpui::test]
+async fn a_dismissed_thread_keeps_its_card_with_a_status_band(cx: &mut TestAppContext) {
+    let (f, card, cx) = card(cx, |f, cx| {
+        let id = f.user_thread(cx);
+        f.post(cx, id, "Not needed?");
+        id
+    });
+    let id = card.read_with(cx, |card, _| card.thread_id());
+    let plain = f32::from(cx.update(|window, cx| card.read(cx).height(px(500.), window, cx)));
+
+    f.store
+        .set_status(id, diffpilot_core::threads::ThreadStatus::Dismissed)
+        .unwrap();
+    f.session.update(cx, |session, cx| session.refresh_threads(cx));
+    cx.run_until_parked();
+
+    assert_eq!(f.threads(cx).len(), 1);
+    assert_eq!(f.session.read_with(cx, |s, _| s.thread_count()), 0);
+    let dismissed = f32::from(cx.update(|window, cx| card.read(cx).height(px(500.), window, cx)));
+    assert_eq!(dismissed, plain + metrics::STATUS_BAND);
 }

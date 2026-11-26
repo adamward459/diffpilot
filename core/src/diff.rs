@@ -57,6 +57,27 @@ pub struct Hunk {
     pub lines: Vec<DiffLine>,
 }
 
+impl Hunk {
+    /// The new-side line at or next to the line at `index`. A deleted line maps to the next line
+    /// that exists in the new file, or the last one before it.
+    pub fn new_line_near(&self, index: usize) -> Option<u32> {
+        let after = self.lines.get(index..)?.iter().find_map(|line| line.new);
+        after
+            .or_else(|| self.lines.get(..index)?.iter().rev().find_map(|line| line.new))
+            .or_else(|| self.header_new_start())
+    }
+
+    pub fn first_new_line(&self) -> Option<u32> {
+        self.new_line_near(0)
+    }
+
+    fn header_new_start(&self) -> Option<u32> {
+        let plus = self.header.split_whitespace().find(|part| part.starts_with('+'))?;
+        let start = plus.trim_start_matches('+').split(',').next()?.parse::<u32>().ok()?;
+        Some(start.max(1))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileDiff {
     pub path: String,
@@ -79,6 +100,14 @@ impl FileDiff {
             deletions: 0,
             hunks: Vec::new(),
         }
+    }
+
+    /// The first changed line in the new file, or where the first deletion sits.
+    pub fn first_changed_new_line(&self) -> Option<u32> {
+        self.hunks.iter().find_map(|hunk| {
+            let index = hunk.lines.iter().position(|line| line.kind != LineKind::Context)?;
+            hunk.new_line_near(index)
+        })
     }
 
     /// A type change (symlink to file) is two `diff --git` blocks for one path; the sidebar shows one.
@@ -379,6 +408,53 @@ mod tests {
             new,
             text: text.into(),
         }
+    }
+
+    #[test]
+    fn a_deleted_line_maps_to_the_next_new_line_then_the_previous_one() {
+        let hunk = Hunk {
+            header: "@@ -3,4 +3,2 @@".into(),
+            lines: vec![
+                line(LineKind::Context, Some(3), Some(3), "a"),
+                line(LineKind::Deleted, Some(4), None, "b"),
+                line(LineKind::Deleted, Some(5), None, "c"),
+                line(LineKind::Context, Some(6), Some(4), "d"),
+                line(LineKind::Deleted, Some(7), None, "e"),
+            ],
+        };
+        assert_eq!(hunk.new_line_near(0), Some(3));
+        assert_eq!(hunk.new_line_near(1), Some(4));
+        assert_eq!(hunk.new_line_near(4), Some(4));
+        assert_eq!(hunk.first_new_line(), Some(3));
+    }
+
+    #[test]
+    fn a_hunk_with_only_deletions_falls_back_to_the_header() {
+        let hunk = Hunk {
+            header: "@@ -3,2 +2,0 @@".into(),
+            lines: vec![
+                line(LineKind::Deleted, Some(3), None, "a"),
+                line(LineKind::Deleted, Some(4), None, "b"),
+            ],
+        };
+        assert_eq!(hunk.new_line_near(1), Some(2));
+        let mut file = FileDiff::new("f", FileStatus::Modified);
+        file.hunks.push(hunk);
+        assert_eq!(file.first_changed_new_line(), Some(2));
+    }
+
+    #[test]
+    fn the_first_changed_line_skips_leading_context() {
+        let mut file = FileDiff::new("f", FileStatus::Modified);
+        file.hunks.push(Hunk {
+            header: "@@ -1,3 +1,3 @@".into(),
+            lines: vec![
+                line(LineKind::Context, Some(1), Some(1), "a"),
+                line(LineKind::Added, None, Some(2), "b"),
+            ],
+        });
+        assert_eq!(file.first_changed_new_line(), Some(2));
+        assert_eq!(FileDiff::new("g", FileStatus::Modified).first_changed_new_line(), None);
     }
 
     #[test]
