@@ -8,3 +8,6 @@ checksum-freshness = true
 
 [alias]
 xtask = "run -q -p xtask --"
+
+[profile.dev.package."*"]
+debug = "line-tables-only"
