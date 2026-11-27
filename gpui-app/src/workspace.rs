@@ -7,11 +7,12 @@ use diffpilot_core::diff::DiffMode;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::{DataScope, Store};
 use diffpilot_core::viewed::ViewedStore;
-use diffpilot_ui_kit::Glyph;
+use diffpilot_ui_kit::components::{glass_panel, tag};
+use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{
-    App, Context, Entity, FocusHandle, IntoElement, Menu, MenuItem, ParentElement, PathPromptOptions, Render, Styled,
-    Subscription, Window, WindowControlArea, actions, div, px,
+    App, Context, Entity, FocusHandle, IntoElement, Menu, MenuItem, MouseButton, ParentElement, PathPromptOptions,
+    Render, Styled, Subscription, Window, WindowControlArea, actions, div, px,
 };
 use gpui_component::button::Button;
 use gpui_component::{ActiveTheme, Icon, Sizable, StyledExt, h_flex, v_flex};
@@ -19,6 +20,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 const MAX_LIVE_VIEWS: usize = 4;
+const SETTINGS_WIDTH: f32 = 780.;
+const SETTINGS_HEIGHT: f32 = 600.;
+const SETTINGS_MARGIN: f32 = 32.;
 
 actions!(
     diffpilot,
@@ -46,7 +50,8 @@ actions!(
         NextChapter,
         PreviousChapter,
         ToggleInspector,
-        ToggleClaudeArea
+        ToggleClaudeArea,
+        ToggleComments
     ]
 );
 
@@ -72,6 +77,7 @@ pub fn init(cx: &mut App) {
         gpui::KeyBinding::new("alt-cmd-0", ToggleInspector, None),
         gpui::KeyBinding::new("shift-cmd-y", ToggleClaudeArea, None),
         gpui::KeyBinding::new("g", ToggleGuide, Some("!Input")),
+        gpui::KeyBinding::new("c", ToggleComments, Some("!Input")),
         gpui::KeyBinding::new("]", NextChapter, Some("!Input")),
         gpui::KeyBinding::new("[", PreviousChapter, Some("!Input")),
     ]);
@@ -112,6 +118,7 @@ pub fn init(cx: &mut App) {
                 MenuItem::action("Show Guide", ShowGuide),
                 MenuItem::action("Toggle Inspector", ToggleInspector),
                 MenuItem::action("Toggle Claude Activity", ToggleClaudeArea),
+                MenuItem::action("Toggle Comments", ToggleComments),
             ],
         },
     ]);
@@ -326,6 +333,38 @@ impl Workspace {
         });
     }
 
+    fn settings_dialog(&self, page: &Entity<SettingsPage>, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let theme = Theme::of(cx);
+        tag(
+            div()
+                .id("settings-backdrop")
+                .absolute()
+                .inset_0()
+                .occlude()
+                .flex()
+                .items_center()
+                .justify_center()
+                .p(px(SETTINGS_MARGIN))
+                .bg(gpui::black().opacity(0.4))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| this.close_settings(window, cx)),
+                )
+                .child(
+                    tag(glass_panel(&theme).id("settings-dialog"), || "settings:dialog")
+                        .w(px(SETTINGS_WIDTH))
+                        .h(px(SETTINGS_HEIGHT))
+                        .max_w_full()
+                        .max_h_full()
+                        .overflow_hidden()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(page.clone()),
+                ),
+            || "settings:backdrop",
+        )
+        .into_any_element()
+    }
+
     fn empty_state(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let (sidebar, border, muted) = (theme.sidebar, theme.sidebar_border, theme.muted_foreground);
@@ -391,11 +430,14 @@ fn wait_for_bench(workspace: Entity<Workspace>, settle: usize, window: &mut Wind
 
 impl Render for Workspace {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let content = match (&self.settings_page, self.active_view()) {
-            (Some((page, _)), _) => page.clone().into_any_element(),
-            (None, Some(repo)) => repo.clone().into_any_element(),
-            (None, None) => self.empty_state(cx).into_any_element(),
+        let content = match self.active_view() {
+            Some(repo) => repo.clone().into_any_element(),
+            None => self.empty_state(cx).into_any_element(),
         };
+        let dialog = self
+            .settings_page
+            .as_ref()
+            .map(|(page, _)| self.settings_dialog(page, cx));
         div()
             .id("workspace")
             .size_full()
@@ -434,6 +476,11 @@ impl Render for Workspace {
                     repo.update(cx, |repo, cx| repo.toggle_claude_area(cx));
                 }
             }))
+            .on_action(cx.listener(|this, _: &ToggleComments, window, cx| {
+                if let Some(repo) = this.active_view() {
+                    repo.update(cx, |repo, cx| repo.toggle_comments(window, cx));
+                }
+            }))
             .on_action(cx.listener(|this, _: &Folder1, window, cx| this.switch_to_index(0, window, cx)))
             .on_action(cx.listener(|this, _: &Folder2, window, cx| this.switch_to_index(1, window, cx)))
             .on_action(cx.listener(|this, _: &Folder3, window, cx| this.switch_to_index(2, window, cx)))
@@ -445,6 +492,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &Folder9, window, cx| this.switch_to_index(8, window, cx)))
             .child(div().size_0().track_focus(&self.focus))
             .child(content)
+            .children(dialog)
             .when(self.benching, |this| this.child(bench::probe()))
     }
 }

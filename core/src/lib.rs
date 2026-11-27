@@ -31,6 +31,7 @@ pub mod stage;
 pub mod store;
 pub mod stream;
 pub mod sync;
+pub mod thread_groups;
 pub mod threads;
 pub mod tree;
 pub mod viewed;

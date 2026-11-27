@@ -187,6 +187,11 @@ impl ReviewSession {
             .filter(|thread| thread.status != ThreadStatus::Resolved)
     }
 
+    /// Every thread of this view, resolved and dismissed ones included.
+    pub fn all_threads(&self) -> impl Iterator<Item = &ReviewThread> {
+        self.store.threads()
+    }
+
     fn open_threads(&self) -> impl Iterator<Item = &ReviewThread> {
         self.store
             .threads()
@@ -635,9 +640,25 @@ impl ReviewSession {
         }
     }
 
+    /// Clears what Claude reported for an open thread. A resolved or dismissed thread goes back to open and
+    /// returns to the diff.
     pub fn reopen_thread(&mut self, id: ThreadId, cx: &mut Context<Self>) {
-        if self.store.get(id).is_some() && self.store.clear_addressed(id).is_some() {
-            self.thread_updated(id, cx);
+        let Some(status) = self.store.get(id).map(|thread| thread.status) else {
+            return;
+        };
+        if status == ThreadStatus::Open {
+            if self.store.clear_addressed(id).is_some() {
+                self.thread_updated(id, cx);
+            }
+            return;
+        }
+        self.store.clear_addressed(id);
+        if let Some(thread) = self.store.set_status(id, ThreadStatus::Open) {
+            if thread.finding.is_some() && !self.review_threads.contains(&id) {
+                self.review_threads.push(id);
+            }
+            cx.emit(ReviewEvent::ThreadsChanged(ThreadChange::Added(id)));
+            cx.notify();
         }
     }
 

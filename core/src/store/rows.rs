@@ -1,4 +1,4 @@
-use super::{Result, SessionId, Store, StoreError, now_ms};
+use super::{Result, SessionId, SessionKey, Store, StoreError, now_ms};
 use crate::review::{FindingMeta, Severity};
 use crate::store::RunId;
 use crate::threads::{
@@ -11,6 +11,15 @@ use rusqlite::{Connection, OptionalExtension, Row};
 pub struct Written<T> {
     pub value: T,
     pub revision: i64,
+}
+
+/// The threads of one session and when the newest of them changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionThreads {
+    pub session: SessionId,
+    pub key: SessionKey,
+    pub latest: i64,
+    pub threads: Vec<ReviewThread>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,6 +198,35 @@ impl Store {
             value: load(&conn, Some(session.0), None)?,
             revision,
         })
+    }
+
+    /// Loads the threads of every session of `repo`. A session without threads is left out.
+    pub fn load_repo_threads(&self, repo: &str) -> Result<Vec<SessionThreads>> {
+        let conn = self.lock();
+        let sessions: Vec<(i64, SessionKey, i64)> = conn
+            .prepare(
+                "SELECT s.id, s.branch, s.base, MAX(t.updated_at) FROM sessions s
+                 JOIN threads t ON t.session_id = s.id WHERE s.repo = ?1 GROUP BY s.id ORDER BY s.id",
+            )?
+            .query_map([repo], |row| {
+                Ok((
+                    row.get(0)?,
+                    SessionKey::new(repo, &row.get::<_, String>(1)?, &row.get::<_, String>(2)?),
+                    row.get(3)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        sessions
+            .into_iter()
+            .map(|(id, key, latest)| {
+                Ok(SessionThreads {
+                    session: SessionId(id),
+                    key,
+                    latest,
+                    threads: load(&conn, Some(id), None)?,
+                })
+            })
+            .collect()
     }
 
     pub fn load_thread(&self, id: ThreadId) -> Result<Option<(SessionId, ReviewThread)>> {
@@ -370,5 +408,56 @@ impl Store {
         let value = load(&tx, None, Some(thread))?.into_iter().next();
         tx.commit()?;
         Ok(value.map(|value| Written { value, revision }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::threads::ThreadAnchor;
+
+    fn add(store: &Store, key: &SessionKey, path: &str, body: &str) -> ThreadId {
+        let session = store.session(key).unwrap();
+        let mut thread = NewThread::at(ThreadAnchor::file(path));
+        thread.first_comment = Some(NewComment {
+            author: "You".into(),
+            source: CommentSource::User,
+            body: body.into(),
+            streaming: false,
+            pending: false,
+        });
+        store.insert_thread(session, &thread).unwrap().value.id
+    }
+
+    #[test]
+    fn the_threads_of_every_session_of_a_repo_load_with_their_comments_and_status() {
+        let store = Store::open_in_memory().unwrap();
+        let feature = SessionKey::new("/r", "feature", "main");
+        let topic = SessionKey::new("/r", "topic", "develop");
+        let resolved = add(&store, &feature, "a.rs", "one");
+        add(&store, &topic, "b.rs", "two");
+        add(
+            &store,
+            &SessionKey::new("/other", "feature", "main"),
+            "c.rs",
+            "elsewhere",
+        );
+        store.session(&SessionKey::new("/r", "empty", "main")).unwrap();
+        store.set_status(resolved, ThreadStatus::Resolved).unwrap();
+
+        let loaded = store.load_repo_threads("/r").unwrap();
+
+        assert_eq!(
+            loaded.iter().map(|session| &session.key).collect::<Vec<_>>(),
+            [&feature, &topic]
+        );
+        let first = &loaded[0].threads[0];
+        assert_eq!(
+            (first.status, first.comments[0].body.as_str()),
+            (ThreadStatus::Resolved, "one")
+        );
+        assert_eq!(loaded[1].threads[0].anchor.path(), "b.rs");
+        assert!(loaded[1].latest > 0);
+        assert!(store.load_repo_threads("/nowhere").unwrap().is_empty());
     }
 }

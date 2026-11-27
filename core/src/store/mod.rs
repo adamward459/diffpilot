@@ -12,7 +12,7 @@ mod viewed;
 
 pub use data::{BranchData, DataScope, RepoData};
 pub use guides::{GuideSummary, StoredGuide};
-pub use rows::{NewComment, NewThread, Written};
+pub use rows::{NewComment, NewThread, SessionThreads, Written};
 
 use crate::comparison::Comparison;
 use crate::paths::standardized;

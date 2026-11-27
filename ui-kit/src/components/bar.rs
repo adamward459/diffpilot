@@ -222,7 +222,7 @@ pub fn status_dot(color: Hsla) -> Div {
 pub fn label_switch(
     theme: &Theme,
     id: &'static str,
-    labels: &[&'static str],
+    labels: &[impl Into<SharedString> + Clone],
     selected: usize,
     name: impl Fn(usize) -> String,
     on_select: OnSelect,
@@ -246,7 +246,7 @@ pub fn label_switch(
                         this.cursor_pointer().hover(move |style| style.bg(hover))
                     })
                     .on_click(move |_, window, cx| on_select(index, window, cx))
-                    .child(*label),
+                    .child(label.clone().into()),
                 || name(index),
             )
         }),

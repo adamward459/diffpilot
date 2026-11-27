@@ -13,7 +13,10 @@ use crate::guide::stage::{GuideStage, StageEvent, banner};
 use crate::guide::text::CodeRef;
 use crate::pane::{DiffPane, DiffPaneEvent};
 use crate::remote::{RemoteCapsule, RemoteEvent, RemoteMenu, RemoteStatus, SyncKind};
-use crate::review::{FixButton, FixEvent, PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
+use crate::review::comments_panel::open_count;
+use crate::review::{
+    CommentsEvent, CommentsPanel, FixButton, FixEvent, PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession,
+};
 use crate::sidebar::{LoadedChanges, Sidebar, SidebarEvent};
 use diffpilot_core::changes;
 use diffpilot_core::comparison::{self, Comparison};
@@ -177,6 +180,7 @@ struct Session {
     pane: Entity<DiffPane>,
     pill: Entity<ReviewPill>,
     fix: Entity<FixButton>,
+    comments: Entity<CommentsPanel>,
     area: Entity<ClaudeArea>,
     review: Entity<ReviewSession>,
     guide: Entity<GuideSession>,
@@ -208,6 +212,7 @@ pub struct RepoView {
     inspector: Drawer,
     claude_area: Drawer,
     claude_area_generation: u32,
+    comments_open: bool,
     sidebar: Drawer,
     sidebar_width: Pixels,
     resizing: bool,
@@ -275,6 +280,7 @@ impl RepoView {
             inspector: Drawer::new(true),
             claude_area: Drawer::new(false),
             claude_area_generation: 0,
+            comments_open: false,
             sidebar: Drawer::new(true),
             sidebar_width: px(IDEAL_SIDEBAR),
             resizing: false,
@@ -458,6 +464,10 @@ impl RepoView {
         pane.update(cx, |pane, cx| pane.set_review(review.clone(), window, cx));
         let pill = cx.new(|cx| ReviewPill::new(review.clone(), window, cx));
         let fix = cx.new(|cx| FixButton::new(review.clone(), window, cx));
+        let comments = {
+            let store = self.review_store.clone();
+            cx.new(|cx| CommentsPanel::new(review.clone(), store, cx))
+        };
         let area = {
             let popover = pill.read(cx).popover();
             cx.new(|cx| ClaudeArea::new(review.clone(), popover, cx))
@@ -473,7 +483,21 @@ impl RepoView {
         };
         let inspector = cx.new(|cx| GuideInspector::new(guide.clone(), cx));
         self.compact_toolbar = false;
+        self.comments_open = false;
         let subscriptions = vec![
+            cx.subscribe_in(
+                &comments,
+                window,
+                |this, _, event: &CommentsEvent, window, cx| match event {
+                    CommentsEvent::Close => this.set_comments(false, window, cx),
+                    CommentsEvent::Focus(id) => {
+                        this.set_comments(false, window, cx);
+                        if let Some(session) = &this.session {
+                            session.pane.update(cx, |pane, cx| pane.focus_thread(*id, window, cx));
+                        }
+                    }
+                },
+            ),
             cx.subscribe_in(&guide, window, |this, _, _: &GuideEvent, window, cx| {
                 this.sync_guide(window, cx);
                 cx.notify();
@@ -569,6 +593,7 @@ impl RepoView {
             pane,
             pill,
             fix,
+            comments,
             area,
             review,
             guide,
@@ -873,6 +898,22 @@ impl RepoView {
             }
             cx.notify();
         }
+    }
+
+    pub fn toggle_comments(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_comments(!self.comments_open, window, cx);
+    }
+
+    fn set_comments(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = &self.session else { return };
+        if self.comments_open == open {
+            return;
+        }
+        self.comments_open = open;
+        if open {
+            session.comments.update(cx, |panel, cx| panel.show(window, cx));
+        }
+        cx.notify();
     }
 
     fn show_claude_log(&mut self, cx: &mut Context<Self>) {
@@ -1321,6 +1362,37 @@ impl RepoView {
                 .child(session.pill.clone())
                 .child(session.fix.clone())
         });
+        let comments = self.session.as_ref().map(|session| {
+            let open = open_count(session.review.read(cx));
+            let icon = Icon::new(Glyph::MessageSquare)
+                .size(px(16.))
+                .text_color(tokens.ui.text2);
+            let (hover, press) = (tokens.hover, tokens.press);
+            tag(
+                capsule(&tokens, CAPSULE_HEIGHT)
+                    .id("toolbar-comments")
+                    .px(px(12.))
+                    .gap(px(6.))
+                    .cursor_pointer()
+                    .when(self.comments_open, |this| this.bg(press))
+                    .hover(move |style| style.bg(hover))
+                    .tooltip(move |window, cx| {
+                        gpui_component::tooltip::Tooltip::new(format!("Comments \u{b7} {open} open")).build(window, cx)
+                    })
+                    .on_click(cx.listener(|this, _, window, cx| this.toggle_comments(window, cx)))
+                    .child(icon)
+                    .children((open > 0).then(|| {
+                        tag(
+                            div()
+                                .text_size(px(14.))
+                                .text_color(tokens.ui.text)
+                                .child(open.to_string()),
+                            move || format!("toolbar:comments:{open}"),
+                        )
+                    })),
+                || "toolbar:comments",
+            )
+        });
         let activity = self
             .remote
             .read(cx)
@@ -1381,6 +1453,7 @@ impl RepoView {
                 ),
         )
         .children(pill)
+        .children(comments)
         .children(control)
         .child(div().flex_1())
         .children(activity)
@@ -1467,6 +1540,7 @@ impl Render for RepoView {
 
         h_flex()
             .id("repo-view")
+            .relative()
             .size_full()
             .bg(background)
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
@@ -1576,6 +1650,12 @@ impl Render for RepoView {
                     )
                     .children(claude_area)
                     .child(bottom_bar),
+            )
+            .children(
+                self.session
+                    .as_ref()
+                    .filter(|_| self.comments_open)
+                    .map(|session| session.comments.clone()),
             )
     }
 }

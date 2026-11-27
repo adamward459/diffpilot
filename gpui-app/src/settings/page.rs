@@ -13,8 +13,8 @@ use diffpilot_ui_kit::components::{filter_field, glyph_icon, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{
-    Context, Entity, EventEmitter, IntoElement, PathPromptOptions, Render, ScrollHandle, Subscription, Window,
-    WindowControlArea, div, point, px,
+    Context, Entity, EventEmitter, IntoElement, PathPromptOptions, Render, ScrollHandle, Subscription, Window, div,
+    point, px,
 };
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::{ActiveTheme, Sizable};
@@ -470,7 +470,7 @@ pub enum PageEvent {
 
 impl EventEmitter<PageEvent> for SettingsPage {}
 
-const TOC_WIDTH: f32 = 200.;
+const TOC_WIDTH: f32 = 176.;
 
 impl Render for SettingsPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -560,13 +560,12 @@ impl Render for SettingsPage {
             .flex()
             .flex_col()
             .size_full()
-            .bg(t.chrome.panel)
             .text_color(t.ui.text)
             .font_family(cx.theme().font_family.clone())
             .text_size(px(13.))
             .child(header)
             .child(
-                div().flex_none().flex().px(px(28.)).pb(px(14.)).child(tag(
+                div().flex_none().flex().px(px(20.)).pb(px(12.)).child(tag(
                     filter_field(
                         &t,
                         Input::new(&self.search)
@@ -591,7 +590,7 @@ impl Render for SettingsPage {
                             .flex_col()
                             .gap(px(2.))
                             .w(px(TOC_WIDTH))
-                            .pl(px(20.))
+                            .pl(px(12.))
                             .pr(px(8.))
                             .pt(px(4.))
                             .children(toc),
@@ -603,7 +602,7 @@ impl Render for SettingsPage {
                             .min_w_0()
                             .overflow_y_scroll()
                             .track_scroll(&self.scroll)
-                            .pr(px(28.))
+                            .pr(px(20.))
                             .pt(px(4.))
                             .children(body)
                             .when(sections.is_empty(), |this| {
@@ -645,10 +644,9 @@ impl SettingsPage {
             .flex()
             .items_center()
             .flex_none()
-            .h(px(52.))
-            .pl(px(88.))
-            .pr(px(14.))
-            .window_control_area(WindowControlArea::Drag)
+            .h(px(48.))
+            .pl(px(20.))
+            .pr(px(12.))
             .child(
                 div()
                     .flex_1()

@@ -1,5 +1,7 @@
 use diffpilot::settings::Section;
-use diffpilot::testing::{click, fixture, fixture_named, open_settings, open_workspace, press, shows, type_text};
+use diffpilot::testing::{
+    bounds, click, click_corner, fixture, fixture_named, open_settings, open_workspace, press, shows, type_text,
+};
 use diffpilot_core::settings::Settings;
 use gpui::{TestAppContext, VisualTestContext};
 use std::sync::Arc;
@@ -16,17 +18,40 @@ fn settings_open_over_the_repo_and_escape_brings_the_repo_back(app: &mut TestApp
     click(cx, "wrap-lines");
     assert!(settings.wrap_lines(), "a row found by search still works");
 
-    click(cx, "comparison-base");
-    assert!(
-        !shows(cx, "comparison-base:Staged Changes Only"),
-        "the page covers the repo, so its controls cannot be clicked"
-    );
-
     press(cx, "escape");
     click(cx, "comparison-base");
     assert!(
         shows(cx, "comparison-base:Staged Changes Only"),
         "escape closes the page and the repo works as before"
+    );
+}
+
+#[gpui::test]
+fn settings_open_as_a_dialog_over_the_app_and_a_click_outside_closes_it(app: &mut TestAppContext) {
+    let dir = fixture();
+    let settings = Arc::new(Settings::in_memory());
+    let cx = open_settings(app, Some(dir.path()), settings, Section::General);
+
+    let window = bounds(cx, "settings:backdrop");
+    let dialog = bounds(cx, "settings:dialog");
+    let repo = bounds(cx, "comparison-base");
+    assert!(
+        dialog.size.width < window.size.width && dialog.size.height < window.size.height,
+        "the dialog is smaller than the window"
+    );
+    assert!(
+        window.contains(&repo.center()) && !dialog.contains(&repo.center()),
+        "the app stays visible behind"
+    );
+
+    click(cx, "settings:search");
+    assert!(shows(cx, "settings:search"), "a click inside the dialog keeps it open");
+
+    click_corner(cx, "settings:backdrop");
+    click(cx, "comparison-base");
+    assert!(
+        shows(cx, "comparison-base:Staged Changes Only"),
+        "a click on the backdrop closes the dialog and the app works again"
     );
 }
 

@@ -351,6 +351,15 @@ pub fn click(cx: &mut VisualTestContext, selector: &str) {
     draw(cx);
 }
 
+pub fn click_corner(cx: &mut VisualTestContext, selector: &str) {
+    let bounds = settled_bounds(cx, selector);
+    cx.simulate_click(
+        bounds.origin + gpui::point(gpui::px(4.), gpui::px(4.)),
+        Modifiers::default(),
+    );
+    draw(cx);
+}
+
 pub fn hover(cx: &mut VisualTestContext, selector: &str) {
     let bounds = settled_bounds(cx, selector);
     cx.simulate_mouse_move(bounds.center(), None, Modifiers::default());

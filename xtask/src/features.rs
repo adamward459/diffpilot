@@ -185,7 +185,7 @@ pub const FEATURES: &[Feature] = &[
     Feature {
         name: "review",
         paths: &[
-            "core/src/{review,threads,fix}.rs",
+            "core/src/{review,threads,thread_groups,fix}.rs",
             "core/src/{fix_comments,make_changes,reply_thread}.md",
             "gpui-app/src/review/**",
             "gpui-app/src/claude_{area,status}.rs",
@@ -203,6 +203,14 @@ pub const FEATURES: &[Feature] = &[
             Lib {
                 package: CORE,
                 module: "threads::",
+            },
+            Lib {
+                package: CORE,
+                module: "thread_groups::",
+            },
+            Lib {
+                package: CORE,
+                module: "store::rows::",
             },
             Lib {
                 package: CORE,

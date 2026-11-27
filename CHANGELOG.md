@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - Link folders outside the repo to a guide by path. Claude reads them for context and can list code there that the change may break.
 - Edit your own comments. Edit puts the text back in the comment box, and Save keeps the new text.
 - A Data tab in Settings lists the threads, runs, guides, and viewed marks stored for each repo and branch. Delete them per branch, per repo, or all at once.
+- A Comments panel (C, View menu, or the button in the toolbar) lists every comment by file, with Open, Resolved and All filters. Resolved comments can be reopened. All views also shows comments from other views.
 - Compare a branch with its base: another branch, a tag, a recent commit, only the working tree, or only the staged changes.
 - Mark files as viewed. The mark is kept per repository and branch, and it clears when the file changes again.
 - A sidebar that shows the changed files as a tree or a list, with a name filter and filters for uncommitted and viewed files.
@@ -41,7 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - Menus, popovers, context menus and the selection bar now share one liquid-glass look, and they fade in when they open.
 - The sidebar, inspector and Claude area now slide in and out instead of jumping.
 - Popovers (Checks, Sync, Ask Claude, Fix, Queue) now have an arrow that points at the button that opened them, like native macOS popovers.
-- Settings now open inside the main window, like in VS Code, with a search box and a section list. Press Esc to go back.
+- Settings now open as a dialog over the main window, like in VS Code, with a search box and a section list. Press Esc or click outside to close it.
 - Fix is now its own toolbar button, next to Ask Claude. It opens a list where you pick which comments to send, and it stays available while a review runs.
 - Glass controls now look like real glass: a sheen lit from the top, a crisp rim, and a shadow that sinks when you hover or press. Buttons are now capsules, and controls, toolbars, and text are larger.
 - The app is now named Diffpilot in the menu bar and the Dock.
