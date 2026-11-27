@@ -161,6 +161,7 @@ impl Settings {
         match kind {
             RunKind::Review | RunKind::Guide => self.reviews_model(),
             RunKind::FixComments | RunKind::MakeChanges | RunKind::Reply => self.fixes_model(),
+            RunKind::CommitMessage => ReviewModel::COMMIT_MESSAGE,
         }
     }
 

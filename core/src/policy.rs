@@ -32,6 +32,7 @@ pub fn mcp_tools(kind: RunKind) -> &'static [&'static str] {
         RunKind::Review => &["get_diff", "list_threads", "add_comment", "add_general_comment"],
         RunKind::FixComments | RunKind::Reply => &["get_diff", "list_threads", "reply", "resolve", "dismiss"],
         RunKind::MakeChanges => &["get_diff", "list_threads"],
+        RunKind::CommitMessage => &[],
         RunKind::Guide => &[
             "get_diff",
             "set_overview",
@@ -189,6 +190,7 @@ mod tests {
             RunKind::MakeChanges,
             RunKind::Reply,
             RunKind::Guide,
+            RunKind::CommitMessage,
         ] {
             for edit in EditPermission::ALL {
                 let Ok(policy) = ToolPolicy::new(kind, edit, true) else {
@@ -275,6 +277,7 @@ mod tests {
             RunKind::MakeChanges,
             RunKind::Reply,
             RunKind::Guide,
+            RunKind::CommitMessage,
         ] {
             for edit in EditPermission::ALL {
                 let policy = ToolPolicy::new(kind, edit, true).unwrap();

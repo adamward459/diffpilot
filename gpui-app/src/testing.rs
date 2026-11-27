@@ -472,6 +472,13 @@ impl FakeClaude {
         std::fs::write(self.work.path().join("after"), after.to_string()).expect("write after");
     }
 
+    pub fn reply_with(&self, text: &str) {
+        let after = serde_json::json!({
+            "type": "result", "subtype": "success", "is_error": false, "num_turns": 1, "result": text,
+        });
+        std::fs::write(self.work.path().join("after"), after.to_string()).expect("write after");
+    }
+
     pub fn fail_with(&self, message: &str) {
         let after = serde_json::json!({
             "type": "result", "subtype": "error_during_execution", "is_error": true, "result": message,

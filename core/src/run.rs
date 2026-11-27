@@ -24,12 +24,13 @@ pub enum RunKind {
     MakeChanges,
     Reply,
     Guide,
+    CommitMessage,
 }
 
 impl RunKind {
     /// Runs that may change files. They get a snapshot first.
     pub fn edits(self) -> bool {
-        !matches!(self, Self::Review | Self::Guide)
+        !matches!(self, Self::Review | Self::Guide | Self::CommitMessage)
     }
 
     pub fn title(self) -> &'static str {
@@ -39,6 +40,7 @@ impl RunKind {
             Self::MakeChanges => "Make Changes",
             Self::Reply => "Reply",
             Self::Guide => "Guide",
+            Self::CommitMessage => "Commit message",
         }
     }
 }
@@ -712,6 +714,6 @@ mod tests {
     fn only_review_and_guide_runs_are_read_only() {
         assert!(!RunKind::Review.edits());
         assert!(RunKind::FixComments.edits() && RunKind::MakeChanges.edits() && RunKind::Reply.edits());
-        assert!(!RunKind::Guide.edits());
+        assert!(!RunKind::Guide.edits() && !RunKind::CommitMessage.edits());
     }
 }

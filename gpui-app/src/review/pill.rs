@@ -231,6 +231,7 @@ impl ReviewPill {
             (RunKind::MakeChanges, _) => "Making changes".to_string(),
             (RunKind::Guide, _) => "Writing guide".to_string(),
             (RunKind::Reply, _) => "Replying".to_string(),
+            (RunKind::CommitMessage, _) => "Writing commit message".to_string(),
         };
         let seconds = run.elapsed_ms(crate::runs::now_ms()).unwrap_or(0) / 1000;
         let stop_id = match run.kind {

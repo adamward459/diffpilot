@@ -1,4 +1,6 @@
-use diffpilot::testing::{canned_claude, click, fixture, git, open_repo, press, shows, type_text, wait_until_shows};
+use diffpilot::testing::{
+    canned_claude, click, clipboard, fake_claude, fixture, git, open_repo, press, shows, type_text, wait_until_shows,
+};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::viewed::ViewedStore;
 use gpui::{TestAppContext, VisualTestContext};
@@ -55,4 +57,64 @@ fn cmd_enter_commits_too(app: &mut TestAppContext) {
 
     wait_until_shows(cx, "bottom-bar:commit:disabled");
     assert_eq!(last_message(dir.path()), "Keyboard commit");
+}
+
+#[gpui::test]
+fn generate_fills_the_message_from_claude_and_the_user_commits_it(app: &mut TestAppContext) {
+    let claude = fake_claude(app);
+    claude.reply_with("Add the fixture files\n\nThey cover edits and new files.");
+    let (dir, cx) = open_fixture(app);
+
+    click(cx, "bottom-bar:commit");
+    click(cx, "commit:generate");
+    wait_until_shows(cx, "commit:stop");
+    claude.wait_for_launches(cx, 1);
+    assert!(claude.prompt().contains("src/staged.rs"), "the prompt carries the diff");
+    claude.finish();
+    wait_until_shows(cx, "commit:generate");
+    press(cx, "cmd-a");
+    press(cx, "cmd-c");
+    assert_eq!(
+        clipboard(cx).as_deref(),
+        Some("Add the fixture files\n\nThey cover edits and new files.")
+    );
+
+    click(cx, "commit:submit");
+    wait_until_shows(cx, "bottom-bar:commit:disabled");
+    assert_eq!(
+        last_message(dir.path()),
+        "Add the fixture files\n\nThey cover edits and new files."
+    );
+}
+
+#[gpui::test]
+fn the_run_shows_in_the_claude_area_and_stop_ends_it(app: &mut TestAppContext) {
+    let claude = fake_claude(app);
+    let (_dir, cx) = open_fixture(app);
+
+    click(cx, "bottom-bar:commit");
+    click(cx, "commit:generate");
+    claude.wait_for_launches(cx, 1);
+    wait_until_shows(cx, "pill:stop-run:working");
+    click(cx, "pill:stop-run:working");
+    wait_until_shows(cx, "claude-area:title:Commit message");
+
+    click(cx, "bottom-bar:commit");
+    click(cx, "commit:stop");
+    wait_until_shows(cx, "commit:generate");
+}
+
+#[gpui::test]
+fn a_failed_run_shows_the_error_and_leaves_the_message_alone(app: &mut TestAppContext) {
+    let claude = fake_claude(app);
+    claude.fail_with("Claude is out of credit.");
+    let (_dir, cx) = open_fixture(app);
+
+    click(cx, "bottom-bar:commit");
+    click(cx, "commit:generate");
+    claude.wait_for_launches(cx, 1);
+    claude.finish();
+
+    wait_until_shows(cx, "commit:error:Claude is out of credit.");
+    assert!(shows(cx, "commit:generate"));
 }

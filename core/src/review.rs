@@ -127,6 +127,11 @@ impl ReviewModel {
         effort: Effort::Medium,
     };
 
+    pub const COMMIT_MESSAGE: ReviewModel = ReviewModel {
+        name: ModelName::Sonnet,
+        effort: Effort::Low,
+    };
+
     pub fn new(name: ModelName, effort: Effort) -> Self {
         Self { name, effort }
     }

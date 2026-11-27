@@ -600,6 +600,10 @@ impl RepoView {
             load_task: None,
             _subscriptions: subscriptions,
         });
+        if let Some(session) = &self.session {
+            let key = session.review.read(cx).session_key();
+            self.commit.update(cx, |commit, _| commit.set_session(key));
+        }
         self.start_load(window, cx);
         self.sync_guide(window, cx);
         true
