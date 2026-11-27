@@ -5,7 +5,7 @@ use crate::diff_pane::layout::{
 use crate::diff_pane::rows::{BlockId, BlockSlot, RowKind, RowRef, Rows, Visibility, body_notice, build};
 use diffpilot_core::diff::{DiffMode, FileDiff};
 use diffpilot_core::preview::{PreviewKind, preview_kind};
-use diffpilot_core::threads::Side;
+use diffpilot_core::threads::{Side, ThreadAnchor};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::Arc;
@@ -18,6 +18,20 @@ pub struct Geometry {
     pub height: f32,
     pub cell: f32,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScrollThumb {
+    pub top: f32,
+    pub height: f32,
+}
+
+/// A drag of the scroll thumb. `grab` is how far below the thumb's top the pointer holds it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThumbDrag {
+    grab: f32,
+}
+
+const THUMB_MIN: f32 = 32.0;
 
 /// The row at the top of the viewport and how far the viewport is into it. `from_header` is the fallback
 /// for a row that no longer exists.
@@ -168,6 +182,40 @@ impl PaneState {
 
     pub fn scroll_by(&mut self, dy: f32) {
         self.scroll_to(self.scroll + dy);
+    }
+
+    pub fn thumb(&self) -> Option<ScrollThumb> {
+        let max = self.max_scroll();
+        if max <= 0.0 {
+            return None;
+        }
+        let viewport = self.geometry.height;
+        let height = (viewport * viewport / self.tops.total()).max(THUMB_MIN).min(viewport);
+        Some(ScrollThumb {
+            top: self.scroll / max * (viewport - height),
+            height,
+        })
+    }
+
+    /// Starts a drag at `y` in the viewport. A press beside the thumb first moves the thumb's center there.
+    pub fn press_thumb(&mut self, y: f32) -> Option<ThumbDrag> {
+        let thumb = self.thumb()?;
+        let grab = if (thumb.top..=thumb.top + thumb.height).contains(&y) {
+            y - thumb.top
+        } else {
+            thumb.height / 2.0
+        };
+        let drag = ThumbDrag { grab };
+        self.drag_thumb(drag, y);
+        Some(drag)
+    }
+
+    pub fn drag_thumb(&mut self, drag: ThumbDrag, y: f32) {
+        let Some(thumb) = self.thumb() else { return };
+        let track = self.geometry.height - thumb.height;
+        if track > 0.0 {
+            self.scroll_to((y - drag.grab) / track * self.max_scroll());
+        }
     }
 
     pub fn position(&self) -> Option<Position> {
@@ -607,6 +655,9 @@ impl PaneState {
                 return None;
             }
             let top = self.tops.top(self.rows.block_row(slot as u32)?);
+            if matches!(block.anchor, ThreadAnchor::Change) {
+                return Some(top.min(max));
+            }
             let file = self.file_index(block.anchor.path())?;
             let header = self.tops.top(self.rows.header_index(file)?);
             Some((top - inset).max(header).clamp(0.0, max))
@@ -627,7 +678,7 @@ mod tests {
     use super::*;
     use crate::diff_pane::layout::{FILE_HEADER, GAP, HUNK, LINE, NOTICE, SPLIT_MIN_WIDTH};
     use crate::diff_pane::testing::{added, diff, lines_with};
-    use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
+    use diffpilot_core::threads::ThreadId;
 
     const GEOMETRY: Geometry = Geometry {
         width: 400.0,
@@ -702,6 +753,28 @@ mod tests {
         assert_eq!(state.scroll(), 0.0);
         state.scroll_by(1e9);
         assert_eq!(state.scroll(), 3.0 * FILE_HEIGHT - GEOMETRY.height);
+    }
+
+    #[test]
+    fn dragging_the_thumb_keeps_the_grab_point_under_the_pointer() {
+        let mut state = state(three_files());
+        let thumb = state.thumb().unwrap();
+        let drag = state.press_thumb(thumb.top + 5.0).unwrap();
+        assert_eq!(state.scroll(), 0.0);
+        state.drag_thumb(drag, thumb.top + 25.0);
+        assert!((state.thumb().unwrap().top - (thumb.top + 20.0)).abs() < 0.01);
+        state.drag_thumb(drag, 1e9);
+        assert_eq!(state.scroll(), state.max_scroll());
+    }
+
+    #[test]
+    fn pressing_beside_the_thumb_centers_it_on_the_pointer() {
+        let mut state = state(three_files());
+        let height = state.thumb().unwrap().height;
+        let drag = state.press_thumb(70.0).unwrap();
+        assert!((state.thumb().unwrap().top - (70.0 - height / 2.0)).abs() < 0.01);
+        state.drag_thumb(drag, 60.0);
+        assert!((state.thumb().unwrap().top - (60.0 - height / 2.0)).abs() < 0.01);
     }
 
     #[test]
@@ -1017,6 +1090,16 @@ mod tests {
         assert!(state.step_thread(true, FILE_HEADER + HUNK));
         assert_eq!(state.scroll(), state.tops.top(state.rows.header_index(1).unwrap()));
         assert_eq!(state.visible_path(), Some("f1.ts"));
+    }
+
+    #[test]
+    fn stepping_back_from_below_reaches_the_change_thread_at_the_top() {
+        let mut state = state(three_files());
+        state.set_blocks(vec![slot(1, ThreadAnchor::Change), line_thread(2, "f2.ts", 5)]);
+        assert!(state.step_thread(true, 10.0));
+        assert!(state.step_thread(false, 10.0));
+        assert_eq!(state.scroll(), 0.0);
+        assert!(!state.step_thread(false, 10.0));
     }
 
     #[test]

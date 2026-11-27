@@ -106,6 +106,7 @@ pub struct Thumb {
     pub top: f32,
     pub height: f32,
     pub opacity: f32,
+    pub wide: bool,
 }
 
 pub struct Frame {
@@ -297,6 +298,7 @@ fn shape_chunk(style: &Style, window: &mut Window, line: &DiffLine, range: &Rang
 }
 
 const THUMB_WIDTH: f32 = 6.0;
+const THUMB_WIDE: f32 = 10.0;
 const THUMB_INSET: f32 = 3.0;
 
 struct Slot {
@@ -408,14 +410,14 @@ pub fn paint(frame: &Frame, bounds: Bounds<Pixels>, window: &mut Window, cx: &mu
             });
         }
         if let Some(thumb) = &frame.thumb {
+            let width = if thumb.wide { THUMB_WIDE } else { THUMB_WIDTH };
             let origin = point(
-                bounds.right() - px(THUMB_WIDTH + THUMB_INSET),
+                bounds.right() - px(width + THUMB_INSET),
                 bounds.origin.y + px(thumb.top),
             );
             let color = theme.diff.muted.opacity(thumb.opacity);
             window.paint_quad(
-                fill(Bounds::new(origin, size(px(THUMB_WIDTH), px(thumb.height))), color)
-                    .corner_radii(px(THUMB_WIDTH / 2.0)),
+                fill(Bounds::new(origin, size(px(width), px(thumb.height))), color).corner_radii(px(width / 2.0)),
             );
         }
     });

@@ -211,3 +211,32 @@ fn the_thread_arrows_step_through_the_threads(app: &mut TestAppContext) {
         "the first thread's file is in view"
     );
 }
+
+#[gpui::test]
+fn the_previous_thread_arrow_reaches_the_review_summary(app: &mut TestAppContext) {
+    let dir = fixture();
+    let fake = fake_claude(app);
+    fake.review_with(&result(
+        "Fine overall.",
+        vec![finding("src/staged.rs", Some(280), Severity::Nit, "Late")],
+    ));
+    fake.finish();
+    let (_, cx) = open_repo(
+        app,
+        dir.path(),
+        Arc::new(Settings::in_memory()),
+        Arc::new(ViewedStore::in_memory()),
+    );
+    click(cx, "sidebar:row:src/staged.rs");
+    click(cx, "review:open");
+    click(cx, "review:start");
+    wait_until_shows(cx, "review:done");
+    wait_until_shows(cx, "jump-bar:threads:2");
+
+    click(cx, "jump-bar:thread-next");
+    assert!(shows(cx, "finding:Late"));
+    let summary = format!("comment:{CLAUDE_NAME}:Fine overall.");
+    assert!(!shows(cx, &summary), "the summary is out of view");
+    click(cx, "jump-bar:thread-previous");
+    assert!(shows(cx, &summary), "the previous arrow scrolls up to the summary");
+}
