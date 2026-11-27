@@ -43,6 +43,14 @@ impl GuideInspector {
     fn text(id: impl Into<gpui::ElementId>, text: &str, body: Body, on_ref: &OnRef, cx: &App) -> AnyElement {
         rich::element(id, &Inline::parse(text), body, Some(on_ref.clone()), cx)
     }
+
+    fn bullet(tokens: &Theme, name: String, text: AnyElement) -> impl IntoElement {
+        h_flex()
+            .gap(px(6.))
+            .items_start()
+            .child(div().mt(px(1.)).text_color(tokens.ui.muted).child("\u{2022}"))
+            .child(tag(div(), || name).flex_1().w_0().min_w_0().child(text))
+    }
 }
 
 fn heading(tokens: &Theme, text: &'static str) -> impl IntoElement {
@@ -139,17 +147,11 @@ impl Render for GuideInspector {
             .child(Self::text("guide-chapter-summary", &chapter.summary, body, &on_ref, cx));
         if let Some(written) = written {
             for (position, point) in written.points.iter().enumerate() {
-                column = column.child(
-                    h_flex()
-                        .gap(px(6.))
-                        .items_start()
-                        .child(div().mt(px(1.)).text_color(tokens.ui.muted).child("\u{2022}"))
-                        .child(
-                            div()
-                                .flex_1()
-                                .child(Self::text(("guide-point", position), point, body, &on_ref, cx)),
-                        ),
-                );
+                column = column.child(Self::bullet(
+                    &tokens,
+                    format!("guide-point:{position}"),
+                    Self::text(("guide-point", position), point, body, &on_ref, cx),
+                ));
             }
         }
         column = column.children(diagrams);
@@ -199,17 +201,11 @@ impl Render for GuideInspector {
         if let Some(written) = written.filter(|written| !written.focus.is_empty()) {
             column = column.child(heading(&tokens, "While reading, check"));
             for (position, item) in written.focus.iter().enumerate() {
-                column = column.child(
-                    h_flex()
-                        .gap(px(6.))
-                        .items_start()
-                        .child(div().mt(px(1.)).text_color(tokens.ui.muted).child("\u{2022}"))
-                        .child(
-                            div()
-                                .flex_1()
-                                .child(Self::text(("guide-focus", position), item, small, &on_ref, cx)),
-                        ),
-                );
+                column = column.child(Self::bullet(
+                    &tokens,
+                    format!("guide-focus:{position}"),
+                    Self::text(("guide-focus", position), item, small, &on_ref, cx),
+                ));
             }
         }
         if let Some(written) = written.filter(|written| !written.impact.is_empty()) {
@@ -270,7 +266,11 @@ impl Render for GuideInspector {
                 Button::new("guide-next-chapter")
                     .look(Look::Primary)
                     .regular()
-                    .label(format!("Next: {title}"))
+                    .w_full()
+                    .child(
+                        tag(div().min_w_0().truncate(), || "guide-next-label")
+                            .child(SharedString::from(format!("Next: {title}"))),
+                    )
                     .on_click(move |_, _, cx| forward.update(cx, |guide, cx| guide.next(cx))),
                 || "guide-next-chapter",
             ));
@@ -287,15 +287,14 @@ impl Render for GuideInspector {
             || "guide-mark-continue",
         ));
         column = column.child(actions);
-        div()
-            .id("guide-inspector")
+        tag(div().id("guide-inspector"), || "guide-inspector")
             .w(px(INSPECTOR_WIDTH))
             .h_full()
             .flex_none()
             .overflow_y_scroll()
             .border_l_1()
             .border_color(tokens.ui.line)
-            .child(column)
+            .child(column.w_full().min_w_0())
             .into_any_element()
     }
 }

@@ -341,6 +341,10 @@ fn settled_bounds(cx: &mut VisualTestContext, selector: &str) -> Bounds<Pixels> 
     bounds
 }
 
+pub fn bounds(cx: &mut VisualTestContext, selector: &str) -> Bounds<Pixels> {
+    bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"))
+}
+
 pub fn click(cx: &mut VisualTestContext, selector: &str) {
     let bounds = settled_bounds(cx, selector);
     cx.simulate_click(bounds.center(), Modifiers::default());
@@ -835,11 +839,18 @@ pub fn install_github(cx: &mut TestAppContext, http: Arc<dyn Http>) {
 fn demo_chapter(title: &str, phase: &str, attention: Attention, files: &[&str], notes: Vec<Note>) -> Chapter {
     Chapter {
         title: title.into(),
-        summary: format!("{title} summary with `code`."),
+        summary: format!(
+            "{title}: a long summary that has to wrap in a narrow column, with `popover()` and `paint_path` in code."
+        ),
         phase: Some(phase.into()),
         attention,
-        points: vec!["First point.".into()],
-        focus: vec!["Check the loop.".into()],
+        points: vec![
+            "First point: it is long enough that it has to wrap in the narrow inspector, and it names `popover()`."
+                .into(),
+        ],
+        focus: vec![
+            "Check the loop: this check is long enough that it has to wrap inside the narrow inspector.".into(),
+        ],
         files: files
             .iter()
             .map(|path| ChapterFile {
@@ -873,8 +884,14 @@ pub fn demo_guide(repo: &Path, files: &[FileDiff]) -> Guide {
         overview: Overview {
             title: "What this change does".into(),
             summary: "It adds a staged file and edits the base.".into(),
-            before: Some("Nothing was staged.".into()),
-            after: Some("A staged file exists.".into()),
+            before: Some(
+                "Nothing was staged, so every run of the tool had to read the files from disk and compare them with `HEAD` again."
+                    .into(),
+            ),
+            after: Some(
+                "A staged file exists, so the tool reads it once and keeps the result, using `paint_path` only for the diagram."
+                    .into(),
+            ),
         },
         diagrams: vec![],
         chapters: vec![
@@ -886,7 +903,7 @@ pub fn demo_guide(repo: &Path, files: &[FileDiff]) -> Guide {
                 vec![demo_note(5, false, "Plain note."), demo_note(7, true, "Risky spot.")],
             ),
             demo_chapter(
-                "The small edits",
+                "The small edits, changelog, xtask features and screenshots",
                 "Skim",
                 Attention::Low,
                 &["base.txt", "docs/committed.md"],

@@ -273,7 +273,10 @@ impl RenderOnce for Button {
             .when_some(self.tooltip, |b, text| {
                 b.tooltip(move |window, cx| Tooltip::new(text.clone()).build(window, cx))
             })
-            .children(self.label)
+            .children(
+                self.label
+                    .map(|label| div().min_w_0().overflow_hidden().text_ellipsis().child(label)),
+            )
             .children(self.children)
             .when(self.caret, |b| b.child(Icon::new(Glyph::ChevronDown).size(px(13.))))
             .when_some(self.hint, |b, hint| {

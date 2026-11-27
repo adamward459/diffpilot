@@ -487,17 +487,38 @@ pub const FEATURES: &[Feature] = &[
             Scene {
                 name: "overview-light",
                 target: Binary::app_example("guide"),
-                env: &[("DIFFPILOT_GUIDE_STEP", "overview"), ("DIFFPILOT_APPEARANCE", "light")],
+                env: &[
+                    ("DIFFPILOT_GUIDE_STEP", "overview"),
+                    ("DIFFPILOT_APPEARANCE", "light"),
+                    ("DIFFPILOT_GUIDE_WIDTH", "1000"),
+                ],
             },
             Scene {
                 name: "chapter-light",
                 target: Binary::app_example("guide"),
-                env: &[("DIFFPILOT_GUIDE_STEP", "chapter"), ("DIFFPILOT_APPEARANCE", "light")],
+                env: &[
+                    ("DIFFPILOT_GUIDE_STEP", "chapter"),
+                    ("DIFFPILOT_APPEARANCE", "light"),
+                    ("DIFFPILOT_GUIDE_WIDTH", "1000"),
+                ],
             },
             Scene {
                 name: "chapter-dark",
                 target: Binary::app_example("guide"),
-                env: &[("DIFFPILOT_GUIDE_STEP", "chapter"), ("DIFFPILOT_APPEARANCE", "dark")],
+                env: &[
+                    ("DIFFPILOT_GUIDE_STEP", "chapter"),
+                    ("DIFFPILOT_APPEARANCE", "dark"),
+                    ("DIFFPILOT_GUIDE_WIDTH", "1000"),
+                ],
+            },
+            Scene {
+                name: "overview-dark",
+                target: Binary::app_example("guide"),
+                env: &[
+                    ("DIFFPILOT_GUIDE_STEP", "overview"),
+                    ("DIFFPILOT_APPEARANCE", "dark"),
+                    ("DIFFPILOT_GUIDE_WIDTH", "1000"),
+                ],
             },
         ],
     },

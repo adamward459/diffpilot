@@ -1,6 +1,7 @@
 //! Shows Guide mode over a small fixture repo with a stored guide.
 //!
 //! `DIFFPILOT_GUIDE_STEP=overview|chapter` picks the screen. `DIFFPILOT_APPEARANCE=light|dark` picks the theme.
+//! `DIFFPILOT_GUIDE_WIDTH` sets the window width in points (default 1388).
 
 use diffpilot::guide::session::Step;
 use diffpilot::repo_view::{Nav, RepoView};
@@ -18,12 +19,16 @@ use std::time::Duration;
 
 fn main() {
     let chapter = std::env::var("DIFFPILOT_GUIDE_STEP").is_ok_and(|step| step == "chapter");
+    let width = std::env::var("DIFFPILOT_GUIDE_WIDTH")
+        .ok()
+        .and_then(|width| width.parse::<f32>().ok())
+        .unwrap_or(1388.);
     Application::new().with_assets(diffpilot_ui_kit::Assets).run(move |cx| {
         diffpilot_ui_kit::init(cx);
         let repo = fixture();
         let store = Arc::new(Store::open_in_memory().expect("an in-memory store opens"));
         let shared = Rc::new(RefCell::new(None));
-        let bounds = Bounds::centered(None, size(px(1388.), px(923.)), cx);
+        let bounds = Bounds::centered(None, size(px(width), px(923.)), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             ..Default::default()
@@ -50,6 +55,23 @@ fn main() {
         let view = shared.borrow().clone().expect("the window builds the view");
         cx.spawn(async move |cx| {
             cx.background_executor().timer(Duration::from_secs(1)).await;
+            let mut last = None;
+            let mut steady = 0;
+            while steady < 8 {
+                cx.background_executor().timer(Duration::from_millis(500)).await;
+                let now = cx
+                    .update(|cx| {
+                        let review = view.read(cx).review().read(cx);
+                        (review.session_id(), review.host().files.len())
+                    })
+                    .ok();
+                steady = if now == last && now.is_some_and(|(_, files)| files > 0) {
+                    steady + 1
+                } else {
+                    0
+                };
+                last = now;
+            }
             cx.update(|cx| {
                 let review = view.read(cx).review();
                 let files: Vec<_> = review
@@ -61,8 +83,10 @@ fn main() {
                     .collect();
                 let guide = demo_guide(repo.path(), &files);
                 let session = review.read(cx).session_id();
-                store.save_draft(session, RunId(1), ReviewModel::STANDARD, &guide).ok();
-                store.complete_draft(RunId(1), &guide).ok();
+                store
+                    .save_draft(session, RunId(1), ReviewModel::STANDARD, &guide)
+                    .expect("the draft saves");
+                store.complete_draft(RunId(1), &guide).expect("the draft completes");
                 view.read(cx).guide().update(cx, |guide, cx| {
                     guide.reload(cx);
                     if chapter {

@@ -554,3 +554,84 @@ fn the_banner_keeps_the_commit_count_while_the_diff_keeps_changing(app: &mut Tes
     cx.run_until_parked();
     assert_eq!(text(cx), "The branch moved 1 commit after Claude wrote this guide.");
 }
+
+const LONG: &str = "This sentence is long on purpose so that it has to wrap onto several lines inside a narrow column, \
+and it carries `popover()` and `paint_path` code spans";
+
+fn long_guide(guide: &mut Guide) {
+    guide.overview.before = Some(LONG.into());
+    guide.overview.after = Some(LONG.replace("long", "longer"));
+    guide.chapters[0].summary = LONG.into();
+    guide.chapters[0].points = vec![LONG.into(), LONG.into()];
+    guide.chapters[0].focus = vec![LONG.into()];
+    guide.chapters[1].title = "Changelog, xtask features, screenshots and a lot more words".into();
+}
+
+fn inside(inner: gpui::Bounds<gpui::Pixels>, outer: gpui::Bounds<gpui::Pixels>) -> bool {
+    let slack = gpui::px(0.5);
+    inner.left() >= outer.left() - slack
+        && inner.right() <= outer.right() + slack
+        && inner.top() >= outer.top() - slack
+        && inner.bottom() <= outer.bottom() + slack
+}
+
+#[gpui::test]
+fn long_overview_text_wraps_inside_its_cards_and_chapter_rows(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    cx.simulate_resize(gpui::size(gpui::px(800.), gpui::px(900.)));
+    store_guide_with(&world, cx, long_guide);
+    show_guide(&world, cx);
+
+    let article = testing::bounds(cx, "guide-article");
+    let before = testing::bounds(cx, "guide-before");
+    let after = testing::bounds(cx, "guide-after");
+    assert!(
+        inside(before, article) && inside(after, article),
+        "{before:?} {after:?} {article:?}"
+    );
+    assert!(
+        before.right() <= after.left(),
+        "the cards do not overlap: {before:?} {after:?}"
+    );
+    assert!(
+        (before.size.width - after.size.width).abs() < gpui::px(1.),
+        "equal columns: {before:?} {after:?}"
+    );
+    for (card, text) in [(before, "guide-before-text"), (after, "guide-after-text")] {
+        let text = testing::bounds(cx, text);
+        assert!(inside(text, card), "{text:?} is inside {card:?}");
+        assert!(text.size.height > gpui::px(40.), "the text wraps: {text:?}");
+    }
+
+    let summary = testing::bounds(cx, "guide-chapter-summary:0");
+    let stat = testing::bounds(cx, "guide-chapter-stat:0");
+    assert!(inside(summary, article), "{summary:?} {article:?}");
+    assert!(
+        summary.right() <= stat.left(),
+        "the summary stops before the stat: {summary:?} {stat:?}"
+    );
+    assert!(summary.size.height > gpui::px(40.), "the summary wraps: {summary:?}");
+    assert!(inside(stat, article), "{stat:?} {article:?}");
+}
+
+#[gpui::test]
+fn long_inspector_text_wraps_and_a_long_next_label_stays_in_its_button(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    cx.simulate_resize(gpui::size(gpui::px(900.), gpui::px(900.)));
+    store_guide_with(&world, cx, long_guide);
+    show_guide(&world, cx);
+    let guide = world.view.read_with(cx, |view, _| view.guide());
+    guide.update(cx, |guide, cx| guide.go(Step::Chapter(0), cx));
+    cx.run_until_parked();
+
+    let inspector = testing::bounds(cx, "guide-inspector");
+    for name in ["guide-point:0", "guide-point:1", "guide-focus:0"] {
+        let bullet = testing::bounds(cx, name);
+        assert!(inside(bullet, inspector), "{name} {bullet:?} is inside {inspector:?}");
+        assert!(bullet.size.height > gpui::px(40.), "{name} wraps: {bullet:?}");
+    }
+    let button = testing::bounds(cx, "guide-next-chapter");
+    let label = testing::bounds(cx, "guide-next-label");
+    assert!(inside(button, inspector), "{button:?} {inspector:?}");
+    assert!(inside(label, button), "{label:?} is inside {button:?}");
+}

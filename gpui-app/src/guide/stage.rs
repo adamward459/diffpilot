@@ -339,7 +339,9 @@ impl GuideStage {
     }
 
     fn text(id: &'static str, text: &str, body: Body, on_ref: &OnRef, cx: &App) -> AnyElement {
-        rich::element(id, &Inline::parse(text), body, Some(on_ref.clone()), cx)
+        tag(div().w_full().min_w_0(), || id)
+            .child(rich::element(id, &Inline::parse(text), body, Some(on_ref.clone()), cx))
+            .into_any_element()
     }
 
     fn chapter_row(&self, index: usize, chapter: &ReadingChapter, tokens: &Theme, cx: &App) -> AnyElement {
@@ -406,18 +408,20 @@ impl GuideStage {
                         div().child((index + 1).to_string()).into_any_element()
                     }),
             )
+            .child(v_flex().flex_1().w_0().min_w_0().gap(px(2.)).child(title).child(
+                tag(div().w_full().min_w_0(), || format!("guide-chapter-summary:{index}")).child(rich::element(
+                    ("guide-overview-summary", index),
+                    &Inline::parse(&chapter.summary),
+                    Body::new(tokens, 12.5, 18.).colored(tokens.ui.muted),
+                    None,
+                    cx,
+                )),
+            ))
             .child(
-                v_flex().flex_1().min_w_0().gap(px(2.)).child(title).child(
-                    div()
-                        .text_size(px(12.5))
-                        .text_color(tokens.ui.muted)
-                        .child(SharedString::from(chapter.summary.clone())),
-                ),
-            )
-            .child(
-                h_flex()
+                tag(h_flex(), || format!("guide-chapter-stat:{index}"))
                     .gap(px(5.))
                     .flex_none()
+                    .whitespace_nowrap()
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_size(px(11.5))
                     .child(
@@ -451,7 +455,7 @@ impl GuideStage {
         };
         let overview = &stored.guide.overview;
         let chapters = &guide.reading().chapters;
-        let mut article = v_flex()
+        let mut article = tag(v_flex(), || "guide-article")
             .w_full()
             .max_w(px(ARTICLE_WIDTH))
             .gap(px(14.))
@@ -480,41 +484,50 @@ impl GuideStage {
                 cx,
             ));
         if overview.before.is_some() || overview.after.is_some() {
-            let side = |label: &'static str, text: &Option<String>, accent: bool| {
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap(px(4.))
-                    .p(px(12.))
-                    .rounded(px(10.))
-                    .border_1()
-                    .border_color(if accent {
-                        tokens.ui.claude_border
-                    } else {
-                        tokens.ui.line
-                    })
-                    .bg(if accent { tokens.ui.claude_bg } else { tokens.ui.raised })
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(if accent { tokens.ui.claude } else { tokens.ui.muted })
-                            .child(label),
-                    )
-                    .child(Self::text(
-                        "guide-side",
-                        text.as_deref().unwrap_or_default(),
-                        Body::new(&tokens, 13., 19.),
-                        &on_ref,
-                        cx,
-                    ))
-            };
+            let side =
+                |label: &'static str, id: &'static str, text_id: &'static str, text: &Option<String>, accent: bool| {
+                    tag(v_flex(), || id)
+                        .flex_1()
+                        .w_0()
+                        .min_w_0()
+                        .gap(px(4.))
+                        .p(px(12.))
+                        .rounded(px(10.))
+                        .border_1()
+                        .border_color(if accent {
+                            tokens.ui.claude_border
+                        } else {
+                            tokens.ui.line
+                        })
+                        .bg(if accent { tokens.ui.claude_bg } else { tokens.ui.raised })
+                        .child(
+                            div()
+                                .text_size(px(11.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(if accent { tokens.ui.claude } else { tokens.ui.muted })
+                                .child(label),
+                        )
+                        .child(Self::text(
+                            text_id,
+                            text.as_deref().unwrap_or_default(),
+                            Body::new(&tokens, 13., 19.),
+                            &on_ref,
+                            cx,
+                        ))
+                };
             article = article.child(
                 h_flex()
+                    .w_full()
                     .gap(px(10.))
                     .items_start()
-                    .child(side("BEFORE", &overview.before, false))
-                    .child(side("AFTER", &overview.after, true)),
+                    .child(side(
+                        "BEFORE",
+                        "guide-before",
+                        "guide-before-text",
+                        &overview.before,
+                        false,
+                    ))
+                    .child(side("AFTER", "guide-after", "guide-after-text", &overview.after, true)),
             );
         }
         article = article.children(diagrams);
