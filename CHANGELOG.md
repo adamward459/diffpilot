@@ -11,7 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - The Commit… button in the bottom bar now opens a message box and commits all uncommitted changes.
 - Generate in the commit box asks Claude to write the commit message from your uncommitted changes. You can edit it before you commit, and the run shows in the Claude area.
 - Send to Claude in the comment box (also ⌘⇧↩) posts your comment and asks Claude to fix just that thread.
-- Drag over lines in the diff to select them. A floating bar lets you copy the code, open the first line in your editor, or comment on the last line.
+- Click a line, drag over the line numbers, or click a hunk header to select lines. A floating bar lets you copy, open in your editor, comment, and stage, unstage, or discard the selected lines.
+- Drag over code, or double-click a word, to select characters, and press ⌘C to copy them. Esc clears the selection.
 - Link folders outside the repo to a guide by path. Claude reads them for context and can list code there that the change may break.
 - Edit your own comments. Edit puts the text back in the comment box, and Save keeps the new text.
 - A Data tab in Settings lists the threads, runs, guides, and viewed marks stored for each repo and branch. Delete them per branch, per repo, or all at once.
@@ -26,7 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - Fix is now its own toolbar button, next to Ask Claude. It opens a list where you pick which comments to send, and it stays available while a review runs.
 - Glass controls now look like real glass: a sheen lit from the top, a crisp rim, and a shadow that sinks when you hover or press. Buttons are now capsules, and controls, toolbars, and text are larger.
 - The app is now named Diffpilot in the menu bar and the Dock.
-- Hunk actions (Stage Hunk, Revert, Open in Editor, Copy, Ask Claude) appear in a floating bar when you hover a hunk header, like the selection bar.
+- Hunk actions no longer appear when you hover a hunk header. Click the header to select the hunk and use the same floating bar as for selected lines.
 - Copy Path and Reveal in Finder are now buttons in each file header, so you no longer need the More menu for them.
 - Markdown Preview now fills the whole width. A changed file shows as one document, like GitHub's rich diff: added blocks are marked green and removed blocks red.
 - The app uses about 100 MB less memory. A diff window now takes about 117 MB instead of 219 MB.
