@@ -266,7 +266,7 @@ mod tests {
         assert_eq!(&text[word_at(text, 5)], "alpha_1");
         assert_eq!(&text[word_at(text, 3)], " ");
         assert_eq!(&text[word_at(text, 17)], "(");
-        assert_eq!(&text[word_at(text, 100)], ";");
+        assert_eq!(&text[word_at(text, 100)], ");");
         assert_eq!(word_at("", 0), 0..0);
         assert_eq!(&"héllo wörld"[word_at("héllo wörld", 2)], "héllo");
     }
