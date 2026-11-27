@@ -45,6 +45,8 @@ pub(crate) fn git(repo: &Path, args: &[&str], stdin: Option<&[u8]>) -> Result<Ca
         .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    #[cfg(any(test, feature = "testing"))]
+    git::isolate(&mut command);
     let mut child = command.spawn().map_err(|error| GitError::Failed(error.to_string()))?;
     let writer = stdin.and_then(|input| {
         let mut pipe = child.stdin.take()?;

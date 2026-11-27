@@ -3,7 +3,9 @@ use std::process::Command;
 use tempfile::TempDir;
 
 pub fn git(repo: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    crate::git::isolate(&mut command);
+    let output = command
         .arg("-C")
         .arg(repo)
         .args(["-c", "user.name=t", "-c", "user.email=t@t"])

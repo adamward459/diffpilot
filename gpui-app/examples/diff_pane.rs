@@ -617,6 +617,7 @@ fn run_window(repo: PathBuf, launch: Instant, bench: Option<Drive>) {
                 | DiffPaneEvent::OpenInEditor { .. }
                 | DiffPaneEvent::OpenRef(_)
                 | DiffPaneEvent::RevealInFinder(_)
+                | DiffPaneEvent::ThreadSteps
                 | DiffPaneEvent::Changed => {}
                 DiffPaneEvent::ToggleViewed(path) => {
                     let mut viewed = viewed.borrow_mut();

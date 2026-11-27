@@ -25,6 +25,13 @@ pub fn binary() -> Option<PathBuf> {
     find_executable(&candidates, "git")
 }
 
+#[cfg(any(test, feature = "testing"))]
+pub fn isolate(command: &mut Command) {
+    command
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+}
+
 pub fn run(repo: &Path, args: &[&str]) -> Result<String, GitError> {
     run_io(repo, args, &[], None).map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
 }
@@ -43,6 +50,8 @@ pub fn run_io(repo: &Path, args: &[&str], env: &[(&str, &OsStr)], stdin: Option<
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE");
+    #[cfg(any(test, feature = "testing"))]
+    isolate(&mut command);
     for (name, value) in env {
         command.env(name, value);
     }

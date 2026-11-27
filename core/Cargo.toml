@@ -16,6 +16,9 @@ tempfile = "3"
 thiserror = "2"
 
 
+[features]
+testing = []
+
 [dependencies.ureq]
 version = "3"
 

@@ -1,6 +1,7 @@
 use crate::common::{comment_on_file, open_on as open};
 use diffpilot::testing::{
-    bounds, click, fake_claude, fixture, hover, open_workspace, press, shows, type_text, wait_for_motion,
+    bounds, click, fake_claude, fixture, hover, open_workspace, press, settled_bounds, shows, type_text,
+    wait_for_motion,
 };
 use diffpilot_core::settings::Settings;
 use diffpilot_core::threads::USER_NAME;
@@ -15,7 +16,7 @@ fn pointing_at_a_comment_row_shows_its_actions_without_resizing_the_row(app: &mu
     comment_on_file(cx, "docs/committed.md", "Fix this.");
     click(cx, "toolbar:comments");
     wait_for_motion(cx);
-    let at_rest = bounds(cx, "comments:row:Fix this.");
+    let at_rest = settled_bounds(cx, "comments:row:Fix this.");
 
     hover(cx, "comments:row:Fix this.");
     assert!(shows(cx, "comments:resolve:Fix this."));

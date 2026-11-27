@@ -43,7 +43,9 @@ pub fn canned_review() -> ReviewResult {
 
 pub fn git(dir: &Path, args: &[&str]) {
     let binary = diffpilot_core::git::binary().expect("git");
-    let status = Command::new(binary)
+    let mut command = Command::new(binary);
+    diffpilot_core::git::isolate(&mut command);
+    let status = command
         .arg("-C")
         .arg(dir)
         .args([
@@ -376,7 +378,7 @@ pub fn shows(cx: &mut VisualTestContext, selector: &str) -> bool {
 
 /// Bounds of a tag once it has stopped moving, so a click lands after a menu or drawer finishes opening. Panels
 /// that were closing are gone by then, as they would be for a user who waits.
-fn settled_bounds(cx: &mut VisualTestContext, selector: &str) -> Bounds<Pixels> {
+pub fn settled_bounds(cx: &mut VisualTestContext, selector: &str) -> Bounds<Pixels> {
     if diffpilot_ui_kit::components::closing_motions() > 0 {
         wait_for_motion(cx);
     }
@@ -511,12 +513,9 @@ pub fn drag_right_edge(cx: &mut VisualTestContext, selector: &str, inset: f32, f
 
 pub fn git_output(dir: &Path, args: &[&str]) -> String {
     let binary = diffpilot_core::git::binary().expect("git");
-    let output = Command::new(binary)
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .expect("run git");
+    let mut command = Command::new(binary);
+    diffpilot_core::git::isolate(&mut command);
+    let output = command.arg("-C").arg(dir).args(args).output().expect("run git");
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 

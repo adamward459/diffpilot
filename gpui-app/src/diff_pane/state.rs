@@ -1117,7 +1117,11 @@ mod tests {
         state.set_blocks(vec![line_thread(2, "f1.ts", 5), line_thread(1, "f0.ts", 5)]);
         assert_eq!(state.take_thread_steps_change(10.0), Some(steps(false, true)));
         state.step_thread(true, 10.0);
-        assert_eq!(state.take_thread_steps_change(10.0), Some(steps(true, true)));
+        assert_eq!(
+            state.take_thread_steps_change(10.0),
+            None,
+            "nothing lies above the first thread"
+        );
         state.step_thread(true, 10.0);
         assert_eq!(state.take_thread_steps_change(10.0), Some(steps(true, false)));
         assert_eq!(state.take_thread_steps_change(10.0), None);

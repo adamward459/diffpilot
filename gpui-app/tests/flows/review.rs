@@ -234,8 +234,8 @@ fn the_previous_thread_arrow_reaches_the_review_summary(app: &mut TestAppContext
     wait_until_shows(cx, "jump-bar:threads:2");
 
     assert!(
-        shows(cx, "jump-bar:thread-steps:false:true"),
-        "at the top, only Next works"
+        shows(cx, "jump-bar:thread-steps:true:true"),
+        "src/staged.rs is shown, with the summary above and Late below, so both arrows work"
     );
     click(cx, "jump-bar:thread-next");
     assert!(shows(cx, "finding:Late"));

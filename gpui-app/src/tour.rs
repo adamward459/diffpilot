@@ -141,12 +141,11 @@ pub fn anchor<E: ParentElement + Styled>(element: E, stop: Stop) -> E {
 
 pub fn bounds_of(stop: Stop, window: &Window, cx: &App) -> Option<Bounds<Pixels>> {
     let anchors = cx.try_global::<Anchors>()?;
-    let bounds = anchors
+    anchors
         .0
         .borrow()
         .get(&(window.window_handle().window_id(), stop))
-        .copied();
-    bounds
+        .copied()
 }
 
 pub fn shown(window: &Window, cx: &App) -> Vec<Stop> {
