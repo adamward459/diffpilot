@@ -1020,6 +1020,16 @@ mod tests {
     }
 
     #[test]
+    fn stepping_back_from_below_reaches_the_change_thread_at_the_top() {
+        let mut state = state(three_files());
+        state.set_blocks(vec![slot(1, ThreadAnchor::Change), line_thread(2, "f2.ts", 5)]);
+        assert!(state.step_thread(true, 10.0));
+        assert!(state.step_thread(false, 10.0));
+        assert_eq!(state.scroll(), 0.0);
+        assert!(!state.step_thread(false, 10.0));
+    }
+
+    #[test]
     fn collapsing_the_file_that_holds_the_top_thread_scrolls_to_its_header() {
         let mut state = state(three_files());
         state.set_blocks(vec![line_thread(1, "f1.ts", 5)]);
