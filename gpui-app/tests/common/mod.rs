@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use diffpilot::review::{ReviewEvent, ReviewHost, ReviewSession};
-use diffpilot::testing::{FakeClaude, fake_claude};
+use diffpilot::testing::{FakeClaude, bounds, click, fake_claude, open_repo_in, press, type_text};
 use diffpilot_core::changes::FileStatus;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{DiffLine, FileDiff, Hunk, LineKind};
@@ -10,9 +10,11 @@ use diffpilot_core::run::{Run, RunState};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::Store;
 use diffpilot_core::threads::{ReviewThread, Side, ThreadAnchor, ThreadId};
-use gpui::{AppContext, Context, Entity, Render, TestAppContext, VisualTestContext, Window};
+use diffpilot_core::viewed::ViewedStore;
+use gpui::{AppContext, Context, Entity, Render, TestAppContext, VisualTestContext, Window, px};
 use gpui_component::Root;
 use std::cell::RefCell;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -228,4 +230,33 @@ pub fn root_window<V: Render + 'static>(
     let vcx = VisualTestContext::from_window(handle.into(), cx).into_mut();
     vcx.run_until_parked();
     (view.expect("the window builds its view"), vcx)
+}
+
+pub fn open_on(app: &mut TestAppContext, repo: &Path, store: Arc<Store>) -> &'static mut VisualTestContext {
+    let (_, cx) = open_repo_in(
+        app,
+        repo,
+        Arc::new(Settings::in_memory()),
+        Arc::new(ViewedStore::in_memory()),
+        store,
+    );
+    cx
+}
+
+pub fn comment_on_file(cx: &mut VisualTestContext, path: &str, text: &str) {
+    click(cx, &format!("sidebar:row:{path}"));
+    click(cx, &format!("pane:comment-on-file:{path}"));
+    type_text(cx, text);
+    press(cx, "cmd-enter");
+}
+
+/// The card of the thread with this key must not run past the row the pane made for it.
+pub fn assert_card_inside_its_row(cx: &mut VisualTestContext, key: &str) {
+    let card = bounds(cx, &format!("thread:card:{key}"));
+    let row = bounds(cx, &format!("pane:thread-row:{key}"));
+    assert!(
+        card.bottom() <= row.bottom() + px(1.),
+        "the card `{key}` ends {:?} below its row",
+        card.bottom() - row.bottom()
+    );
 }

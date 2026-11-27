@@ -30,7 +30,8 @@ cargo xtask perf [feature...] [--base REF] [--force]
 cargo xtask baseline [feature...] [--force]
                                 run each bench once and write its part of baselines/bench.json
 cargo xtask visual [feature...] [--compare [--base REF]] [--dry-run]
-                                capture each scene of the features into screenshots/<feature>/;
+                                capture each scene of the features into screenshots/<feature>/: the
+                                `scenes` example crops the real app to one part, other scenes keep the window;
                                 --compare pixel-diffs each image with the base ref's copy
 cargo xtask pr-screenshots [feature...]
                                 capture and push the scenes of the features the open PR touches,

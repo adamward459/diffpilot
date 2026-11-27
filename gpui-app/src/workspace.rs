@@ -242,7 +242,7 @@ impl Workspace {
             .map(|(page, _)| page)
     }
 
-    fn active_view(&self) -> Option<&Entity<RepoView>> {
+    pub fn active_view(&self) -> Option<&Entity<RepoView>> {
         self.views.first().map(|(_, view)| view)
     }
 

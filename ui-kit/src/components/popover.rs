@@ -1,5 +1,6 @@
 use crate::components::{OVERLAY_RADIUS, Presence, glass_panel};
 use crate::icons::Glyph;
+use crate::regions::region;
 use crate::theme::Theme;
 use gpui::prelude::*;
 use gpui::{
@@ -130,7 +131,11 @@ fn frame(
     let panel = glass_panel(&theme).child(v_flex().p_3().child(body));
     div()
         .relative()
-        .child(presence.slide(format!("{id}:open"), arrow_frame(panel, below, trigger), below))
+        .child(presence.slide(
+            format!("{id}:open"),
+            region(arrow_frame(panel, below, trigger), || format!("popover:{id}")),
+            below,
+        ))
         .children(presence.is_closing().then(inert))
         .into_any_element()
 }

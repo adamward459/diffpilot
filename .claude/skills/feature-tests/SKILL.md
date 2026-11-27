@@ -11,7 +11,7 @@ The Cargo workspace is split by crate:
 | --- | --- |
 | `core` (`diffpilot-core`) | logic: git, diff, review, viewed store, settings |
 | `ui-kit` (`diffpilot-ui-kit`) | theme, icons, and shared components; has a `gallery` example |
-| `gpui-app` (`diffpilot`) | the binary: app shell, sidebar, comparison. Its library holds the diff view (`src/diff_pane/`) and the review UI (`src/review/`); the `diff_pane` and `review` examples are benches |
+| `gpui-app` (`diffpilot`) | the binary: app shell, sidebar, comparison. Its library holds the diff view (`src/diff_pane/`) and the review UI (`src/review/`); the `diff_pane` and `review` examples are benches, and the `scenes` example takes the screenshots |
 
 Unit tests sit next to the code (`#[cfg(test)]`) or in a crate's `tests/` folder. They are grouped by feature, in the table in `xtask/src/features.rs`. Each feature lists its files and the tests that cover them: a module of a crate's unit tests, or one integration test file. Run `cargo xtask features` to see the table and the files under `core/src` and `gpui-app/src` that no feature lists.
 
@@ -56,19 +56,23 @@ The flows open no window, so you can run them at any time. A flow cannot hold a 
 5. Before you open or update a PR, run `cargo xtask baseline` and commit `baselines/bench.json` in the PR.
 6. After you open or update a PR, run `cargo xtask pr-screenshots`. It captures the scenes of the features the PR touches, saves the images to `screenshots/<feature>/<scene>.png`, and pixel-diffs each one with the base branch's copy. It commits and pushes the images and puts them, grouped by feature, with the list of changed images, in a `## Screenshots
 
-- A scene is one screenshot. It lives in the `scenes` field of a feature in `xtask/src/features.rs`: the binary to open (the app, or an example), the environment variables, and the file name. `cargo xtask visual [feature...]` builds each binary once in release mode, opens each scene on the fixture repo, finds the window of the process, captures it with `screencapture`, and saves `screenshots/<feature>/<scene>.png`. The terminal needs Screen Recording permission.
+- A scene is one screenshot. It lives in the `scenes` field of a feature in `xtask/src/features.rs`: the binary to open, the environment variables, and the file name. `cargo xtask visual [feature...]` builds each binary once in release mode, opens each scene on the fixture repo, finds the window of the process, captures it with `screencapture`, and saves `screenshots/<feature>/<scene>.png`. The terminal needs Screen Recording permission.
+- Every app scene runs the `scenes` example (`gpui-app/examples/scenes.rs`). It opens the real `Workspace` window on the fixture repo with a fake Claude, runs the scene function that `DIFFPILOT_SCENE` names, waits until the named region stops moving, and prints `shot x y w h window_w window_h`. `cargo xtask visual` crops the capture to that part plus a 12 pt margin, so each image shows one feature inside the real app.
+- A region is a part of the window marked with `region(element, || name)` from `ui-kit/src/regions.rs`. It records its bounds only with the `regions` feature (on through the `testing` feature, so in examples and tests, not in the shipped app). The regions are `pane`, `sidebar`, `toolbar`, `content`, `claude-area`, `settings`, and `popover:<id>` on every popover.
+- gpui hides element bounds outside its test context, so a scene cannot click a tagged element. It reaches its state through the real views' own methods (small `pub` accessors such as `Workspace::active_view`, `RepoView::pill`, `RepoView::fix_button`), and through the fake Claude (`FakeClaude`). Do not add fake views or fake data in a scene: the data comes from the fixture repo and the fake Claude.
 - `--compare` pixel-diffs each image with its copy on the base ref (`--base REF` to override). It prints the number of changed pixels and the largest channel change for each image that differs, and writes a red-marked diff image under `screenshot-diff/` in the Cargo build dir. A size change counts every pixel as changed.
 - `cargo xtask visual --dry-run` lists the scenes and does not build or open anything.
 
   | Feature | Scenes |
   | --- | --- |
-  | `app-shell` | the app, light and dark |
-  | `diff-pane` | the `diff_pane` example: split light and dark, split without wrap, split with threads (light and dark), unified |
-  | `review` | the `review` example, light and dark |
+  | `app-shell` | `sidebar-light`, `toolbar-light`, `settings-light`, `settings-dark` |
+  | `diff-pane` | the pane in split light and dark, unified, split with and without wrap, and preview light and dark |
+  | `review` | the review popover light and dark, finding cards, the Fix picker, and the Claude area |
+  | `guide` | the overview, and a chapter in light and dark |
   | `shared` | the `gallery` example of `ui-kit`, light and dark |
 
-- The binaries read these variables: `DIFFPILOT_REPO` (the fixture repo in `.fixtures/large`, built by `cargo xtask fixture`), `DIFFPILOT_VIEWED_SEED`, `DIFFPILOT_APPEARANCE` (`light` or `dark`), `DIFFPILOT_DIFF_MODE` (`unified` or `split`), and `DIFFPILOT_REVIEWER=scripted`. The `diff_pane` example also takes `DIFFPILOT_WRAP=0`, `DIFFPILOT_REVEAL=<path>` (scroll to that file), and `DIFFPILOT_DEMO_THREADS=1` (a comment on each side of the first changed line pair, in the revealed file when one is set).
-- To add a scene, add a `Scene` to its feature and run `cargo xtask visual <feature>`.
+- The binaries read these variables: `DIFFPILOT_REPO` (the fixture repo in `.fixtures/large`, built by `cargo xtask fixture`), `DIFFPILOT_VIEWED_SEED`, `DIFFPILOT_APPEARANCE` (`light` or `dark`), `DIFFPILOT_DIFF_MODE` (`unified` or `split`), `DIFFPILOT_REVIEWER=scripted`, and `DIFFPILOT_SCENE` (the `scenes` example). The `diff_pane` example, kept as a bench, also takes `DIFFPILOT_WRAP=0`, `DIFFPILOT_REVEAL=<path>`, and `DIFFPILOT_DEMO_THREADS=1`.
+- To add a scene, add one function to `scenes.rs` that returns the region name, a case for it in `Stage::play`, and a `Scene` in its feature. Mark a new region in the view with `region`. Then run `cargo xtask visual <feature>` and open every image.
 - Use deterministic data, so screenshots only change when the UI changes.
 - `cargo xtask visual` opens windows on your screen. Run it only when you mean to look at them.
 

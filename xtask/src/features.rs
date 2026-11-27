@@ -27,11 +27,10 @@ impl Binary {
     }
 }
 
-/// One screenshot: `screenshots/<feature>/<name>.png`, taken from a window of `target` that
-/// opens with `env` set on top of the fixture repo variables.
-// The fixture file whose first new line is long enough to wrap; see LONG_LINE_PATH in fixture.rs.
-const LONG_LINE_FILE: &str = "src/components/inbox/MessageRow.tsx";
-
+/// One screenshot: `screenshots/<feature>/<name>.png`. App scenes run the `scenes` example with
+/// `DIFFPILOT_SCENE` naming the scene function; it opens the real app on the fixture repo and prints
+/// the part of the window to keep. Other scenes capture the whole window of `target`.
+/// `env` is set on top of the fixture repo variables.
 pub struct Scene {
     pub name: &'static str,
     pub target: Binary,
@@ -103,80 +102,69 @@ pub const FEATURES: &[Feature] = &[
                 package: APP,
                 test: "diff_pane_headless",
             },
-            Target {
-                package: APP,
-                test: "diff_pane_review",
-            },
         ],
         bench: Some(Binary::app_example("diff_pane")),
         scenes: &[
             Scene {
                 name: "split-light",
-                target: Binary::app_example("diff_pane"),
-                env: &[("DIFFPILOT_DIFF_MODE", "split"), ("DIFFPILOT_APPEARANCE", "light")],
+                target: Binary::app_example("scenes"),
+                env: &[
+                    ("DIFFPILOT_SCENE", "pane"),
+                    ("DIFFPILOT_DIFF_MODE", "split"),
+                    ("DIFFPILOT_APPEARANCE", "light"),
+                ],
             },
             Scene {
                 name: "split-dark",
-                target: Binary::app_example("diff_pane"),
-                env: &[("DIFFPILOT_DIFF_MODE", "split"), ("DIFFPILOT_APPEARANCE", "dark")],
-            },
-            Scene {
-                name: "split-wrap-light",
-                target: Binary::app_example("diff_pane"),
+                target: Binary::app_example("scenes"),
                 env: &[
+                    ("DIFFPILOT_SCENE", "pane"),
                     ("DIFFPILOT_DIFF_MODE", "split"),
-                    ("DIFFPILOT_REVEAL", LONG_LINE_FILE),
-                    ("DIFFPILOT_APPEARANCE", "light"),
-                ],
-            },
-            Scene {
-                name: "split-nowrap-light",
-                target: Binary::app_example("diff_pane"),
-                env: &[
-                    ("DIFFPILOT_DIFF_MODE", "split"),
-                    ("DIFFPILOT_WRAP", "0"),
-                    ("DIFFPILOT_REVEAL", LONG_LINE_FILE),
-                    ("DIFFPILOT_APPEARANCE", "light"),
-                ],
-            },
-            Scene {
-                name: "split-threads-light",
-                target: Binary::app_example("diff_pane"),
-                env: &[
-                    ("DIFFPILOT_DIFF_MODE", "split"),
-                    ("DIFFPILOT_DEMO_THREADS", "1"),
-                    ("DIFFPILOT_APPEARANCE", "light"),
-                ],
-            },
-            Scene {
-                name: "split-threads-dark",
-                target: Binary::app_example("diff_pane"),
-                env: &[
-                    ("DIFFPILOT_DIFF_MODE", "split"),
-                    ("DIFFPILOT_DEMO_THREADS", "1"),
                     ("DIFFPILOT_APPEARANCE", "dark"),
                 ],
             },
             Scene {
                 name: "unified-light",
-                target: Binary::app_example("diff_pane"),
-                env: &[("DIFFPILOT_DIFF_MODE", "unified"), ("DIFFPILOT_APPEARANCE", "light")],
+                target: Binary::app_example("scenes"),
+                env: &[
+                    ("DIFFPILOT_SCENE", "pane"),
+                    ("DIFFPILOT_DIFF_MODE", "unified"),
+                    ("DIFFPILOT_APPEARANCE", "light"),
+                ],
+            },
+            Scene {
+                name: "split-wrap-light",
+                target: Binary::app_example("scenes"),
+                env: &[
+                    ("DIFFPILOT_SCENE", "pane-wrap"),
+                    ("DIFFPILOT_DIFF_MODE", "split"),
+                    ("DIFFPILOT_APPEARANCE", "light"),
+                ],
+            },
+            Scene {
+                name: "split-nowrap-light",
+                target: Binary::app_example("scenes"),
+                env: &[
+                    ("DIFFPILOT_SCENE", "pane-nowrap"),
+                    ("DIFFPILOT_DIFF_MODE", "split"),
+                    ("DIFFPILOT_APPEARANCE", "light"),
+                ],
             },
             Scene {
                 name: "preview-light",
-                target: Binary::app_example("diff_pane"),
+                target: Binary::app_example("scenes"),
                 env: &[
+                    ("DIFFPILOT_SCENE", "pane-preview"),
                     ("DIFFPILOT_DIFF_MODE", "split"),
-                    ("DIFFPILOT_PREVIEW", "1"),
                     ("DIFFPILOT_APPEARANCE", "light"),
                 ],
             },
             Scene {
                 name: "preview-dark",
-                target: Binary::app_example("diff_pane"),
+                target: Binary::app_example("scenes"),
                 env: &[
+                    ("DIFFPILOT_SCENE", "pane-preview"),
                     ("DIFFPILOT_DIFF_MODE", "split"),
-                    ("DIFFPILOT_PREVIEW", "1"),
                     ("DIFFPILOT_APPEARANCE", "dark"),
                 ],
             },
@@ -226,14 +214,6 @@ pub const FEATURES: &[Feature] = &[
             },
             Target {
                 package: APP,
-                test: "review_card",
-            },
-            Target {
-                package: APP,
-                test: "review_pill",
-            },
-            Target {
-                package: APP,
                 test: "review_session",
             },
             Target {
@@ -244,14 +224,41 @@ pub const FEATURES: &[Feature] = &[
         bench: Some(Binary::app_example("review")),
         scenes: &[
             Scene {
-                name: "light",
-                target: Binary::app_example("review"),
-                env: &[("DIFFPILOT_APPEARANCE", "light")],
+                name: "setup-light",
+                target: Binary::app_example("scenes"),
+                env: &[("DIFFPILOT_SCENE", "review-setup"), ("DIFFPILOT_APPEARANCE", "light")],
             },
             Scene {
-                name: "dark",
-                target: Binary::app_example("review"),
-                env: &[("DIFFPILOT_APPEARANCE", "dark")],
+                name: "setup-dark",
+                target: Binary::app_example("scenes"),
+                env: &[("DIFFPILOT_SCENE", "review-setup"), ("DIFFPILOT_APPEARANCE", "dark")],
+            },
+            Scene {
+                name: "threads-light",
+                target: Binary::app_example("scenes"),
+                env: &[
+                    ("DIFFPILOT_SCENE", "review-threads"),
+                    ("DIFFPILOT_DIFF_MODE", "split"),
+                    ("DIFFPILOT_APPEARANCE", "light"),
+                ],
+            },
+            Scene {
+                name: "fix-picker-light",
+                target: Binary::app_example("scenes"),
+                env: &[
+                    ("DIFFPILOT_SCENE", "review-fix-picker"),
+                    ("DIFFPILOT_DIFF_MODE", "split"),
+                    ("DIFFPILOT_APPEARANCE", "light"),
+                ],
+            },
+            Scene {
+                name: "claude-area-light",
+                target: Binary::app_example("scenes"),
+                env: &[
+                    ("DIFFPILOT_SCENE", "review-claude-area"),
+                    ("DIFFPILOT_DIFF_MODE", "split"),
+                    ("DIFFPILOT_APPEARANCE", "light"),
+                ],
             },
         ],
     },
@@ -469,7 +476,6 @@ pub const FEATURES: &[Feature] = &[
             "core/src/store/guides.rs",
             "core/tests/guide.rs",
             "gpui-app/src/guide/**",
-            "gpui-app/examples/guide.rs",
             "gpui-app/tests/guide.rs",
         ],
         tests: &[
@@ -498,38 +504,25 @@ pub const FEATURES: &[Feature] = &[
         scenes: &[
             Scene {
                 name: "overview-light",
-                target: Binary::app_example("guide"),
-                env: &[
-                    ("DIFFPILOT_GUIDE_STEP", "overview"),
-                    ("DIFFPILOT_APPEARANCE", "light"),
-                    ("DIFFPILOT_GUIDE_WIDTH", "1000"),
-                ],
+                target: Binary::app_example("scenes"),
+                env: &[("DIFFPILOT_SCENE", "guide-overview"), ("DIFFPILOT_APPEARANCE", "light")],
             },
             Scene {
                 name: "chapter-light",
-                target: Binary::app_example("guide"),
+                target: Binary::app_example("scenes"),
                 env: &[
-                    ("DIFFPILOT_GUIDE_STEP", "chapter"),
+                    ("DIFFPILOT_SCENE", "guide-chapter"),
+                    ("DIFFPILOT_DIFF_MODE", "split"),
                     ("DIFFPILOT_APPEARANCE", "light"),
-                    ("DIFFPILOT_GUIDE_WIDTH", "1000"),
                 ],
             },
             Scene {
                 name: "chapter-dark",
-                target: Binary::app_example("guide"),
+                target: Binary::app_example("scenes"),
                 env: &[
-                    ("DIFFPILOT_GUIDE_STEP", "chapter"),
+                    ("DIFFPILOT_SCENE", "guide-chapter"),
+                    ("DIFFPILOT_DIFF_MODE", "split"),
                     ("DIFFPILOT_APPEARANCE", "dark"),
-                    ("DIFFPILOT_GUIDE_WIDTH", "1000"),
-                ],
-            },
-            Scene {
-                name: "overview-dark",
-                target: Binary::app_example("guide"),
-                env: &[
-                    ("DIFFPILOT_GUIDE_STEP", "overview"),
-                    ("DIFFPILOT_APPEARANCE", "dark"),
-                    ("DIFFPILOT_GUIDE_WIDTH", "1000"),
                 ],
             },
         ],
@@ -541,6 +534,8 @@ pub const FEATURES: &[Feature] = &[
             "core/src/{folder_status,commit}.rs",
             "gpui-app/tests/flows.rs",
             "gpui-app/tests/flows/**",
+            "gpui-app/examples/scenes.rs",
+            "ui-kit/src/regions.rs",
         ],
         tests: &[
             Lib {
@@ -563,14 +558,24 @@ pub const FEATURES: &[Feature] = &[
         bench: Some(Binary::App),
         scenes: &[
             Scene {
-                name: "light",
-                target: Binary::App,
-                env: &[("DIFFPILOT_APPEARANCE", "light")],
+                name: "sidebar-light",
+                target: Binary::app_example("scenes"),
+                env: &[("DIFFPILOT_SCENE", "sidebar"), ("DIFFPILOT_APPEARANCE", "light")],
             },
             Scene {
-                name: "dark",
-                target: Binary::App,
-                env: &[("DIFFPILOT_APPEARANCE", "dark")],
+                name: "toolbar-light",
+                target: Binary::app_example("scenes"),
+                env: &[("DIFFPILOT_SCENE", "toolbar"), ("DIFFPILOT_APPEARANCE", "light")],
+            },
+            Scene {
+                name: "settings-light",
+                target: Binary::app_example("scenes"),
+                env: &[("DIFFPILOT_SCENE", "settings"), ("DIFFPILOT_APPEARANCE", "light")],
+            },
+            Scene {
+                name: "settings-dark",
+                target: Binary::app_example("scenes"),
+                env: &[("DIFFPILOT_SCENE", "settings"), ("DIFFPILOT_APPEARANCE", "dark")],
             },
         ],
     },

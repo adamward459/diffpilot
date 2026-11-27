@@ -19,7 +19,7 @@ unicode-width = "0.2"
 pulldown-cmark = { version = "0.13.6", default-features = false }
 
 [features]
-testing = ["gpui/test-support", "dep:tempfile", "dep:serde_json"]
+testing = ["gpui/test-support", "diffpilot-ui-kit/regions", "dep:tempfile", "dep:serde_json"]
 
 [dev-dependencies]
 diffpilot = { path = ".", features = ["testing"] }

@@ -8,5 +8,8 @@ diffpilot-core = { version = "0.1.0", path = "../core" }
 gpui = { version = "0.2.2", features = ["runtime_shaders"] }
 gpui-component = "=0.5.1"
 
+[features]
+regions = []
+
 [dev-dependencies]
 gpui = { version = "0.2.2", features = ["runtime_shaders", "test-support"] }

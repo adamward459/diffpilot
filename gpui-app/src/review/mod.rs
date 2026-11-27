@@ -7,6 +7,7 @@ pub mod pill;
 pub mod popover;
 pub mod session;
 
+pub(crate) use card::card_key;
 pub use card::{CardEvent, ThreadCard, metrics};
 pub use comments_panel::{CommentsEvent, CommentsPanel};
 pub use fix_button::{FixButton, FixEvent};
