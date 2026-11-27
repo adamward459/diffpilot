@@ -2,9 +2,7 @@
 
 use diffpilot::review::{ReviewEvent, ReviewHost, ReviewSession};
 use diffpilot::testing::{FakeClaude, fake_claude};
-use diffpilot_core::cancel::CancelToken;
 use diffpilot_core::changes::FileStatus;
-use diffpilot_core::claude::Replier;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{DiffLine, FileDiff, Hunk, LineKind};
 use diffpilot_core::review::{Finding, ReviewResult, Severity};
@@ -16,41 +14,8 @@ use gpui::{AppContext, Context, Entity, Render, TestAppContext, VisualTestContex
 use gpui_component::Root;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
-
-#[derive(Default)]
-pub struct StubReplier {
-    pub senders: Mutex<Vec<async_channel::Sender<String>>>,
-    pub tokens: Mutex<Vec<CancelToken>>,
-    pub asked: Mutex<Vec<ReviewThread>>,
-}
-
-impl StubReplier {
-    pub fn send(&self, chunk: &str) {
-        for sender in self.senders.lock().unwrap().iter() {
-            sender.send_blocking(chunk.into()).unwrap();
-        }
-    }
-
-    pub fn finish(&self) {
-        self.senders.lock().unwrap().clear();
-    }
-
-    pub fn asked(&self) -> usize {
-        self.asked.lock().unwrap().len()
-    }
-}
-
-impl Replier for StubReplier {
-    fn reply(&self, thread: &ReviewThread, cancel: &CancelToken) -> async_channel::Receiver<String> {
-        let (sender, receiver) = async_channel::unbounded();
-        self.senders.lock().unwrap().push(sender);
-        self.tokens.lock().unwrap().push(cancel.clone());
-        self.asked.lock().unwrap().push(thread.clone());
-        receiver
-    }
-}
 
 pub fn finding(path: &str, line: Option<u32>, severity: Severity, title: &str) -> Finding {
     Finding {
@@ -98,7 +63,6 @@ pub fn file() -> FileDiff {
 pub struct Fixture {
     pub session: Entity<ReviewSession>,
     pub claude: FakeClaude,
-    pub replier: Arc<StubReplier>,
     pub settings: Arc<Settings>,
     pub store: Arc<Store>,
     pub events: Rc<RefCell<Vec<ReviewEvent>>>,
@@ -111,15 +75,14 @@ pub fn fixture(cx: &mut TestAppContext, result: ReviewResult) -> Fixture {
     claude.review_with(&result);
     claude.finish();
     let repo = tempfile::tempdir().unwrap();
-    let replier = Arc::new(StubReplier::default());
     let settings = Arc::new(Settings::in_memory());
     let store = claude.store();
     let mut host = ReviewHost::new(Some(repo.path().to_path_buf()), Comparison::checked_out("main", true));
     host.files = Arc::from([Arc::new(file())]);
     host.visible_path = Some("src/a.ts".into());
     let session = {
-        let (replier, settings, store) = (replier.clone(), settings.clone(), store.clone());
-        cx.new(move |cx| ReviewSession::new(host, settings, store, replier, cx))
+        let (settings, store) = (settings.clone(), store.clone());
+        cx.new(move |cx| ReviewSession::new(host, settings, store, cx))
     };
     let events = Rc::new(RefCell::new(Vec::new()));
     let sink = events.clone();
@@ -132,7 +95,6 @@ pub fn fixture(cx: &mut TestAppContext, result: ReviewResult) -> Fixture {
     Fixture {
         session,
         claude,
-        replier,
         settings,
         store,
         events,
@@ -145,8 +107,7 @@ pub fn session_on(cx: &mut TestAppContext, store: &Arc<Store>, comparison: Compa
     host.branch_name = Some("feature".into());
     host.files = Arc::from([Arc::new(file())]);
     let (store, settings) = (store.clone(), Arc::new(Settings::in_memory()));
-    let replier = Arc::new(StubReplier::default());
-    cx.new(move |cx| ReviewSession::new(host, settings, store, replier, cx))
+    cx.new(move |cx| ReviewSession::new(host, settings, store, cx))
 }
 
 pub fn wait_until(cx: &mut TestAppContext, what: &str, mut done: impl FnMut(&mut TestAppContext) -> bool) {
@@ -211,6 +172,39 @@ impl Fixture {
 
     pub fn post(&self, cx: &mut TestAppContext, id: ThreadId, text: &str) {
         self.session.update(cx, |session, cx| session.post(id, text, cx));
+    }
+
+    pub fn replying(&self, cx: &mut TestAppContext, id: ThreadId) -> bool {
+        self.session.read_with(cx, |session, _| session.is_replying(id))
+    }
+
+    pub fn wait_for_reply_end(&self, cx: &mut TestAppContext, id: ThreadId) {
+        wait_until(cx, "the reply run to end", |cx| !self.replying(cx, id));
+    }
+
+    pub fn wait_for_comment(&self, cx: &mut TestAppContext, id: ThreadId, body: &str) {
+        wait_until(cx, "the comment", |cx| {
+            self.session.update(cx, |session, cx| session.refresh_threads(cx));
+            self.thread(cx, id)
+                .is_some_and(|thread| thread.comments.iter().any(|comment| comment.body == body))
+        });
+    }
+
+    /// Answers through the MCP tool, as Claude does, once the reply run has started.
+    pub fn claude_replies(&self, cx: &mut TestAppContext, id: ThreadId, body: &str) {
+        self.claude_calls(
+            cx,
+            "reply",
+            serde_json::json!({ "threadId": id.0.to_string(), "body": body }),
+        );
+        self.wait_for_comment(cx, id, body);
+    }
+
+    pub fn claude_calls(&self, cx: &mut TestAppContext, tool: &str, args: serde_json::Value) {
+        let launched = self.claude.launches();
+        self.wait_for_launches(cx, launched.max(1));
+        let answer = self.claude.call_mcp_tool(tool, args);
+        assert_eq!(answer["ok"], true, "{answer}");
     }
 }
 

@@ -390,7 +390,7 @@ fn the_guide_tools_belong_to_a_guide_run_and_stop_after_the_guide_is_saved() {
             revisions: vec!["HEAD".into()],
             linked: Vec::new(),
             threads: Vec::new(),
-            permission: EditPermission::DontAsk,
+            edits: Some(EditPermission::DontAsk),
             notify: Arc::new(move |notice| notices.lock().unwrap().push(notice)),
         })
     };

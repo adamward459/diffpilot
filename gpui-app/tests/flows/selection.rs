@@ -1,6 +1,4 @@
-use diffpilot::testing::{
-    canned_claude, click, clipboard, drag_below, fixture, git, open_repo, wait_until_shows, write,
-};
+use diffpilot::testing::{click, clipboard, drag_below, fixture, git, open_repo, wait_until_shows, write};
 use diffpilot_core::editor::Editor;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::viewed::ViewedStore;
@@ -26,13 +24,7 @@ fn dragging_over_lines_copies_them_and_opens_the_first_one(app: &mut TestAppCont
     std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     let settings = Arc::new(Settings::in_memory());
     settings.set_editor(Some(Editor::Custom(format!("{} {{file}} {{line}}", editor.display()))));
-    let (_, cx) = open_repo(
-        app,
-        dir.path(),
-        settings,
-        Arc::new(ViewedStore::in_memory()),
-        canned_claude(),
-    );
+    let (_, cx) = open_repo(app, dir.path(), settings, Arc::new(ViewedStore::in_memory()));
     wait_until_shows(cx, "pane:hunk:docs/notes.txt:0");
 
     drag_below(cx, "pane:hunk:docs/notes.txt:0", 10.0, 30.0);

@@ -1,5 +1,4 @@
-use crate::common::{StubReplier, finding, result};
-use diffpilot::repo_view::Claude;
+use crate::common::{finding, result};
 use diffpilot::testing::{
     FakeClaude, canned_review, click, fake_claude, fixture, fixture_named, open_repo, open_workspace, press, shows,
     wait_until_shows,
@@ -11,21 +10,9 @@ use diffpilot_core::viewed::ViewedStore;
 use gpui::{TestAppContext, VisualTestContext};
 use std::sync::Arc;
 
-fn claude() -> Claude {
-    Claude {
-        replier: Arc::new(StubReplier::default()),
-    }
-}
-
 fn open(app: &mut TestAppContext, settings: Settings) -> (tempfile::TempDir, &'static mut VisualTestContext) {
     let dir = fixture();
-    let (_, cx) = open_repo(
-        app,
-        dir.path(),
-        Arc::new(settings),
-        Arc::new(ViewedStore::in_memory()),
-        claude(),
-    );
+    let (_, cx) = open_repo(app, dir.path(), Arc::new(settings), Arc::new(ViewedStore::in_memory()));
     (dir, cx)
 }
 

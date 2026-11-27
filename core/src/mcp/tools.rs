@@ -179,7 +179,7 @@ pub fn definitions() -> Vec<ToolDef> {
 /// The names this run may call.
 pub fn allowed(binding: &Binding) -> Vec<&'static str> {
     let mut names: Vec<&'static str> = mcp_tools(binding.kind).to_vec();
-    if binding.kind.edits() && binding.permission != EditPermission::DontAsk {
+    if binding.edits.is_some_and(|edit| edit != EditPermission::DontAsk) {
         names.push(APPROVE_TOOL);
     }
     names

@@ -1,4 +1,4 @@
-use diffpilot::testing::{canned_claude, click, fixture, open_repo, shows};
+use diffpilot::testing::{click, fixture, open_repo, shows};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::viewed::ViewedStore;
 use gpui::TestAppContext;
@@ -10,7 +10,7 @@ fn a_viewed_file_stays_viewed_when_the_repo_is_reopened(app: &mut TestAppContext
     let settings = Arc::new(Settings::in_memory());
     let store = Arc::new(ViewedStore::in_memory());
 
-    let (_, cx) = open_repo(app, dir.path(), settings.clone(), store.clone(), canned_claude());
+    let (_, cx) = open_repo(app, dir.path(), settings.clone(), store.clone());
     assert!(shows(cx, "sidebar:summary:0/3 viewed"));
 
     click(cx, "comparison-base");
@@ -34,7 +34,7 @@ fn a_viewed_file_stays_viewed_when_the_repo_is_reopened(app: &mut TestAppContext
     );
     assert!(shows(cx, "sidebar:is-viewed:src/staged.rs"));
 
-    let (_, cx) = open_repo(app, dir.path(), settings, store, canned_claude());
+    let (_, cx) = open_repo(app, dir.path(), settings, store);
     assert!(
         shows(cx, "sidebar:summary:1/1 viewed"),
         "the reopened repo remembers the staged comparison and the viewed file"

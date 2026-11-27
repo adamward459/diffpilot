@@ -1,4 +1,4 @@
-use diffpilot::testing::{canned_claude, click, fake_claude, fixture, open_repo_in, press, shows, type_text};
+use diffpilot::testing::{click, fake_claude, fixture, open_repo_in, press, shows, type_text};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::threads::USER_NAME;
 use diffpilot_core::viewed::ViewedStore;
@@ -17,7 +17,6 @@ fn open(
         Arc::new(Settings::in_memory()),
         Arc::new(ViewedStore::in_memory()),
         store,
-        canned_claude(),
     );
     cx
 }

@@ -249,24 +249,6 @@ impl Store {
         self.change(thread, |conn| insert_comment(conn, thread, new))
     }
 
-    /// Adds `chunk` to the streaming comment of `thread`. None when no comment is streaming.
-    pub fn append_streaming(&self, thread: ThreadId, chunk: &str, done: bool) -> Result<Option<Written<ReviewThread>>> {
-        let mut conn = self.lock();
-        let tx = conn.transaction()?;
-        let updated = tx.execute(
-            "UPDATE comments SET body = body || ?2, streaming = ?3
-             WHERE thread_id = ?1 AND streaming = 1 AND author = ?4",
-            (thread.0, chunk, !done, crate::threads::CLAUDE_NAME),
-        )?;
-        let Some(session) = session_of(&tx, thread)?.filter(|_| updated > 0) else {
-            return Ok(None);
-        };
-        let revision = bump(&tx, session)?;
-        let value = load(&tx, None, Some(thread))?.into_iter().next();
-        tx.commit()?;
-        Ok(value.map(|value| Written { value, revision }))
-    }
-
     /// Changes the text of a comment that is not streaming.
     pub fn update_comment(&self, thread: ThreadId, comment: u32, body: &str) -> Result<Option<Written<ReviewThread>>> {
         self.change(thread, |conn| {

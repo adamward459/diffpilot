@@ -55,7 +55,7 @@ impl Fixture {
             revisions: vec!["--cached".into()],
             linked: Vec::new(),
             threads,
-            permission: EditPermission::DontAsk,
+            edits: Some(EditPermission::DontAsk),
             notify: Arc::new(move |notice| notices.lock().unwrap().push(notice)),
         }
     }
@@ -379,7 +379,7 @@ fn a_token_stops_working_when_the_run_is_over() {
 
 fn ask_binding(fx: &Fixture, permission: EditPermission, requests: Arc<Mutex<Vec<PermissionRequest>>>) -> String {
     let mut binding = fx.binding(RunKind::FixComments, vec![]);
-    binding.permission = permission;
+    binding.edits = Some(permission);
     binding.notify = Arc::new(move |notice| {
         if let Notice::Permission(request) = notice {
             requests.lock().unwrap().push(request);

@@ -56,7 +56,8 @@ pub struct Binding {
     pub linked: Vec<PathBuf>,
     /// The threads this run may read and answer. Empty means every thread of the review.
     pub threads: Vec<ThreadId>,
-    pub permission: EditPermission,
+    /// How the run may edit files, None when it may not.
+    pub edits: Option<EditPermission>,
     pub notify: Arc<dyn Fn(Notice) + Send + Sync>,
 }
 
@@ -190,9 +191,9 @@ impl McpBridge {
         let is_edit = matches!(tool, "Edit" | "Write" | "MultiEdit" | "NotebookEdit");
         let binding = &bound.binding;
         let remembered =
-            binding.permission == EditPermission::AskOnce && is_edit && bound.edits_approved.load(Ordering::SeqCst);
+            binding.edits == Some(EditPermission::AskOnce) && is_edit && bound.edits_approved.load(Ordering::SeqCst);
         let allow = remembered || self.ask(binding, tool, &input, is_edit);
-        if allow && is_edit && binding.permission == EditPermission::AskOnce {
+        if allow && is_edit && binding.edits == Some(EditPermission::AskOnce) {
             bound.edits_approved.store(true, Ordering::SeqCst);
         }
         if !allow && is_edit {

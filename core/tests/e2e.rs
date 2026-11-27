@@ -555,7 +555,7 @@ fn a_reply_run_answers_one_thread_without_marking_it_fixed() {
     });
     let thread = world.comment(1, "Why is x not renamed?");
     let target = world.target(EditPermission::DontAsk);
-    let request = fix::reply_to(&target, &world.threads()[0]).unwrap();
+    let request = fix::reply_to(&target, &world.threads()[0], true).unwrap();
     let rx = world.engine.subscribe();
     let id = world.engine.submit(request).unwrap();
     let (state, _) = wait_finished(&rx, id, WITHIN);
@@ -563,6 +563,57 @@ fn a_reply_run_answers_one_thread_without_marking_it_fixed() {
     assert_eq!(world.thread(thread).comments[1].author, "Claude");
     assert!(world.thread(thread).addressed.is_none(), "an answer is not a fix");
     assert_eq!(world.engine.run(id).unwrap().kind, RunKind::Reply);
+}
+
+#[test]
+fn a_reply_run_that_made_the_change_resolves_its_thread_with_a_summary() {
+    let world = world(|work| {
+        mcp_claude(
+            work,
+            "printf 'export const count = 1;\\n' > a.ts",
+            &[call(
+                "resolve",
+                json!({ "threadId": "1", "summary": "Fixed: renamed x to count.", "files": ["a.ts"] }),
+            )],
+            "",
+        )
+    });
+    let thread = world.comment(1, "Rename x to count.");
+    let request = fix::reply_to(&world.target(EditPermission::DontAsk), &world.threads()[0], true).unwrap();
+    let rx = world.engine.subscribe();
+    let id = world.engine.submit(request).unwrap();
+    let (state, _) = wait_finished(&rx, id, WITHIN);
+    assert_eq!(state, RunState::Done);
+    let thread = world.thread(thread);
+    assert_eq!(thread.addressed.as_ref().map(|mark| mark.run), Some(id));
+    assert_eq!(thread.comments.last().unwrap().body, "Fixed: renamed x to count.");
+}
+
+#[test]
+fn a_read_only_reply_run_gets_no_edit_tools_and_asks_nothing() {
+    let world = world(|work| {
+        mcp_claude(
+            work,
+            "",
+            &[call(
+                "reply",
+                json!({ "threadId": "1", "body": "I would rename x to count." }),
+            )],
+            "",
+        )
+    });
+    world.comment(1, "Rename x to count.");
+    let request = fix::reply_to(&world.target(EditPermission::AskEach), &world.threads()[0], false).unwrap();
+    let rx = world.engine.subscribe();
+    let id = world.engine.submit(request).unwrap();
+    let (state, _) = wait_finished(&rx, id, WITHIN);
+    assert_eq!(state, RunState::Done);
+    let args = std::fs::read_to_string(out(world.work.path()).join("args.txt")).unwrap();
+    let lines: Vec<&str> = args.lines().collect();
+    let at = lines.iter().position(|arg| *arg == "--tools").unwrap();
+    assert_eq!(lines[at + 1], "Read,Grep,Glob,TodoWrite,Bash");
+    assert!(!lines.contains(&"--permission-prompt-tool"));
+    assert!(!lines.contains(&"--permission-mode"));
 }
 
 #[test]

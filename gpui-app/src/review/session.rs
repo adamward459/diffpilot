@@ -1,6 +1,4 @@
 use crate::runs::Runs;
-use diffpilot_core::cancel::CancelToken;
-use diffpilot_core::claude::Replier;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::FileDiff;
 use diffpilot_core::fix::{self, Target};
@@ -26,7 +24,7 @@ pub const FIX_NEEDS_WORKING_TREE: &str =
 pub const NOTHING_TO_FIX_MESSAGE: &str = "There is no open comment for Claude to fix.";
 pub const RUNS_UNAVAILABLE: &str = "Claude runs are not available here.";
 const PAST_RUN_WINDOW: usize = 200;
-pub const NO_REPLY_MESSAGE: &str = "Claude did not reply. Check that the claude command is installed, then ask again.";
+pub const NO_REPLY_MESSAGE: &str = "Claude did not reply. Open the Claude area to see what happened, then ask again.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreadChange {
@@ -63,19 +61,14 @@ impl ReviewHost {
     }
 }
 
-struct Active {
-    cancel: CancelToken,
-    _task: Task<()>,
-}
-
 pub struct ReviewSession {
     host: ReviewHost,
     settings: Arc<Settings>,
-    replier: Arc<dyn Replier>,
     store: ThreadStore,
     setup: ReviewSetup,
     review_threads: Vec<ThreadId>,
-    replies: HashMap<ThreadId, Active>,
+    /// Reply runs of this session, with their thread and how many comments it had when the run was asked for.
+    asks: HashMap<RunId, (ThreadId, usize)>,
     engine: Option<RunEngine>,
     current: Option<Run>,
     queued: Vec<Run>,
@@ -96,7 +89,6 @@ impl EventEmitter<ReviewEvent> for ReviewSession {}
 
 impl Drop for ReviewSession {
     fn drop(&mut self) {
-        self.replies.values().for_each(|active| active.cancel.cancel());
         if let Some(engine) = &self.engine {
             for id in &self.submitted {
                 engine.stop(*id);
@@ -106,13 +98,7 @@ impl Drop for ReviewSession {
 }
 
 impl ReviewSession {
-    pub fn new(
-        host: ReviewHost,
-        settings: Arc<Settings>,
-        store: Arc<Store>,
-        replier: Arc<dyn Replier>,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(host: ReviewHost, settings: Arc<Settings>, store: Arc<Store>, cx: &mut Context<Self>) -> Self {
         let setup = Self::saved_setup(&settings, host.repo.as_deref());
         let threads = ThreadStore::open(store, &Self::thread_key(&host)).unwrap_or_default();
         let review_threads = threads
@@ -123,11 +109,10 @@ impl ReviewSession {
         let mut this = Self {
             host,
             settings,
-            replier,
             store: threads,
             setup,
             review_threads,
-            replies: HashMap::new(),
+            asks: HashMap::new(),
             engine: None,
             current: None,
             queued: Vec::new(),
@@ -220,8 +205,16 @@ impl ReviewSession {
         counts
     }
 
+    /// A reply run for the thread is waiting or going.
     pub fn is_replying(&self, id: ThreadId) -> bool {
-        self.replies.contains_key(&id)
+        self.reply_runs(id).next().is_some()
+    }
+
+    fn reply_runs(&self, id: ThreadId) -> impl Iterator<Item = &Run> {
+        self.current
+            .iter()
+            .chain(&self.queued)
+            .filter(move |run| run.kind == RunKind::Reply && !run.state.is_finished() && run.threads.contains(&id))
     }
 
     pub fn file_count(&self) -> usize {
@@ -325,8 +318,7 @@ impl ReviewSession {
         cx.notify();
     }
 
-    pub fn use_settings(&mut self, replier: Arc<dyn Replier>, cx: &mut Context<Self>) {
-        self.replier = replier;
+    pub fn use_settings(&mut self, cx: &mut Context<Self>) {
         let model = Some(self.settings.reviews_model());
         if self.setup.model != model {
             self.setup.model = model;
@@ -385,6 +377,11 @@ impl ReviewSession {
         };
         match run.kind {
             RunKind::Review => self.start_review(cx),
+            RunKind::Reply => {
+                if let Some(id) = run.threads.first().copied() {
+                    self.ask_claude(id, cx);
+                }
+            }
             RunKind::FixComments => {
                 let open = self.fixable();
                 let again: Vec<ThreadId> = run.threads.iter().copied().filter(|id| open.contains(id)).collect();
@@ -398,9 +395,9 @@ impl ReviewSession {
     }
 
     pub fn can_run_again(&self) -> bool {
-        self.current
-            .as_ref()
-            .is_some_and(|run| run.state.is_finished() && matches!(run.kind, RunKind::Review | RunKind::FixComments))
+        self.current.as_ref().is_some_and(|run| {
+            run.state.is_finished() && matches!(run.kind, RunKind::Review | RunKind::FixComments | RunKind::Reply)
+        })
     }
 
     pub fn current(&self) -> Option<&Run> {
@@ -565,49 +562,76 @@ impl ReviewSession {
         }
     }
 
+    /// Queues a reply run for the thread. Claude answers with the MCP tools, so its reply shows when it is written.
     pub fn ask_claude(&mut self, id: ThreadId, cx: &mut Context<Self>) {
-        let Some(thread) = self.store.begin_claude_reply(id) else {
+        self.refresh_threads(cx);
+        if self.is_replying(id) {
+            return;
+        }
+        let Some(thread) = self.store.get(id).cloned() else {
             return;
         };
-        self.thread_updated(id, cx);
-        let cancel = CancelToken::new();
-        let chunks = self.replier.reply(&thread, &cancel);
-        let task = cx.spawn(async move |this, cx| {
-            while let Ok(chunk) = chunks.recv().await {
-                if this
-                    .update(cx, |session, cx| session.append_reply(id, &chunk, cx))
-                    .is_err()
-                {
-                    return;
-                }
+        let (Some(repo), Some(engine)) = (self.host.repo.clone(), Self::global_engine(cx)) else {
+            let reason = if self.host.repo.is_none() {
+                NO_REPO_MESSAGE
+            } else {
+                RUNS_UNAVAILABLE
+            };
+            return self.claude_says(id, reason, cx);
+        };
+        if let Some(reason) = cx.global::<Runs>().unavailable() {
+            let reason = reason.to_string();
+            return self.claude_says(id, &reason, cx);
+        }
+        let target = Target {
+            repo,
+            session: self.session_key(),
+            revisions: self.host.comparison.revisions(),
+            model: self.settings.model_for(RunKind::Reply),
+            edit_permission: self.settings.edit_permission(),
+        };
+        let Ok(request) = fix::reply_to(&target, &thread, self.edit_blocker().is_none()) else {
+            return;
+        };
+        match self.submit(&engine, request, cx) {
+            Ok(run) => {
+                self.asks.insert(run, (id, thread.comments.len()));
+                self.thread_updated(id, cx);
+                self.announce_run(cx);
             }
-            this.update(cx, |session, cx| session.finish_reply(id, cx)).ok();
-        });
-        self.replies.insert(id, Active { cancel, _task: task });
+            Err(message) => self.claude_says(id, &message, cx),
+        }
     }
 
-    fn append_reply(&mut self, id: ThreadId, chunk: &str, cx: &mut Context<Self>) {
-        if self.store.append_claude(id, chunk, false).is_some() {
+    fn claude_says(&mut self, id: ThreadId, text: &str, cx: &mut Context<Self>) {
+        if self.store.add_claude_comment(id, text).is_some() {
             self.thread_updated(id, cx);
         }
     }
 
-    fn finish_reply(&mut self, id: ThreadId, cx: &mut Context<Self>) {
-        self.replies.remove(&id);
-        let silent = self
-            .store
-            .get(id)
-            .and_then(|thread| {
-                thread
-                    .comments
-                    .iter()
-                    .rev()
-                    .find(|c| c.author == CLAUDE_NAME && c.is_streaming)
-            })
-            .is_some_and(|comment| comment.body.is_empty());
-        let fallback = if silent { NO_REPLY_MESSAGE } else { "" };
-        if self.store.append_claude(id, fallback, true).is_some() {
+    /// A reply run that ended without a word from Claude leaves a note in the thread, unless the reviewer stopped it.
+    fn finish_reply(&mut self, run: RunId, state: RunState, cx: &mut Context<Self>) {
+        let Some((id, before)) = self.asks.remove(&run) else {
+            return;
+        };
+        self.refresh_threads(cx);
+        let Some(thread) = self.store.get(id) else {
+            return;
+        };
+        let answered = thread.comments.iter().skip(before).any(|c| c.author == CLAUDE_NAME);
+        if answered || state == RunState::Stopped {
             self.thread_updated(id, cx);
+        } else {
+            self.claude_says(id, NO_REPLY_MESSAGE, cx);
+        }
+    }
+
+    fn stop_replies(&mut self, id: ThreadId) {
+        let runs: Vec<RunId> = self.reply_runs(id).map(|run| run.id).collect();
+        if let Some(engine) = &self.engine {
+            for run in runs {
+                engine.stop(run);
+            }
         }
     }
 
@@ -649,7 +673,7 @@ impl ReviewSession {
         self.announce_run(cx);
     }
 
-    /// Threads Claude can fix now. Threads in the running or a queued fix run are left out.
+    /// Threads Claude can fix now. Threads in the running or a queued fix or reply run are left out.
     pub fn fixable(&self) -> Vec<ThreadId> {
         let taken = self.taken_by_fix();
         self.store
@@ -664,7 +688,7 @@ impl ReviewSession {
             .iter()
             .filter(|run| !run.state.is_finished())
             .chain(&self.queued)
-            .filter(|run| run.kind == RunKind::FixComments)
+            .filter(|run| matches!(run.kind, RunKind::FixComments | RunKind::Reply))
             .flat_map(|run| run.threads.iter().copied())
             .collect()
     }
@@ -694,6 +718,12 @@ impl ReviewSession {
         if self.host.repo.is_none() {
             return Some(NO_REPO_MESSAGE.into());
         }
+        self.edit_blocker().map(String::from)
+    }
+
+    /// Why Claude may not edit files from this review: it edits the working tree, and only the Don't ask setting
+    /// works for now.
+    fn edit_blocker(&self) -> Option<&'static str> {
         let on_working_tree = matches!(
             self.host.comparison,
             Comparison::WorkingTree
@@ -703,10 +733,10 @@ impl ReviewSession {
                 }
         );
         if !on_working_tree {
-            return Some(FIX_NEEDS_WORKING_TREE.into());
+            return Some(FIX_NEEDS_WORKING_TREE);
         }
         if self.settings.edit_permission() != EditPermission::DontAsk {
-            return Some(FIX_NEEDS_DONT_ASK.into());
+            return Some(FIX_NEEDS_DONT_ASK);
         }
         None
     }
@@ -792,6 +822,7 @@ impl ReviewSession {
         };
         let mut threads_changed = false;
         let mut touched = false;
+        let mut finished = Vec::new();
         for event in &events {
             match event {
                 RunEvent::ThreadsChanged { session, .. } => threads_changed |= *session == self.store.session(),
@@ -815,6 +846,7 @@ impl ReviewSession {
                         }
                         self.last = Some(found.summary());
                     }
+                    finished.push((*run, *state));
                     cx.emit(ReviewEvent::RunFinished(*state));
                 }
                 RunEvent::Queued { run } | RunEvent::Updated { run } | RunEvent::Log { run, .. }
@@ -831,6 +863,9 @@ impl ReviewSession {
         if touched {
             self.sync_runs(&engine);
             self.announce_run(cx);
+        }
+        for (run, state) in finished {
+            self.finish_reply(run, state, cx);
         }
     }
 
@@ -906,9 +941,7 @@ impl ReviewSession {
         if self.store.get(id).is_none() {
             return;
         }
-        if let Some(active) = self.replies.remove(&id) {
-            active.cancel.cancel();
-        }
+        self.stop_replies(id);
         if self.store.set_status(id, ThreadStatus::Resolved).is_some() {
             self.review_threads.retain(|known| *known != id);
             cx.emit(ReviewEvent::ThreadsChanged(ThreadChange::Removed(id)));
@@ -920,9 +953,7 @@ impl ReviewSession {
         if self.store.get(id).is_none() {
             return;
         }
-        if let Some(active) = self.replies.remove(&id) {
-            active.cancel.cancel();
-        }
+        self.stop_replies(id);
         self.store.remove(id);
         self.review_threads.retain(|known| *known != id);
         cx.emit(ReviewEvent::ThreadsChanged(ThreadChange::Removed(id)));

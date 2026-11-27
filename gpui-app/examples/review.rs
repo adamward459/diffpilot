@@ -8,12 +8,12 @@
 use diffpilot::bench::{Counting, Meter, live_bytes};
 use diffpilot::review::{PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession, ThreadCard, ThreadChange};
 use diffpilot::runs::Runs;
-use diffpilot::testing::fake_engine;
+use diffpilot::testing::{FakeClaude, fake_engine};
 use diffpilot_core::changes::FileStatus;
-use diffpilot_core::claude::{Replier, ScriptedReplier};
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{DiffLine, FileDiff, Hunk, LineKind};
 use diffpilot_core::review::{Finding, ReviewResult, Severity};
+use diffpilot_core::run::{RunKind, RunState};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::Store;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
@@ -25,7 +25,6 @@ use gpui::{
 use gpui_component::{ActiveTheme, Root, h_flex, v_flex};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -196,12 +195,45 @@ fn demo_review() -> ReviewResult {
     }
 }
 
-fn install_fake_claude(cx: &mut App, seconds: f64) {
+const DEMO_REPLY: &str = "I read the change around this line. The `onDismiss` callback now runs after the sheet animates out, so a caller that reads layout inside it sees the final frame. I would keep it, and add a test that dismisses twice in a row.";
+
+/// With `seconds`, each run ends that long after it starts. Without, runs wait for `FakeClaude::finish`.
+fn install_fake_claude(cx: &mut App, seconds: Option<f64>) -> &'static FakeClaude {
     let claude = fake_engine();
     claude.review_with(&demo_review());
-    claude.finish_after(seconds);
+    if let Some(seconds) = seconds {
+        claude.finish_after(seconds);
+    }
     cx.set_global(Runs::with_engine(claude.engine()));
-    Box::leak(Box::new(claude));
+    Box::leak(Box::new(claude))
+}
+
+/// Answers the reply run of `id` through the MCP tool, as Claude would, once that run has started.
+async fn answer_when_asked(
+    session: &Entity<ReviewSession>,
+    claude: &FakeClaude,
+    id: ThreadId,
+    body: &str,
+    cx: &mut AsyncApp,
+) {
+    loop {
+        let started = session
+            .read_with(cx, |session, _| {
+                session.current().is_some_and(|run| {
+                    run.kind == RunKind::Reply && run.state == RunState::Running && run.threads.contains(&id)
+                })
+            })
+            .unwrap_or(true);
+        if started {
+            break;
+        }
+        cx.background_executor().timer(Duration::from_millis(50)).await;
+    }
+    cx.background_executor().timer(Duration::from_millis(300)).await;
+    claude.call_mcp_tool(
+        "reply",
+        serde_json::json!({ "threadId": id.0.to_string(), "body": body }),
+    );
 }
 
 fn review_seconds() -> f64 {
@@ -211,16 +243,15 @@ fn review_seconds() -> f64 {
         .unwrap_or(1.5)
 }
 
-fn session(cx: &mut App, replier: Arc<dyn Replier>) -> Entity<ReviewSession> {
-    let mut host = ReviewHost::new(
-        Some(PathBuf::from("/tmp/diffpilot-demo")),
-        Comparison::checked_out("main", true),
-    );
+/// Runs start `claude` in the repo folder, so it has to exist.
+fn session(cx: &mut App, store: Arc<Store>) -> Entity<ReviewSession> {
+    let repo = std::env::temp_dir().join("diffpilot-demo");
+    std::fs::create_dir_all(&repo).expect("make the demo folder");
+    let mut host = ReviewHost::new(Some(repo), Comparison::checked_out("main", true));
     host.branch_name = Some("feature".into());
     host.files = Arc::from([Arc::new(archive_file())]);
     host.visible_path = Some("docs/archive.md".into());
-    let store = Arc::new(Store::open_in_memory().expect("an in-memory store opens"));
-    cx.new(|cx| ReviewSession::new(host, Arc::new(Settings::in_memory()), store, replier, cx))
+    cx.new(|cx| ReviewSession::new(host, Arc::new(Settings::in_memory()), store, cx))
 }
 
 fn open_gallery(
@@ -250,8 +281,8 @@ fn open_gallery(
 }
 
 fn run_demo(cx: &mut App) {
-    install_fake_claude(cx, review_seconds());
-    let session = session(cx, Arc::new(ScriptedReplier::default()));
+    let claude = install_fake_claude(cx, Some(review_seconds()));
+    let session = session(cx, claude.store());
     let (_, gallery) = open_gallery(cx, false, session.clone());
     let flag = |name: &str| std::env::var(name).is_ok_and(|value| value == "1");
     if flag("DIFFPILOT_DEMO_POPOVER") {
@@ -262,11 +293,15 @@ fn run_demo(cx: &mut App) {
     if flag("DIFFPILOT_DEMO_START") {
         session.update(cx, |session, cx| session.start_review(cx));
     }
-    session.update(cx, |session, cx| {
+    let asked = session.update(cx, |session, cx| {
         let id = session.create_thread(ThreadAnchor::line("docs/archive.md", Side::New, 3), cx);
         session.post(id, "@claude is this line needed?", cx);
         session.create_thread(ThreadAnchor::file("docs/archive.md"), cx);
+        id
     });
+    let answering = session.clone();
+    cx.spawn(async move |cx| answer_when_asked(&answering, claude, asked, DEMO_REPLY, cx).await)
+        .detach();
     cx.activate(true);
 }
 
@@ -286,16 +321,12 @@ async fn bench(cx: &mut AsyncApp) {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(240);
-    let replier = Arc::new(ScriptedReplier {
-        text: long_reply(words),
-        interval: Duration::from_millis(33),
-    });
-    let (window, gallery, session) = cx
+    let (window, gallery, session, claude) = cx
         .update(|cx| {
-            install_fake_claude(cx, 0.0);
-            let session = session(cx, replier);
+            let claude = install_fake_claude(cx, None);
+            let session = session(cx, claude.store());
             let (window, gallery) = open_gallery(cx, true, session.clone());
-            (window, gallery, session)
+            (window, gallery, session, claude)
         })
         .expect("app is alive");
     let draw = |cx: &mut AsyncApp| {
@@ -337,6 +368,7 @@ async fn bench(cx: &mut AsyncApp) {
         .expect("app is alive");
     let mut stream = Vec::new();
     let mut chars = 0;
+    let mut answered_at = None;
     let mut meter = Meter::start();
     while session
         .read_with(cx, |session, _| session.is_replying(id))
@@ -345,6 +377,22 @@ async fn bench(cx: &mut AsyncApp) {
         cx.background_executor().timer(Duration::from_millis(33)).await;
         stream.push(draw(cx));
         meter.sample();
+        let running = session
+            .read_with(cx, |session, _| {
+                session.current().is_some_and(|run| run.state == RunState::Running)
+            })
+            .expect("app is alive");
+        match answered_at {
+            None if running && stream.len() >= 10 => {
+                claude.call_mcp_tool(
+                    "reply",
+                    serde_json::json!({ "threadId": id.0.to_string(), "body": long_reply(words) }),
+                );
+                answered_at = Some(stream.len());
+            }
+            Some(at) if stream.len() == at + 30 => claude.finish(),
+            _ => {}
+        }
         chars = session
             .read_with(cx, |session, _| {
                 session
@@ -444,7 +492,7 @@ async fn reopen_retained(cx: &mut AsyncApp) -> i64 {
     for cycle in 0..=REOPEN_CYCLES {
         let window = cx
             .update(|cx| {
-                let session = session(cx, Arc::new(ScriptedReplier::default()));
+                let session = session(cx, Arc::new(Store::open_in_memory().expect("an in-memory store opens")));
                 session.update(cx, |session, cx| {
                     let id = session.create_thread(ThreadAnchor::line("docs/archive.md", Side::New, 3), cx);
                     session.post(id, "Is this line needed?", cx);

@@ -86,7 +86,7 @@ fn the_binary_speaks_mcp_over_stdio_and_forwards_to_the_app() {
         revisions: vec!["HEAD".into()],
         linked: Vec::new(),
         threads: vec![thread],
-        permission: EditPermission::DontAsk,
+        edits: Some(EditPermission::DontAsk),
         notify: Arc::new(|_| {}),
     });
 

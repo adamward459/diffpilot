@@ -1,5 +1,5 @@
 use diffpilot::settings::Section;
-use diffpilot::testing::{canned_claude, click, fixture, open_repo, open_settings, shows};
+use diffpilot::testing::{click, fixture, open_repo, open_settings, shows};
 use diffpilot_core::diff::DiffMode;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::viewed::ViewedStore;
@@ -17,7 +17,7 @@ fn the_diff_mode_chosen_in_settings_applies_to_every_session_of_a_repo_opened_af
 
     let dir = fixture();
     let store = Arc::new(ViewedStore::in_memory());
-    let (_, cx) = open_repo(app, dir.path(), settings.clone(), store, canned_claude());
+    let (_, cx) = open_repo(app, dir.path(), settings.clone(), store);
     assert!(
         shows(cx, "diff-mode:Split:selected"),
         "a repo opened now starts in Split"

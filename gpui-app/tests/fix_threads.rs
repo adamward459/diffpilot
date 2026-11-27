@@ -87,7 +87,7 @@ fn world(cx: &mut TestAppContext, comparison: Comparison) -> World {
     host.files = Arc::from([Arc::new(file())]);
     let session = {
         let settings = settings.clone();
-        cx.new(move |cx| ReviewSession::new(host, settings, store, Arc::new(StubReplier::default()), cx))
+        cx.new(move |cx| ReviewSession::new(host, settings, store, cx))
     };
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let sink = events.clone();
@@ -299,7 +299,7 @@ async fn run_again_after_a_fix_with_every_thread_resolved_starts_nothing(cx: &mu
 }
 
 #[gpui::test]
-async fn a_guide_run_is_not_part_of_the_review_session(cx: &mut TestAppContext) {
+async fn a_guide_run_shows_as_the_sessions_run_without_counting_as_a_review_or_a_fix(cx: &mut TestAppContext) {
     let w = world(cx, working_tree());
     let key = w.session.read_with(cx, |s, _| s.session_key());
     let engine = cx.update(|cx| cx.global::<Runs>().engine().clone());
@@ -325,20 +325,31 @@ async fn a_guide_run_is_not_part_of_the_review_session(cx: &mut TestAppContext) 
             s.can_run_again(),
         )
     });
-    assert_eq!((current, busy, last, past, can_again), (None, false, None, 0, false));
-    assert_eq!(w.session.read_with(cx, |s, cx| s.fix_blocker(cx)), None);
+    assert_eq!((current, busy, last, past, can_again), (Some(id), true, None, 1, false));
+    assert_eq!(
+        w.session.read_with(cx, |s, cx| s.fix_blocker(cx)),
+        None,
+        "a guide is not a fix"
+    );
+    assert!(
+        w.session
+            .read_with(cx, |s, _| s.review_run().is_none() && s.fix_run().is_none())
+    );
 
     std::fs::write(w.out("go"), "").unwrap();
     wait_until(cx, "the guide to end", |_| {
         engine.run(id).is_some_and(|run| run.state.is_finished())
     });
     cx.run_until_parked();
+    assert!(w.session.read_with(cx, |s, _| {
+        s.current().is_some_and(|run| run.id == id) && s.last_run().is_some_and(|run| run.id == id)
+    }));
     assert!(
-        w.session
-            .read_with(cx, |s, _| s.current().is_none() && s.last_run().is_none())
+        !w.session.read_with(cx, |s, _| s.can_run_again()),
+        "the guide has its own Write Guide"
     );
     assert!(
-        !w.events
+        w.events
             .lock()
             .unwrap()
             .iter()

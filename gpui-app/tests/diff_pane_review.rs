@@ -4,9 +4,7 @@ use diffpilot::diff_pane::rows::BlockId;
 use diffpilot::diff_pane::rows::RowKind;
 use diffpilot::review::{ReviewHost, ReviewSession, metrics};
 use diffpilot::testing::{FakeClaude, fake_claude};
-use diffpilot_core::cancel::CancelToken;
 use diffpilot_core::changes::FileStatus;
-use diffpilot_core::claude::Replier;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{DiffLine, DiffMode, FileDiff, Hunk, LineKind};
 use diffpilot_core::review::{Finding, ReviewResult, Severity};
@@ -14,27 +12,8 @@ use diffpilot_core::settings::Settings;
 use diffpilot_core::threads::{ReviewThread, Side, ThreadAnchor, ThreadId};
 use gpui::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext, point, px, size};
 use gpui_component::Root;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
-
-#[derive(Default)]
-struct Chunks(Mutex<Vec<async_channel::Sender<String>>>);
-
-impl Chunks {
-    fn send(&self, chunk: &str) {
-        for sender in self.0.lock().unwrap().iter() {
-            sender.send_blocking(chunk.into()).unwrap();
-        }
-    }
-}
-
-impl Replier for Chunks {
-    fn reply(&self, _: &ReviewThread, _: &CancelToken) -> async_channel::Receiver<String> {
-        let (sender, receiver) = async_channel::unbounded();
-        self.0.lock().unwrap().push(sender);
-        receiver
-    }
-}
 
 fn file(path: &str, lines: usize) -> FileDiff {
     let mut diff = FileDiff::new(path, FileStatus::Modified);
@@ -78,8 +57,7 @@ fn review() -> ReviewResult {
 struct Opened {
     pane: Entity<DiffPane>,
     session: Entity<ReviewSession>,
-    replier: Arc<Chunks>,
-    _claude: FakeClaude,
+    claude: FakeClaude,
     _repo: tempfile::TempDir,
 }
 
@@ -92,13 +70,11 @@ fn open(cx: &mut TestAppContext) -> (Opened, &mut VisualTestContext) {
     claude.review_with(&review());
     claude.finish();
     let repo = tempfile::tempdir().unwrap();
-    let replier = Arc::new(Chunks::default());
     let mut host = ReviewHost::new(Some(repo.path().to_path_buf()), Comparison::checked_out("main", true));
     host.branch_name = Some("feature".into());
     let session = {
-        let replier = replier.clone();
         let store = claude.store();
-        cx.new(move |cx| ReviewSession::new(host, Arc::new(Settings::in_memory()), store, replier, cx))
+        cx.new(move |cx| ReviewSession::new(host, Arc::new(Settings::in_memory()), store, cx))
     };
     let mut pane = None;
     let handle = cx.add_window({
@@ -120,8 +96,7 @@ fn open(cx: &mut TestAppContext) -> (Opened, &mut VisualTestContext) {
         Opened {
             pane,
             session,
-            replier,
-            _claude: claude,
+            claude,
             _repo: repo,
         },
         cx,
@@ -132,6 +107,15 @@ fn draw(pane: &Entity<DiffPane>, cx: &mut VisualTestContext) {
     let pane = pane.clone();
     cx.draw(point(px(0.0), px(0.0)), size(px(900.0), px(600.0)), move |_, _| pane);
     cx.run_until_parked();
+}
+
+fn wait_until(cx: &mut VisualTestContext, what: &str, mut done: impl FnMut(&mut VisualTestContext) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !done(cx) {
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        std::thread::sleep(Duration::from_millis(20));
+        cx.run_until_parked();
+    }
 }
 
 fn row_height(opened: &Opened, cx: &mut VisualTestContext, id: ThreadId) -> f32 {
@@ -383,8 +367,9 @@ fn the_session_learns_the_files_and_the_top_file(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_streamed_reply_grows_its_row_and_the_content_in_view_stays_put(cx: &mut TestAppContext) {
+fn claudes_reply_grows_its_row_and_the_content_in_view_stays_put(cx: &mut TestAppContext) {
     let (opened, cx) = open(cx);
+    opened.claude.hold();
     let id = opened.session.update(cx, |session, cx| {
         session.create_thread(ThreadAnchor::line("a.ts", Side::New, 1), cx)
     });
@@ -393,7 +378,7 @@ fn a_streamed_reply_grows_its_row_and_the_content_in_view_stays_put(cx: &mut Tes
     opened
         .session
         .update(cx, |session, cx| session.post(id, "@claude why?", cx));
-    cx.run_until_parked();
+    opened.claude.wait_for_launches(cx, 1);
     draw(&opened.pane, cx);
 
     opened.pane.update(cx, |pane, cx| pane.reveal("b.ts", cx));
@@ -409,29 +394,29 @@ fn a_streamed_reply_grows_its_row_and_the_content_in_view_stays_put(cx: &mut Tes
     let (row, offset, scroll) = view(cx);
     let height = row_height(&opened, cx, id);
 
-    let mut previous = height;
-    for chunk in 0..8 {
-        opened.replier.send(&format!(
-            "{chunk}: {}",
-            "a long answer that wraps across lines ".repeat(5)
-        ));
-        cx.run_until_parked();
-        let now = row_height(&opened, cx, id);
-        assert!(now >= previous);
-        previous = now;
-        let (_, offset_now, scroll_now) = view(cx);
-        assert_eq!(offset_now, offset, "the row under the viewport top does not move");
-        assert_eq!(
-            scroll_now - scroll,
-            now - height,
-            "the scroll follows the thread's growth"
-        );
-    }
+    let answer = opened.claude.call_mcp_tool(
+        "reply",
+        serde_json::json!({
+            "threadId": id.0.to_string(),
+            "body": "a long answer that wraps across lines ".repeat(40),
+        }),
+    );
+    assert_eq!(answer["ok"], true, "{answer}");
+    wait_until(cx, "the reply to land", |cx| row_height(&opened, cx, id) > height);
+    let now = row_height(&opened, cx, id);
+    let (_, offset_now, scroll_now) = view(cx);
+    assert_eq!(offset_now, offset, "the row under the viewport top does not move");
+    assert_eq!(
+        scroll_now - scroll,
+        now - height,
+        "the scroll follows the thread's growth"
+    );
     assert!(
-        previous > height + 2.0 * metrics::LINE,
-        "the reply made the row taller: {height} to {previous}"
+        now > height + 2.0 * metrics::LINE,
+        "the reply made the row taller: {height} to {now}"
     );
     assert_eq!(view(cx).0, row, "still the same row at the top");
+    opened.claude.finish();
 }
 
 #[gpui::test]

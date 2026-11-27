@@ -1,5 +1,4 @@
-use crate::common::{StubReplier, finding, result};
-use diffpilot::repo_view::Claude;
+use crate::common::{finding, result};
 use diffpilot::testing::{
     click, fake_claude, fixture, open_repo, open_repo_in, press, shows, type_text, wait_until_shows,
 };
@@ -22,16 +21,11 @@ fn a_comment_a_review_and_a_reply_end_up_as_threads_in_the_pane(app: &mut TestAp
         ],
     ));
     fake.finish();
-    let replier = Arc::new(StubReplier::default());
-    let claude = Claude {
-        replier: replier.clone(),
-    };
     let (_, cx) = open_repo(
         app,
         dir.path(),
         Arc::new(Settings::in_memory()),
         Arc::new(ViewedStore::in_memory()),
-        claude,
     );
 
     click(cx, "sidebar:row:docs/committed.md");
@@ -65,6 +59,8 @@ fn a_comment_a_review_and_a_reply_end_up_as_threads_in_the_pane(app: &mut TestAp
     click(cx, "sidebar:row:base.txt");
     assert!(shows(cx, "finding:Edited"), "the pane shows the finding on the line");
 
+    fake.hold();
+    fake.end_without_review();
     click(cx, "thread:reply:Edited");
     type_text(cx, "@claude is this really needed?");
     press(cx, "cmd-enter");
@@ -72,16 +68,25 @@ fn a_comment_a_review_and_a_reply_end_up_as_threads_in_the_pane(app: &mut TestAp
         cx,
         &format!("comment:{USER_NAME}:@claude is this really needed?")
     ));
-    assert_eq!(replier.asked(), 1);
-
-    replier.send("Yes, ");
     assert!(
-        shows(cx, &format!("comment:{CLAUDE_NAME}:Yes, ")),
-        "the reply streams in"
+        shows(cx, &format!("comment:{CLAUDE_NAME}:")),
+        "the thread shows that Claude is on it"
     );
-    replier.send("the line changed.");
-    replier.finish();
-    assert!(shows(cx, &format!("comment:{CLAUDE_NAME}:Yes, the line changed.")));
+    fake.wait_for_launches(cx, 2);
+    wait_until_shows(cx, "claude:status:Reply · running a command");
+
+    let listed = fake.call_mcp_tool("list_threads", serde_json::json!({}));
+    let threads = listed["result"]["threads"].as_array().expect("the run's threads");
+    assert_eq!(threads.len(), 1, "a reply run sees only its thread: {listed}");
+    assert_eq!(threads[0]["title"], "Edited");
+    let answer = fake.call_mcp_tool(
+        "reply",
+        serde_json::json!({ "threadId": threads[0]["id"], "body": "Yes, the line changed." }),
+    );
+    assert_eq!(answer["ok"], true, "{answer}");
+    wait_until_shows(cx, &format!("comment:{CLAUDE_NAME}:Yes, the line changed."));
+    fake.finish();
+    wait_until_shows(cx, "claude:status:Reply finished · 0 comments · 3 tool calls");
 }
 
 #[gpui::test]
@@ -89,16 +94,12 @@ fn comments_a_running_review_writes_become_threads_and_the_next_review_replaces_
     let dir = fixture();
     let fake = fake_claude(app);
     fake.hold();
-    let claude = Claude {
-        replier: Arc::new(StubReplier::default()),
-    };
     let (_, cx) = open_repo_in(
         app,
         dir.path(),
         Arc::new(Settings::in_memory()),
         Arc::new(ViewedStore::in_memory()),
         fake.store(),
-        claude,
     );
 
     click(cx, "sidebar:row:docs/committed.md");
@@ -151,16 +152,12 @@ fn a_review_that_only_comments_replaces_the_old_findings(app: &mut TestAppContex
         ],
     ));
     fake.finish();
-    let claude = Claude {
-        replier: Arc::new(StubReplier::default()),
-    };
     let (_, cx) = open_repo_in(
         app,
         dir.path(),
         Arc::new(Settings::in_memory()),
         Arc::new(ViewedStore::in_memory()),
         fake.store(),
-        claude,
     );
     click(cx, "review:open");
     click(cx, "review:start");
@@ -196,15 +193,11 @@ fn the_thread_arrows_step_through_the_threads(app: &mut TestAppContext) {
         ],
     ));
     fake.finish();
-    let claude = Claude {
-        replier: Arc::new(StubReplier::default()),
-    };
     let (_, cx) = open_repo(
         app,
         dir.path(),
         Arc::new(Settings::in_memory()),
         Arc::new(ViewedStore::in_memory()),
-        claude,
     );
     click(cx, "review:open");
     click(cx, "review:start");

@@ -1,4 +1,4 @@
-use diffpilot::testing::{canned_claude, click, fixture, open_repo, wait_until_shows};
+use diffpilot::testing::{click, fixture, open_repo, wait_until_shows};
 use diffpilot_core::editor::Editor;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::viewed::ViewedStore;
@@ -22,13 +22,7 @@ fn the_open_in_editor_button_starts_the_editor_on_the_file(app: &mut TestAppCont
     let settings = Arc::new(Settings::in_memory());
     settings.set_editor(Some(Editor::Custom(format!("{} {{file}} {{line}}", editor.display()))));
 
-    let (_, cx) = open_repo(
-        app,
-        dir.path(),
-        settings,
-        Arc::new(ViewedStore::in_memory()),
-        canned_claude(),
-    );
+    let (_, cx) = open_repo(app, dir.path(), settings, Arc::new(ViewedStore::in_memory()));
     wait_until_shows(cx, "pane:open-in-editor:docs/committed.md");
     click(cx, "pane:open-in-editor:docs/committed.md");
 

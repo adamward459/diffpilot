@@ -110,6 +110,8 @@ pub struct RunRequest {
     pub linked: Vec<PathBuf>,
     pub json_schema: Option<String>,
     pub edit_permission: EditPermission,
+    /// Keeps a run of a kind that edits from editing, for example a reply on a comparison without the working tree.
+    pub read_only: bool,
     pub extra_arguments: Vec<String>,
 }
 
@@ -127,8 +129,14 @@ impl RunRequest {
             linked: Vec::new(),
             json_schema: None,
             edit_permission: EditPermission::default(),
+            read_only: false,
             extra_arguments: Vec::new(),
         }
+    }
+
+    /// How the run may edit files, or None when it may not.
+    pub fn edits(&self) -> Option<EditPermission> {
+        (self.kind.edits() && !self.read_only).then_some(self.edit_permission)
     }
 
     /// A review that returns its findings as structured output.
@@ -290,7 +298,7 @@ impl RunEngine {
         if request.kind == RunKind::Guide && !inner.has_mcp() {
             return Err(EngineError::GuideNeedsMcp);
         }
-        ToolPolicy::new(request.kind, request.edit_permission, inner.has_mcp())?;
+        ToolPolicy::new(request.kind, request.edits(), inner.has_mcp())?;
         let session = inner.config.store.session(&request.session)?;
         let id = inner.config.store.insert_run(session, request.kind, &request.title)?;
         let mut run = Run::new(
@@ -489,7 +497,7 @@ impl Inner {
             revisions: request.revisions.clone(),
             linked: request.linked.clone(),
             threads: request.threads.clone(),
-            permission: request.edit_permission,
+            edits: request.edits(),
             notify: Arc::new(move |notice| {
                 if let Some(inner) = weak.upgrade() {
                     inner.notice(id, session, notice);
@@ -611,7 +619,7 @@ impl Inner {
         let Some(binary) = self.claude() else {
             return Ending::Failed(EngineError::ClaudeNotFound.to_string());
         };
-        let policy = match ToolPolicy::new(request.kind, request.edit_permission, self.has_mcp()) {
+        let policy = match ToolPolicy::new(request.kind, request.edits(), self.has_mcp()) {
             Ok(policy) => policy,
             Err(error) => return Ending::Failed(error.to_string()),
         };
@@ -626,7 +634,7 @@ impl Inner {
         if let Err(error) = prepared {
             return Ending::Failed(format!("Could not prepare the run: {error}"));
         }
-        let snapshots = request.kind.edits() && self.config.keep_snapshots > 0;
+        let snapshots = request.edits().is_some() && self.config.keep_snapshots > 0;
         if snapshots {
             match snapshot::take(&request.repo, id) {
                 Ok(taken) => {
@@ -690,7 +698,7 @@ impl Inner {
         if snapshots {
             self.record_changes(id, &request.repo);
         }
-        if request.kind.edits() {
+        if request.edits().is_some() {
             self.record_thread_files(id, request);
         }
         let _ = std::fs::remove_dir_all(&dir);

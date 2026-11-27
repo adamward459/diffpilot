@@ -1,6 +1,6 @@
 use diffpilot::testing::{
-    FakeGithub, RemoteFixture, canned_claude, click, install_github, open_repo, open_workspace, press, remote_fixture,
-    shows, wait_until_shows,
+    FakeGithub, RemoteFixture, click, install_github, open_repo, open_workspace, press, remote_fixture, shows,
+    wait_until_shows,
 };
 use diffpilot_core::settings::Settings;
 use diffpilot_core::viewed::ViewedStore;
@@ -13,7 +13,6 @@ fn open(app: &mut TestAppContext, fixture: &RemoteFixture) -> &'static mut Visua
         &fixture.repo,
         Arc::new(Settings::in_memory()),
         Arc::new(ViewedStore::in_memory()),
-        canned_claude(),
     );
     cx
 }

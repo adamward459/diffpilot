@@ -290,19 +290,11 @@ impl ThreadStore {
         self.adopt(written)
     }
 
-    pub fn begin_claude_reply(&mut self, id: ThreadId) -> Option<ReviewThread> {
-        if self.get(id)?.comments.iter().any(|comment| comment.is_streaming) {
-            return None;
-        }
+    pub fn add_claude_comment(&mut self, id: ThreadId, text: &str) -> Option<ReviewThread> {
+        self.get(id)?;
         let written = self
             .store
-            .insert_comment(id, &comment(CLAUDE_NAME, CommentSource::Claude, "", true));
-        self.adopt(written)
-    }
-
-    pub fn append_claude(&mut self, id: ThreadId, chunk: &str, done: bool) -> Option<ReviewThread> {
-        self.get(id)?;
-        let written = self.store.append_streaming(id, chunk, done);
+            .insert_comment(id, &comment(CLAUDE_NAME, CommentSource::Claude, text, false));
         self.adopt(written)
     }
 
@@ -502,32 +494,17 @@ mod tests {
     }
 
     #[test]
-    fn claude_reply_streams_into_one_comment() {
+    fn a_claude_comment_is_written_by_claude() {
         let mut store = ThreadStore::new();
         let id = store.create(anchor()).id;
         store.post(id, "@claude look");
-        let started = store.begin_claude_reply(id).unwrap();
-        assert!(started.comments.last().unwrap().is_streaming);
-        store.append_claude(id, "one ", false);
-        let finished = store.append_claude(id, "two", true).unwrap();
-        assert_eq!(finished.comments.last().unwrap().body, "one two");
-        assert!(!finished.comments.last().unwrap().is_streaming);
-        assert_eq!(finished.comments.len(), 2);
-    }
-
-    #[test]
-    fn a_second_reply_cannot_start_while_one_streams() {
-        let mut store = ThreadStore::new();
-        let id = store.create(anchor()).id;
-        store.begin_claude_reply(id);
-        assert_eq!(store.begin_claude_reply(id), None);
-    }
-
-    #[test]
-    fn append_without_a_streaming_reply_does_nothing() {
-        let mut store = ThreadStore::new();
-        let id = store.create(anchor()).id;
-        assert_eq!(store.append_claude(id, "x", false), None);
+        let thread = store.add_claude_comment(id, "Claude did not reply.").unwrap();
+        let last = thread.comments.last().unwrap();
+        assert_eq!(
+            (last.author.as_str(), last.source),
+            (CLAUDE_NAME, CommentSource::Claude)
+        );
+        assert_eq!(store.add_claude_comment(ThreadId(99), "x"), None);
     }
 
     #[test]
@@ -565,8 +542,7 @@ mod tests {
             let mut threads = ThreadStore::open(store, &key()).unwrap();
             let id = threads.create_range(anchor(), Some(9), Some("a\nb".into())).id;
             threads.post(id, "first");
-            threads.begin_claude_reply(id);
-            threads.append_claude(id, "answer", true);
+            threads.add_claude_comment(id, "answer");
             threads.add_finding(
                 ThreadAnchor::Change,
                 Some(FindingMeta {
@@ -616,8 +592,15 @@ mod tests {
         let (_dir, store) = file_store();
         let mut threads = ThreadStore::open(store.clone(), &key()).unwrap();
         let id = threads.create(anchor()).id;
-        threads.begin_claude_reply(id);
-        threads.append_claude(id, "half", false);
+        store
+            .insert_comment(
+                id,
+                &NewComment {
+                    streaming: true,
+                    ..comment(CLAUDE_NAME, CommentSource::Claude, "half", true)
+                },
+            )
+            .unwrap();
         let again = ThreadStore::open(store, &key()).unwrap();
         let comment = &again.get(id).unwrap().comments[0];
         assert_eq!((comment.body.as_str(), comment.is_streaming), ("half", false));

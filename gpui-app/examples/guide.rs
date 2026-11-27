@@ -4,7 +4,7 @@
 
 use diffpilot::guide::session::Step;
 use diffpilot::repo_view::{Nav, RepoView};
-use diffpilot::testing::{canned_claude, demo_guide, fixture};
+use diffpilot::testing::{demo_guide, fixture};
 use diffpilot_core::review::ReviewModel;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::{RunId, Store};
@@ -38,7 +38,6 @@ fn main() {
                         Arc::new(Settings::in_memory()),
                         Arc::new(ViewedStore::in_memory()),
                         store,
-                        canned_claude(),
                         window,
                         cx,
                     )

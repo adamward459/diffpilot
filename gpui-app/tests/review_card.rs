@@ -58,26 +58,50 @@ async fn the_height_does_not_change_between_two_measures(cx: &mut TestAppContext
         id
     });
     let id = card.read_with(cx, |card, _| card.thread_id());
+    f.claude.hold();
     f.session.update(cx, |session, cx| session.ask_claude(id, cx));
-    f.replier.send("some reply words ");
     cx.run_until_parked();
     let first = cx.update(|window, cx| card.read(cx).height(px(500.), window, cx));
     let again = cx.update(|window, cx| card.read(cx).height(px(500.), window, cx));
     assert_eq!(first, again);
+    f.claude.finish();
 }
 
 #[gpui::test]
-async fn a_streaming_reply_makes_the_card_taller_as_text_arrives(cx: &mut TestAppContext) {
+async fn a_waiting_reply_adds_a_row_until_claude_writes_its_reply(cx: &mut TestAppContext) {
     let (f, card, cx) = card(cx, |f, cx| {
         let id = f.user_thread(cx);
-        f.post(cx, id, "@claude explain");
+        f.post(cx, id, "Explain this.");
         id
     });
-    let before = cx.update(|window, cx| card.read(cx).height(px(300.), window, cx));
-    f.replier.send(&"long reply ".repeat(200));
+    let id = card.read_with(cx, |card, _| card.thread_id());
+    let height =
+        |cx: &mut VisualTestContext| f32::from(cx.update(|window, cx| card.read(cx).height(px(300.), window, cx)));
+    let alone = height(cx);
+    f.claude.hold();
+    f.session.update(cx, |session, cx| session.ask_claude(id, cx));
     cx.run_until_parked();
-    let after = cx.update(|window, cx| card.read(cx).height(px(300.), window, cx));
-    assert!(after > before);
+    let waiting = height(cx);
+    let row = metrics::BORDER
+        + metrics::COMMENT_TOP
+        + metrics::NAME_LINE
+        + metrics::NAME_GAP
+        + metrics::LINE
+        + metrics::COMMENT_BOTTOM;
+    assert_eq!(waiting, alone + row);
+
+    let long = "long reply ".repeat(200);
+    f.claude_calls(
+        cx,
+        "reply",
+        serde_json::json!({ "threadId": id.0.to_string(), "body": long }),
+    );
+    f.wait_for_comment(cx, id, long.trim());
+    assert!(height(cx) > waiting + metrics::LINE);
+    f.claude.finish();
+    f.wait_for_reply_end(cx, id);
+    cx.run_until_parked();
+    assert!(height(cx) < waiting + 200.0 * metrics::LINE);
 }
 
 #[gpui::test]
@@ -110,10 +134,11 @@ async fn typing_in_a_draft_and_pressing_command_return_posts_and_asks_claude(cx:
     cx.run_until_parked();
 
     let thread = f.thread(cx, id).unwrap();
-    assert_eq!(thread.comments.len(), 2, "{thread:?}");
+    assert_eq!(thread.comments.len(), 1, "{thread:?}");
     assert_eq!(thread.comments[0].body, "@claude is this needed?");
-    assert_eq!(thread.comments[1].author, CLAUDE_NAME);
-    assert_eq!(f.replier.asked(), 1);
+    assert!(f.replying(cx, id));
+    f.wait_for_reply_end(cx, id);
+    assert_eq!(f.thread(cx, id).unwrap().comments[1].author, CLAUDE_NAME);
 }
 
 #[gpui::test]

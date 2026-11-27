@@ -115,7 +115,6 @@ fn capture_scene(exe: &Path, scene: &Scene, out: &Path) -> Result {
         .current_dir(root())
         .env("DIFFPILOT_REPO", fixture::repo())
         .env("DIFFPILOT_VIEWED_SEED", fixture::viewed_seed())
-        .env("DIFFPILOT_REVIEWER", "scripted")
         .envs(scene.env.iter().copied())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

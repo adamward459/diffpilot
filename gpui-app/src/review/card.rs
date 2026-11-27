@@ -258,6 +258,10 @@ impl ThreadCard {
         markup
     }
 
+    fn waiting(&self, cx: &App) -> Option<ThreadComment> {
+        self.session.read(cx).is_replying(self.id).then(waiting_reply)
+    }
+
     fn shows_composer(&self, kind: Kind) -> bool {
         kind == Kind::Plain || self.replying
     }
@@ -281,6 +285,8 @@ impl ThreadCard {
             border + m::COMMENT_TOP + m::NAME_LINE + m::NAME_GAP + text_lines(comment, comment_wrap) + m::COMMENT_BOTTOM
         };
         let first = thread.comments.first();
+        let waiting = session.is_replying(self.id).then(waiting_reply);
+        let waiting = waiting.as_ref();
         let mut total = 2.0 * m::BORDER;
         match kind {
             Kind::Finding => {
@@ -292,6 +298,7 @@ impl ThreadCard {
                         .comments
                         .iter()
                         .skip(1)
+                        .chain(waiting)
                         .map(|c| comment_height(c, false))
                         .sum::<f32>();
                     if shows_status_band(thread) {
@@ -309,6 +316,7 @@ impl ThreadCard {
                     .comments
                     .iter()
                     .skip(1)
+                    .chain(waiting)
                     .map(|c| comment_height(c, false))
                     .sum::<f32>();
                 if shows_status_band(thread) {
@@ -323,6 +331,7 @@ impl ThreadCard {
                 total += thread
                     .comments
                     .iter()
+                    .chain(waiting)
                     .enumerate()
                     .map(|(index, c)| comment_height(c, index == 0))
                     .sum::<f32>();
@@ -899,6 +908,7 @@ impl ThreadCard {
                         .comments
                         .iter()
                         .skip(1)
+                        .chain(self.waiting(cx).as_ref())
                         .map(|c| self.comment(c, false, fonts, cx)),
                 )
                 .children(self.status_band(thread, theme, cx))
@@ -969,6 +979,7 @@ impl ThreadCard {
                     .comments
                     .iter()
                     .skip(1)
+                    .chain(self.waiting(cx).as_ref())
                     .map(|c| self.comment(c, false, fonts, cx)),
             )
             .children(self.status_band(thread, theme, cx))
@@ -980,7 +991,7 @@ impl ThreadCard {
 
     fn plain_card(&self, thread: &ReviewThread, fonts: &Fonts, window: &Window, cx: &Context<Self>) -> AnyElement {
         let theme = fonts.theme;
-        let busy = thread.comments.iter().any(|c| c.is_streaming);
+        let busy = self.waiting(cx).is_some() || thread.comments.iter().any(|c| c.is_streaming);
         let claude = thread.comments.iter().any(|c| c.author == CLAUDE_NAME);
         let label = match &thread.anchor {
             ThreadAnchor::Change => "Review summary".to_string(),
@@ -1024,9 +1035,12 @@ impl ThreadCard {
             .child(
                 h_flex()
                     .gap_1()
-                    .child(self.ask_button(busy).on_click(cx.listener(move |this, _, _, cx| {
-                        this.session.update(cx, |session, cx| session.ask_claude(id, cx));
-                    })))
+                    .child(
+                        self.ask_button(busy || thread.comments.is_empty())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.session.update(cx, |session, cx| session.ask_claude(id, cx));
+                            })),
+                    )
                     .when(!thread.comments.is_empty(), |row| {
                         row.child(
                             self.button("Resolve", "resolve")
@@ -1041,12 +1055,25 @@ impl ThreadCard {
                 thread
                     .comments
                     .iter()
+                    .chain(self.waiting(cx).as_ref())
                     .enumerate()
                     .map(|(index, c)| self.comment(c, index == 0, fonts, cx)),
             )
             .children(self.status_band(thread, theme, cx))
             .child(self.composer_view(thread, theme, window, cx))
             .into_any_element()
+    }
+}
+
+/// Stands in for Claude's answer while its reply run waits or goes. Claude writes the real one with the MCP tools.
+fn waiting_reply() -> ThreadComment {
+    ThreadComment {
+        id: u32::MAX,
+        author: CLAUDE_NAME.into(),
+        body: String::new(),
+        is_streaming: true,
+        source: CommentSource::Claude,
+        pending: false,
     }
 }
 

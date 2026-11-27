@@ -4,8 +4,9 @@ use common::*;
 use diffpilot::review::session::{NO_REPLY_MESSAGE, NO_REPO_MESSAGE};
 use diffpilot::review::{ReviewEvent, ThreadChange};
 use diffpilot_core::comparison::Comparison;
+use diffpilot_core::policy::EditPermission;
 use diffpilot_core::review::{Effort, ModelName, ReviewModel, ReviewScope, Severity};
-use diffpilot_core::run::RunState;
+use diffpilot_core::run::{RunKind, RunState};
 use diffpilot_core::store::Store;
 use diffpilot_core::threads::ThreadStatus;
 use diffpilot_core::threads::{CLAUDE_NAME, Side, ThreadAnchor, ThreadId, USER_NAME};
@@ -241,15 +242,18 @@ async fn a_failed_second_review_keeps_the_first_ones_threads(cx: &mut TestAppCon
 }
 
 #[gpui::test]
-async fn rerunning_ends_a_reply_streaming_in_a_replaced_thread(cx: &mut TestAppContext) {
+async fn a_reply_to_a_thread_the_next_review_replaces_leaves_nothing_behind(cx: &mut TestAppContext) {
     let f = fixture(cx, two_findings());
     f.review(cx);
     let summary = f.threads(cx)[0].id;
+    f.claude.hold();
     f.session.update(cx, |session, cx| session.ask_claude(summary, cx));
-    assert!(f.session.read_with(cx, |session, _| session.is_replying(summary)));
-    f.review(cx);
+    assert!(f.replying(cx, summary));
+    f.start(cx);
+    f.claude.finish();
+    f.wait_for_end(cx);
     assert!(f.thread(cx, summary).is_none());
-    assert!(f.replier.tokens.lock().unwrap()[0].is_cancelled());
+    assert!(!f.replying(cx, summary));
 }
 
 #[gpui::test]
@@ -302,7 +306,7 @@ async fn a_post_without_a_mention_adds_one_comment_and_asks_no_one(cx: &mut Test
         (thread.comments[0].author.as_str(), thread.comments[0].body.as_str()),
         (USER_NAME, "just a note")
     );
-    assert_eq!(f.replier.asked(), 0);
+    assert!(f.current(cx).is_none(), "no run was asked for");
 }
 
 #[gpui::test]
@@ -316,21 +320,33 @@ async fn blank_text_is_not_posted(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-async fn a_post_that_mentions_claude_starts_a_reply(cx: &mut TestAppContext) {
+async fn a_post_that_mentions_claude_queues_a_reply_run_for_its_thread(cx: &mut TestAppContext) {
     let f = fixture(cx, two_findings());
+    f.claude.hold();
     let id = f.user_thread(cx);
     f.post(cx, id, "@claude is this needed?");
     let thread = f.thread(cx, id).unwrap();
-    assert_eq!(thread.comments.len(), 2);
-    assert_eq!(thread.comments[1].author, CLAUDE_NAME);
-    assert!(thread.comments[1].is_streaming);
-    assert!(thread.comments[1].body.is_empty());
-    assert_eq!(f.replier.asked(), 1);
-    assert_eq!(
-        f.replier.asked.lock().unwrap()[0].comments[0].body,
-        "@claude is this needed?"
-    );
-    assert!(f.session.read_with(cx, |session, _| session.is_replying(id)));
+    assert_eq!(thread.comments.len(), 1, "no empty Claude comment waits in the thread");
+    assert!(f.replying(cx, id));
+    let run = f.current(cx).unwrap();
+    assert_eq!((run.kind, run.threads.as_slice()), (RunKind::Reply, [id].as_slice()));
+    f.wait_for_launches(cx, 1);
+    let prompt = f.claude.prompt();
+    assert!(prompt.contains(&format!("- Thread `{}`", id.0)), "{prompt}");
+    assert!(prompt.contains("Make the smallest change"), "{prompt}");
+    f.claude.finish();
+}
+
+#[gpui::test]
+async fn a_reply_that_cannot_edit_is_told_so(cx: &mut TestAppContext) {
+    let f = fixture(cx, two_findings());
+    f.claude.hold();
+    f.settings.set_edit_permission(EditPermission::AskEach);
+    let id = f.user_thread(cx);
+    f.post(cx, id, "@claude rename this");
+    f.wait_for_launches(cx, 1);
+    assert!(f.claude.prompt().contains("You cannot edit files in this run."));
+    f.claude.finish();
 }
 
 #[gpui::test]
@@ -338,98 +354,136 @@ async fn an_address_that_only_looks_like_a_mention_does_not_start_a_reply(cx: &m
     let f = fixture(cx, two_findings());
     let id = f.user_thread(cx);
     f.post(cx, id, "mail me@claude.com or ask @claudette");
-    assert_eq!(f.replier.asked(), 0);
+    assert!(f.current(cx).is_none());
 }
 
 #[gpui::test]
 async fn ask_claude_replies_without_a_new_user_comment(cx: &mut TestAppContext) {
     let f = fixture(cx, two_findings());
+    f.claude.hold();
     let id = f.user_thread(cx);
     f.post(cx, id, "what about this?");
     f.session.update(cx, |session, cx| session.ask_claude(id, cx));
-    let thread = f.thread(cx, id).unwrap();
-    assert_eq!(thread.comments.len(), 2);
-    assert!(thread.comments[1].is_streaming);
-    assert_eq!(f.replier.asked(), 1);
+    assert_eq!(f.thread(cx, id).unwrap().comments.len(), 1);
+    assert!(f.replying(cx, id));
+    f.claude.finish();
 }
 
 #[gpui::test]
-async fn a_second_ask_while_a_reply_streams_is_ignored(cx: &mut TestAppContext) {
+async fn a_second_ask_while_a_reply_runs_is_ignored(cx: &mut TestAppContext) {
     let f = fixture(cx, two_findings());
+    f.claude.hold();
     let id = f.user_thread(cx);
     f.post(cx, id, "@claude one");
     f.session.update(cx, |session, cx| session.ask_claude(id, cx));
     f.post(cx, id, "@claude two");
-    assert_eq!(f.replier.asked(), 1);
-    let claude = f
+    let runs = f.session.read_with(cx, |session, _| {
+        session.current().into_iter().chain(session.queued()).count()
+    });
+    assert_eq!(runs, 1);
+    f.claude.finish();
+}
+
+#[gpui::test]
+async fn claudes_reply_shows_in_the_thread_and_the_end_of_the_run_allows_the_next_ask(cx: &mut TestAppContext) {
+    let f = fixture(cx, two_findings());
+    f.claude.hold();
+    let id = f.user_thread(cx);
+    f.post(cx, id, "@claude hi");
+    f.claude_replies(cx, id, "Hello. The line is needed.");
+    assert!(f.replying(cx, id), "the run goes on until Claude ends it");
+    f.claude.finish();
+    f.wait_for_reply_end(cx, id);
+    let bodies: Vec<String> = f
         .thread(cx, id)
         .unwrap()
         .comments
         .iter()
-        .filter(|c| c.author == CLAUDE_NAME)
-        .count();
-    assert_eq!(claude, 1);
-}
-
-#[gpui::test]
-async fn reply_chunks_append_to_one_comment_and_the_end_of_the_stream_finishes_it(cx: &mut TestAppContext) {
-    let f = fixture(cx, two_findings());
-    let id = f.user_thread(cx);
-    f.post(cx, id, "@claude hi");
-    f.events.borrow_mut().clear();
-
-    f.replier.send("one ");
-    cx.run_until_parked();
-    f.replier.send("two");
-    cx.run_until_parked();
-    let streaming = f.thread(cx, id).unwrap();
-    assert_eq!(streaming.comments[1].body, "one two");
-    assert!(streaming.comments[1].is_streaming);
-    assert_eq!(f.events.borrow().len(), 2);
-
-    f.replier.finish();
-    cx.run_until_parked();
-    let done = f.thread(cx, id).unwrap();
-    assert_eq!(done.comments[1].body, "one two");
-    assert!(!done.comments[1].is_streaming);
-    assert!(!f.session.read_with(cx, |session, _| session.is_replying(id)));
+        .map(|c| c.body.clone())
+        .collect();
+    assert_eq!(
+        bodies,
+        ["@claude hi", "Hello. The line is needed."],
+        "no note after a reply"
+    );
+    assert!(f.thread(cx, id).unwrap().addressed.is_none(), "an answer is not a fix");
 
     f.session.update(cx, |session, cx| session.ask_claude(id, cx));
-    assert_eq!(f.replier.asked(), 2, "a finished reply allows the next ask");
+    assert!(f.replying(cx, id), "a finished reply allows the next ask");
+    f.wait_for_reply_end(cx, id);
 }
 
 #[gpui::test]
-async fn a_reply_that_ends_without_text_says_so_instead_of_staying_empty(cx: &mut TestAppContext) {
+async fn a_reply_run_that_made_the_change_marks_the_thread_addressed(cx: &mut TestAppContext) {
+    let f = fixture(cx, two_findings());
+    f.claude.hold();
+    let id = f.user_thread(cx);
+    f.post(cx, id, "@claude rename it");
+    f.claude_calls(
+        cx,
+        "resolve",
+        serde_json::json!({ "threadId": id.0.to_string(), "summary": "Fixed: renamed it." }),
+    );
+    f.wait_for_comment(cx, id, "Fixed: renamed it.");
+    f.claude.finish();
+    f.wait_for_reply_end(cx, id);
+    let thread = f.thread(cx, id).unwrap();
+    assert_eq!(
+        thread.addressed.map(|mark| mark.summary).as_deref(),
+        Some("Fixed: renamed it.")
+    );
+    assert_eq!(
+        thread.status,
+        ThreadStatus::Open,
+        "the reviewer resolves it after a check"
+    );
+}
+
+#[gpui::test]
+async fn a_reply_run_that_ends_without_a_reply_says_so(cx: &mut TestAppContext) {
     let f = fixture(cx, two_findings());
     let id = f.user_thread(cx);
     f.post(cx, id, "@claude hi");
-    f.replier.finish();
-    cx.run_until_parked();
+    f.wait_for_reply_end(cx, id);
     let comment = f.thread(cx, id).unwrap().comments[1].clone();
-    assert_eq!(comment.body, NO_REPLY_MESSAGE);
-    assert!(!comment.is_streaming);
+    assert_eq!(
+        (comment.author.as_str(), comment.body.as_str()),
+        (CLAUDE_NAME, NO_REPLY_MESSAGE)
+    );
 }
 
 #[gpui::test]
-async fn removing_a_thread_cancels_its_reply_and_drops_late_chunks(cx: &mut TestAppContext) {
+async fn a_stopped_reply_run_leaves_no_note(cx: &mut TestAppContext) {
     let f = fixture(cx, two_findings());
+    f.claude.hold();
+    let id = f.user_thread(cx);
+    f.post(cx, id, "@claude hi");
+    f.wait_for_launches(cx, 1);
+    f.session.update(cx, |session, cx| session.stop_claude(cx));
+    f.wait_for_reply_end(cx, id);
+    assert_eq!(f.state(cx), Some(RunState::Stopped));
+    assert_eq!(f.thread(cx, id).unwrap().comments.len(), 1);
+}
+
+#[gpui::test]
+async fn removing_a_thread_stops_its_reply_run(cx: &mut TestAppContext) {
+    let f = fixture(cx, two_findings());
+    f.claude.hold();
     let id = f.user_thread(cx);
     let other = f.session.update(cx, |session, cx| {
         session.create_thread(ThreadAnchor::file("src/a.ts"), cx)
     });
     f.post(cx, id, "@claude hi");
+    f.wait_for_launches(cx, 1);
     f.session.update(cx, |session, cx| session.remove_thread(id, cx));
     assert!(f.thread(cx, id).is_none());
-    assert!(f.replier.tokens.lock().unwrap()[0].is_cancelled());
     assert!(
         f.events
             .borrow()
             .contains(&ReviewEvent::ThreadsChanged(ThreadChange::Removed(id)))
     );
-
-    f.replier.send("late");
-    cx.run_until_parked();
-    assert!(f.thread(cx, id).is_none());
+    f.wait_for_end(cx);
+    assert_eq!(f.state(cx), Some(RunState::Stopped));
     assert!(f.thread(cx, other).is_some());
 }
 
@@ -486,16 +540,20 @@ async fn the_setup_is_remembered_per_repo_and_reloaded_when_the_repo_changes(cx:
 }
 
 #[gpui::test]
-async fn dropping_the_session_cancels_a_streaming_reply(cx: &mut TestAppContext) {
+async fn dropping_the_session_stops_its_reply_run(cx: &mut TestAppContext) {
     let f = fixture(cx, two_findings());
+    f.claude.hold();
     let id = f.user_thread(cx);
     f.post(cx, id, "@claude hi");
-    let token = f.replier.tokens.lock().unwrap()[0].clone();
+    f.wait_for_launches(cx, 1);
+    let run = f.current(cx).unwrap().id;
+    let engine = f.claude.engine();
     let Fixture { session, .. } = f;
     drop(session);
     cx.update(|_| {});
-    cx.run_until_parked();
-    assert!(token.is_cancelled());
+    wait_until(cx, "the reply run to stop", |_| {
+        engine.run(run).is_some_and(|run| run.state == RunState::Stopped)
+    });
 }
 
 fn texts(cx: &mut TestAppContext, session: &gpui::Entity<diffpilot::review::ReviewSession>) -> Vec<String> {

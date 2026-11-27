@@ -2,7 +2,7 @@ use diffpilot::diff_pane::rows::{BlockId, RowKind};
 use diffpilot::guide::session::{GuideRun, Step};
 use diffpilot::repo_view::{Nav, RepoView};
 use diffpilot::runs::Runs;
-use diffpilot::testing::{self, canned_claude, demo_guide, fixture, open_repo_in};
+use diffpilot::testing::{self, demo_guide, fixture, open_repo_in};
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::FileDiff;
 use diffpilot_core::guide::{Diagram, DiagramKind, FlowStep, Guide};
@@ -78,7 +78,6 @@ fn open(cx: &mut TestAppContext, with_runs: bool) -> (World, &'static mut Visual
         Arc::new(Settings::in_memory()),
         Arc::new(ViewedStore::in_memory()),
         store.clone(),
-        canned_claude(),
     );
     (
         World {

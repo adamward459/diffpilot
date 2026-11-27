@@ -1,5 +1,5 @@
 use diffpilot::testing::{
-    FakeClaude, canned_claude, click, fake_claude, fixture, open_repo, press, shows, type_text, wait_until_shows,
+    FakeClaude, click, fake_claude, fixture, open_repo, press, shows, type_text, wait_until_shows,
 };
 use diffpilot_core::policy::EditPermission;
 use diffpilot_core::settings::Settings;
@@ -12,13 +12,7 @@ fn open(app: &mut TestAppContext) -> (tempfile::TempDir, &'static mut VisualTest
     let dir = fixture();
     let settings = Arc::new(Settings::in_memory());
     settings.set_edit_permission(EditPermission::DontAsk);
-    let (_, cx) = open_repo(
-        app,
-        dir.path(),
-        settings,
-        Arc::new(ViewedStore::in_memory()),
-        canned_claude(),
-    );
+    let (_, cx) = open_repo(app, dir.path(), settings, Arc::new(ViewedStore::in_memory()));
     (dir, cx)
 }
 

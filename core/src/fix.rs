@@ -16,6 +16,9 @@ const FIX_COMMENTS: &str = include_str!("fix_comments.md");
 const REPLY_THREAD: &str = include_str!("reply_thread.md");
 const MAKE_CHANGES: &str = include_str!("make_changes.md");
 const TITLE_LENGTH: usize = 60;
+const CAN_EDIT: &str = "Make the smallest change that does what the comment asks, with your file tools.";
+const CANNOT_EDIT: &str = "You cannot edit files in this run. When the comment asks for a change, do not try to make it: \
+                           `reply` with the change you would make, and do not call `resolve`.";
 
 #[derive(Debug, Clone)]
 pub struct Target {
@@ -122,8 +125,8 @@ pub fn fix_comments(target: &Target, threads: &[ReviewThread], chosen: &[ThreadI
     Ok(FixPlan { request, skipped })
 }
 
-/// A run that answers one thread, and changes code when the comment asks for it.
-pub fn reply_to(target: &Target, thread: &ReviewThread) -> Result<RunRequest, NothingToFix> {
+/// A run that answers one thread. With `can_edit` it also changes code when the comment asks for it.
+pub fn reply_to(target: &Target, thread: &ReviewThread, can_edit: bool) -> Result<RunRequest, NothingToFix> {
     if thread.sent_comments().next().is_none() {
         return Err(NothingToFix {
             skipped: vec![(thread.id, Skip::NothingSent)],
@@ -138,6 +141,10 @@ pub fn reply_to(target: &Target, thread: &ReviewThread) -> Result<RunRequest, No
         "",
     );
     request.threads = vec![thread.id];
+    request.read_only = !can_edit;
+    request.prompt = request
+        .prompt
+        .replace("{{edits}}", if can_edit { CAN_EDIT } else { CANNOT_EDIT });
     Ok(request)
 }
 
@@ -430,24 +437,38 @@ mod tests {
     #[test]
     fn a_reply_run_has_one_thread_and_a_prompt_for_it() {
         let one = user(7, 3);
-        let request = reply_to(&target(), &one).unwrap();
+        let request = reply_to(&target(), &one, true).unwrap();
         assert_eq!(
             (request.kind, request.threads.as_slice()),
             (RunKind::Reply, [ThreadId(7)].as_slice())
         );
         assert!(request.prompt.contains("- Thread `7`: `a.ts:3`"));
+        assert!(request.prompt.contains(CAN_EDIT));
+        assert!(!request.prompt.contains("{{"), "{}", request.prompt);
+        assert_eq!(request.edits(), Some(EditPermission::AskOnce));
         let mut resolved = user(8, 1);
         resolved.status = ThreadStatus::Resolved;
-        assert!(reply_to(&target(), &resolved).is_ok(), "the reviewer asked for it");
+        assert!(
+            reply_to(&target(), &resolved, true).is_ok(),
+            "the reviewer asked for it"
+        );
         let draft = thread(
             9,
             ThreadAnchor::Change,
             vec![comment(CommentSource::User, "Later.", true)],
         );
         assert_eq!(
-            reply_to(&target(), &draft).unwrap_err().skipped,
+            reply_to(&target(), &draft, true).unwrap_err().skipped,
             [(ThreadId(9), Skip::NothingSent)]
         );
+    }
+
+    #[test]
+    fn a_reply_that_cannot_edit_is_read_only_and_says_so() {
+        let request = reply_to(&target(), &user(7, 3), false).unwrap();
+        assert_eq!(request.edits(), None);
+        assert!(request.prompt.contains(CANNOT_EDIT));
+        assert!(!request.prompt.contains(CAN_EDIT));
     }
 
     #[test]

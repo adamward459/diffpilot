@@ -82,8 +82,9 @@ pub struct ToolPolicy {
 }
 
 impl ToolPolicy {
-    /// `has_mcp` says whether the run gets the diffpilot MCP server.
-    pub fn new(kind: RunKind, edit: EditPermission, has_mcp: bool) -> Result<Self, PolicyError> {
+    /// `edits` is how the run may edit files, None when it may not. `has_mcp` says whether the run gets the diffpilot
+    /// MCP server.
+    pub fn new(kind: RunKind, edits: Option<EditPermission>, has_mcp: bool) -> Result<Self, PolicyError> {
         let mut tools = vec!["Read", "Grep", "Glob", "TodoWrite", "Bash"];
         let mut allowed: Vec<String> = vec!["Read".into(), "Grep".into(), "Glob".into(), "TodoWrite".into()];
         if has_mcp {
@@ -91,9 +92,7 @@ impl ToolPolicy {
         }
         let mut permission_mode = None;
         let mut permission_prompt_tool = None;
-        if !kind.edits() {
-            allowed.extend(READ_ONLY_GIT.map(String::from));
-        } else {
+        if let Some(edit) = edits.filter(|_| kind.edits()) {
             tools.extend(["Edit", "Write"]);
             match edit {
                 EditPermission::DontAsk => {
@@ -108,6 +107,8 @@ impl ToolPolicy {
                     permission_prompt_tool = Some(mcp_tool(APPROVE_TOOL));
                 }
             }
+        } else {
+            allowed.extend(READ_ONLY_GIT.map(String::from));
         }
         Ok(Self {
             tools: tools.into_iter().map(String::from).collect(),
@@ -170,7 +171,7 @@ mod tests {
     use super::*;
 
     fn policy(kind: RunKind, edit: EditPermission, has_mcp: bool) -> ToolPolicy {
-        ToolPolicy::new(kind, edit, has_mcp).unwrap()
+        ToolPolicy::new(kind, kind.edits().then_some(edit), has_mcp).unwrap()
     }
 
     fn after<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
@@ -193,7 +194,7 @@ mod tests {
             RunKind::CommitMessage,
         ] {
             for edit in EditPermission::ALL {
-                let Ok(policy) = ToolPolicy::new(kind, edit, true) else {
+                let Ok(policy) = ToolPolicy::new(kind, kind.edits().then_some(edit), true) else {
                     continue;
                 };
                 let args = policy.arguments();
@@ -249,6 +250,17 @@ mod tests {
     }
 
     #[test]
+    fn a_read_only_reply_can_answer_and_resolve_but_not_edit() {
+        let args = ToolPolicy::new(RunKind::Reply, None, true).unwrap().arguments();
+        assert_eq!(after(&args, "--tools"), ["Read,Grep,Glob,TodoWrite,Bash"]);
+        let allowed = after(&args, "--allowedTools");
+        assert!(!allowed.contains(&"Edit") && !allowed.contains(&"Bash"));
+        assert!(allowed.contains(&"mcp__diffpilot__reply") && allowed.contains(&"mcp__diffpilot__resolve"));
+        assert!(!args.contains(&"--permission-mode".to_string()));
+        assert!(!args.contains(&"--permission-prompt-tool".to_string()));
+    }
+
+    #[test]
     fn the_ask_settings_route_edits_to_the_prompt_tool() {
         for edit in [EditPermission::AskOnce, EditPermission::AskEach] {
             let args = policy(RunKind::MakeChanges, edit, true).arguments();
@@ -262,11 +274,15 @@ mod tests {
     #[test]
     fn asking_needs_the_mcp_server() {
         assert_eq!(
-            ToolPolicy::new(RunKind::FixComments, EditPermission::AskOnce, false),
+            ToolPolicy::new(RunKind::FixComments, Some(EditPermission::AskOnce), false),
             Err(PolicyError::PromptNeedsMcp)
         );
-        assert!(ToolPolicy::new(RunKind::Review, EditPermission::AskEach, false).is_ok());
-        assert!(ToolPolicy::new(RunKind::FixComments, EditPermission::DontAsk, false).is_ok());
+        assert!(ToolPolicy::new(RunKind::Review, Some(EditPermission::AskEach), false).is_ok());
+        assert!(ToolPolicy::new(RunKind::FixComments, Some(EditPermission::DontAsk), false).is_ok());
+        assert!(
+            ToolPolicy::new(RunKind::Reply, None, false).is_ok(),
+            "a read-only reply asks nothing"
+        );
     }
 
     #[test]
@@ -280,7 +296,7 @@ mod tests {
             RunKind::CommitMessage,
         ] {
             for edit in EditPermission::ALL {
-                let policy = ToolPolicy::new(kind, edit, true).unwrap();
+                let policy = ToolPolicy::new(kind, kind.edits().then_some(edit), true).unwrap();
                 assert!(policy.allowed.iter().all(|tool| !DENIED_TOOLS.contains(&tool.as_str())));
             }
         }

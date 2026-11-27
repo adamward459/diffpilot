@@ -3,7 +3,6 @@ use diffpilot::diff_pane::highlight;
 use diffpilot::diff_pane::state::{Geometry, PaneState};
 use diffpilot::diff_pane::{DiffPane, DiffPaneEvent};
 use diffpilot::review::{ReviewHost, ReviewSession};
-use diffpilot_core::claude::ScriptedReplier;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{self, DiffMode, FileDiff, LineKind};
 use diffpilot_core::git;
@@ -576,7 +575,6 @@ fn run_window(repo: PathBuf, launch: Instant, bench: Option<Drive>) {
                             host,
                             Arc::new(Settings::in_memory()),
                             Arc::new(Store::open_in_memory().expect("an in-memory store opens")),
-                            Arc::new(ScriptedReplier::default()),
                             cx,
                         )
                     });

@@ -1,5 +1,5 @@
 use diffpilot::testing::{
-    canned_claude, click, clipboard, fake_claude, fixture, git, open_repo, press, shows, type_text, wait_until_shows,
+    click, clipboard, fake_claude, fixture, git, open_repo, press, shows, type_text, wait_until_shows,
 };
 use diffpilot_core::settings::Settings;
 use diffpilot_core::viewed::ViewedStore;
@@ -28,7 +28,6 @@ fn open_fixture(app: &mut TestAppContext) -> (tempfile::TempDir, &'static mut Vi
         dir.path(),
         Arc::new(Settings::in_memory()),
         Arc::new(ViewedStore::in_memory()),
-        canned_claude(),
     );
     (dir, cx)
 }

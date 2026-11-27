@@ -1,8 +1,7 @@
-use crate::repo_view::{Claude, RepoView};
+use crate::repo_view::RepoView;
 use crate::runs::Runs;
 use crate::settings::{self, Section, Services};
 use crate::workspace::{self, Workspace};
-use diffpilot_core::claude::ScriptedReplier;
 use diffpilot_core::diff::FileDiff;
 use diffpilot_core::github::auth::{Credentials, GhCli, MemoryStore};
 use diffpilot_core::github::http::{Http, HttpError, Method, Request, Response};
@@ -38,12 +37,6 @@ pub fn canned_review() -> ReviewResult {
             finding("docs/committed.md", None, Severity::Suggestion, "Doc"),
             finding("src/staged.rs", Some(5), Severity::Question, "Why"),
         ],
-    }
-}
-
-pub fn canned_claude() -> Claude {
-    Claude {
-        replier: Arc::new(ScriptedReplier::default()),
     }
 }
 
@@ -128,7 +121,7 @@ pub fn open_preview(cx: &mut TestAppContext) -> (Opened, &'static mut VisualTest
     let dir = preview_fixture();
     let settings = Arc::new(Settings::in_memory());
     let store = Arc::new(ViewedStore::in_memory());
-    let (view, vcx) = open_repo(cx, dir.path(), settings.clone(), store.clone(), canned_claude());
+    let (view, vcx) = open_repo(cx, dir.path(), settings.clone(), store.clone());
     (
         Opened {
             view,
@@ -155,7 +148,7 @@ pub fn open_with(cx: &mut TestAppContext, settings: Settings) -> (Opened, &'stat
     let dir = fixture();
     let settings = Arc::new(settings);
     let store = Arc::new(ViewedStore::in_memory());
-    let (view, vcx) = open_repo(cx, dir.path(), settings.clone(), store.clone(), canned_claude());
+    let (view, vcx) = open_repo(cx, dir.path(), settings.clone(), store.clone());
     (
         Opened {
             view,
@@ -172,10 +165,9 @@ pub fn open_repo(
     repo: &Path,
     settings: Arc<Settings>,
     store: Arc<ViewedStore>,
-    claude: Claude,
 ) -> (Entity<RepoView>, &'static mut VisualTestContext) {
     let review_store = engine_store(cx);
-    open_repo_in(cx, repo, settings, store, review_store, claude)
+    open_repo_in(cx, repo, settings, store, review_store)
 }
 
 /// Runs and threads share one store, as in the app.
@@ -190,13 +182,12 @@ pub fn open_repo_in(
     settings: Arc<Settings>,
     store: Arc<ViewedStore>,
     review_store: Arc<Store>,
-    claude: Claude,
 ) -> (Entity<RepoView>, &'static mut VisualTestContext) {
     ready(cx);
     let repo = repo.to_path_buf();
     let mut view = None;
     let handle = cx.add_window(|window, cx| {
-        let entity = cx.new(|cx| RepoView::new(repo, settings, store, review_store, claude, window, cx));
+        let entity = cx.new(|cx| RepoView::new(repo, settings, store, review_store, window, cx));
         view = Some(entity.clone());
         gpui_component::Root::new(entity, window, cx)
     });

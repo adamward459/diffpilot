@@ -16,13 +16,12 @@ use crate::remote::{RemoteCapsule, RemoteEvent, RemoteMenu, RemoteStatus, SyncKi
 use crate::review::{FixButton, FixEvent, PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession};
 use crate::sidebar::{LoadedChanges, Sidebar, SidebarEvent};
 use diffpilot_core::changes;
-use diffpilot_core::claude::{ClaudeCliReplier, Replier, ScriptedReplier};
 use diffpilot_core::comparison::{self, Comparison};
 use diffpilot_core::diff::{self, DiffMode, FileDiff};
 use diffpilot_core::editor;
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::refs::Refs;
-use diffpilot_core::run::{RunKind, RunState};
+use diffpilot_core::run::RunState;
 use diffpilot_core::settings::{self, Settings};
 use diffpilot_core::store::Store;
 use diffpilot_core::tree;
@@ -135,28 +134,6 @@ fn load_diff(repo: &std::path::Path, comparison: &Comparison) -> DiffLoaded {
     }
 }
 
-#[derive(Clone)]
-pub struct Claude {
-    pub replier: Arc<dyn Replier>,
-}
-
-impl Claude {
-    /// `DIFFPILOT_REVIEWER=scripted` swaps the `claude` command for canned answers.
-    pub fn from_env(repo: &std::path::Path, settings: &Settings) -> Self {
-        let scripted = std::env::var("DIFFPILOT_REVIEWER").is_ok_and(|kind| kind == "scripted");
-        let replier: Arc<dyn Replier> = if scripted {
-            Arc::new(ScriptedReplier::default())
-        } else {
-            Arc::new(ClaudeCliReplier {
-                binary: settings.claude_path(),
-                model: settings.model_for(RunKind::Reply).name.as_str(),
-                ..ClaudeCliReplier::new(repo)
-            })
-        };
-        Self { replier }
-    }
-}
-
 fn home_relative(path: &std::path::Path) -> String {
     shorten(&tilde_path(path))
 }
@@ -217,7 +194,6 @@ pub struct RepoView {
     settings: Arc<Settings>,
     viewed_store: Arc<ViewedStore>,
     review_store: Arc<Store>,
-    claude: Claude,
     viewed_states: HashMap<ViewedKey, Arc<ViewedState>>,
     refs: Option<Refs>,
     remote: Entity<RemoteStatus>,
@@ -253,7 +229,6 @@ impl RepoView {
         settings: Arc<Settings>,
         viewed_store: Arc<ViewedStore>,
         review_store: Arc<Store>,
-        claude: Claude,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -286,7 +261,6 @@ impl RepoView {
             settings,
             viewed_store,
             review_store,
-            claude,
             viewed_states: HashMap::new(),
             refs: None,
             remote,
@@ -326,12 +300,8 @@ impl RepoView {
         let mode = settings::diff_mode_override().unwrap_or_else(|| self.settings.diff_mode());
         self.show_diff_mode(mode, cx);
         self.show_wrap(self.settings.wrap_lines(), cx);
-        self.claude = Claude::from_env(&self.repo, &self.settings);
         if let Some(session) = &self.session {
-            let claude = self.claude.clone();
-            session
-                .review
-                .update(cx, |review, cx| review.use_settings(claude.replier, cx));
+            session.review.update(cx, |review, cx| review.use_settings(cx));
         }
     }
 
@@ -482,8 +452,8 @@ impl RepoView {
         let mut host = ReviewHost::new(Some(self.repo.clone()), comparison);
         host.branch_name = branch_name;
         let review = {
-            let (settings, claude, store) = (self.settings.clone(), self.claude.clone(), self.review_store.clone());
-            cx.new(|cx| ReviewSession::new(host, settings, store, claude.replier, cx))
+            let (settings, store) = (self.settings.clone(), self.review_store.clone());
+            cx.new(|cx| ReviewSession::new(host, settings, store, cx))
         };
         pane.update(cx, |pane, cx| pane.set_review(review.clone(), window, cx));
         let pill = cx.new(|cx| ReviewPill::new(review.clone(), window, cx));

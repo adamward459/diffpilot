@@ -1,7 +1,7 @@
 use crate::bench::{self, Bench, Mark};
 use crate::folder_menu::{FolderMenu, FolderMenuEvent, SHORTCUT_SLOTS};
 use crate::remote::SyncKind;
-use crate::repo_view::{Claude, Nav, RepoView};
+use crate::repo_view::{Nav, RepoView};
 use crate::settings::{self, OpenSettings, PageEvent, Section, SettingsPage};
 use diffpilot_core::diff::DiffMode;
 use diffpilot_core::settings::Settings;
@@ -180,11 +180,10 @@ impl Workspace {
                 let settings = self.settings.clone();
                 let viewed_store = self.viewed_store.clone();
                 let review_store = self.review_store.clone();
-                let claude = Claude::from_env(&folder, &settings);
                 let menu = self.menu.clone();
                 let path = folder.clone();
                 let view = cx.new(|cx| {
-                    let mut view = RepoView::new(path, settings, viewed_store, review_store, claude, window, cx);
+                    let mut view = RepoView::new(path, settings, viewed_store, review_store, window, cx);
                     view.set_title(menu, cx);
                     view
                 });
