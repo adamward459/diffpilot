@@ -26,6 +26,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - The title bar now shows what you compare as one label, like feature → main. Click it to open the Open Folder sheet on this folder and change the branches or pick a pull request.
 - The Linked button in the Guide overview bar now opens the same Linked Folders popover as the title bar.
 
+### Fixed
+
+- On the Open Folder sheet, a long pull request list no longer covers the search field and the buttons, and the folder page starts at the top.
+
 ## [0.1.1] - 2026-11-27
 
 ### Added

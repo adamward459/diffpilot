@@ -534,8 +534,7 @@ pub fn review_pill(review: Review, requested_from_you: bool) -> Option<(&'static
     match review {
         Review::Approved => Some(("Approved", Tone::Passed)),
         Review::ChangesRequested => Some(("Changes requested", Tone::Failed)),
-        Review::Requested => Some(("Review required", Tone::Running)),
-        Review::None => None,
+        Review::Requested | Review::None => None,
     }
 }
 
@@ -860,6 +859,7 @@ impl OpenFolderDialog {
             }
             Some(_) => v_flex()
                 .id("open-requests")
+                .w_full()
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
@@ -938,6 +938,8 @@ impl Render for OpenFolderDialog {
             Some(folder) => v_flex()
                 .flex_1()
                 .min_w_0()
+                .h_full()
+                .min_h_0()
                 .gap(px(14.))
                 .child(
                     v_flex()
@@ -973,6 +975,7 @@ impl Render for OpenFolderDialog {
                 .into_any_element(),
             None => v_flex()
                 .flex_1()
+                .h_full()
                 .items_center()
                 .justify_center()
                 .text_size(text_px(text_size::BODY))
@@ -1188,6 +1191,7 @@ mod tests {
             Some("Approved")
         );
         assert_eq!(review_pill(Review::None, false), None);
+        assert_eq!(review_pill(Review::Requested, false), None);
         assert_eq!(
             review_pill(Review::Requested, true),
             Some(("Review requested", Tone::Running))

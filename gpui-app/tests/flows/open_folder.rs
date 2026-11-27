@@ -1,5 +1,5 @@
 use diffpilot::testing::{
-    FakeGithub, cancel_next_pick, click, double_click, fixture_named, install_github, open_empty_workspace,
+    FakeGithub, bounds, cancel_next_pick, click, double_click, fixture_named, install_github, open_empty_workspace,
     open_workspace, pick_next, press, remote_fixture, shows, type_text, wait_for_motion, wait_until_shows,
 };
 use diffpilot_core::settings::Settings;
@@ -396,6 +396,22 @@ fn a_pull_request_waiting_for_your_review_is_flagged(app: &mut TestAppContext) {
     assert!(shows(cx, "open:badge:repo:1 needs you"));
     assert!(shows(cx, "open:pr-pill:479:Review requested"));
     assert!(!shows(cx, "open:pr-pill:482:Review requested"));
+}
+
+#[gpui::test]
+fn the_folder_page_starts_at_the_top_and_its_list_stays_above_the_buttons(app: &mut TestAppContext) {
+    let (_fixture, cx, _) = with_pull_requests(app);
+    let header = bounds(cx, "open:selected:repo");
+    let first_row = bounds(cx, "open:folder:repo");
+    assert!(
+        header.top() < first_row.top(),
+        "the page is not centered: header {header:?}, first recent row {first_row:?}"
+    );
+    let search = bounds(cx, "open:search");
+    let list = bounds(cx, "open:prs-count:2");
+    let cancel = bounds(cx, "open-folder-cancel");
+    assert!(header.top() > search.bottom(), "the page stays below the search field");
+    assert!(list.bottom() < cancel.top(), "the pull requests stay above the buttons");
 }
 
 #[gpui::test]
