@@ -168,13 +168,14 @@ impl Github {
     pub fn list_pull_requests(&self, slug: &RepoSlug) -> Result<Vec<PullRequest>, GithubError> {
         let data: RepositoryData<PullRequestsField> =
             self.graphql(&list_prs_query(), json!({ "owner": slug.owner, "name": slug.name }))?;
+        let viewer = data.viewer.map(|viewer| viewer.login).unwrap_or_default();
         Ok(data
             .repository
             .ok_or_else(|| GithubError::NotFound(slug.full_name()))?
             .pull_requests
             .into_items()
             .into_iter()
-            .map(PrNode::into_pull_request)
+            .map(|node| node.into_pull_request(&viewer))
             .collect())
     }
 
@@ -183,9 +184,10 @@ impl Github {
             &get_pr_query(),
             json!({ "owner": slug.owner, "name": slug.name, "number": number }),
         )?;
+        let viewer = data.viewer.map(|viewer| viewer.login).unwrap_or_default();
         data.repository
             .and_then(|repository| repository.pull_request)
-            .map(PrNode::into_pull_request)
+            .map(|node| node.into_pull_request(&viewer))
             .ok_or_else(|| GithubError::NotFound(format!("PR #{number} in {}", slug.full_name())))
     }
 
@@ -200,13 +202,14 @@ impl Github {
             &find_pr_query(),
             json!({ "owner": slug.owner, "name": slug.name, "branch": branch }),
         )?;
+        let viewer = data.viewer.map(|viewer| viewer.login).unwrap_or_default();
         let mut found: Vec<PullRequest> = data
             .repository
             .ok_or_else(|| GithubError::NotFound(slug.full_name()))?
             .pull_requests
             .into_items()
             .into_iter()
-            .map(PrNode::into_pull_request)
+            .map(|node| node.into_pull_request(&viewer))
             .filter(|pr| {
                 pr.head_ref == branch
                     && pr.head_repo.as_deref().is_some_and(|name| {

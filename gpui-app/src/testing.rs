@@ -941,10 +941,11 @@ impl RemoteFixture {
     }
 }
 
-const OPEN_PRS: &str = r#"{"data":{"repository":{"pullRequests":{"nodes":[
+const OPEN_PRS: &str = r#"{"data":{"viewer":{"login":"reviewer"},"repository":{"pullRequests":{"nodes":[
  {"id":"PR_479","number":479,"title":"Bulk select in the inbox","url":"https://github.com/o/r/pull/479","state":"OPEN",
   "isDraft":false,"author":{"login":"jordan-lee"},"baseRefName":"main","headRefName":"feature/bulk-select",
   "headRefOid":"1111111111111111111111111111111111111111","reviewDecision":"REVIEW_REQUIRED","body":"",
+  "reviewRequests":{"nodes":[{"requestedReviewer":{"login":"REQUESTED_LOGIN"}}]},
   "headRepository":{"nameWithOwner":"o/r"},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}},
  {"id":"PR_482","number":482,"title":"Undo keeps a timer per message","url":"https://github.com/o/r/pull/482","state":"OPEN",
   "isDraft":false,"author":{"login":"mira"},"baseRefName":"main","headRefName":"feature",
@@ -956,11 +957,23 @@ const OPEN_PRS: &str = r#"{"data":{"repository":{"pullRequests":{"nodes":[
 /// `feature`) and the check runs and statuses from core's fixtures.
 pub struct FakeGithub {
     seen: Mutex<Vec<Request>>,
+    review_requested_from: &'static str,
 }
 
 impl FakeGithub {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self { seen: Mutex::default() })
+        Arc::new(Self {
+            seen: Mutex::default(),
+            review_requested_from: "someone-else",
+        })
+    }
+
+    /// Like `new`, but a review of #479 is requested from the signed-in user.
+    pub fn requesting_your_review() -> Arc<Self> {
+        Arc::new(Self {
+            seen: Mutex::default(),
+            review_requested_from: "reviewer",
+        })
     }
 
     pub fn posts(&self) -> Vec<String> {
@@ -986,7 +999,7 @@ impl Http for FakeGithub {
             })
         };
         if body.contains("pullRequests(states:OPEN") {
-            reply(200, OPEN_PRS)
+            reply(200, &OPEN_PRS.replace("REQUESTED_LOGIN", self.review_requested_from))
         } else if request.url.contains("/check-runs") {
             reply(200, include_str!("../../core/tests/fixtures/github/check_runs.json"))
         } else if request.url.contains("/status") {

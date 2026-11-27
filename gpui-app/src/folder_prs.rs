@@ -20,18 +20,31 @@ impl PrList {
         }
     }
 
+    pub fn waiting_for_you(&self) -> usize {
+        waiting_for_you(self.requests())
+    }
+
     pub fn badge(&self) -> Option<String> {
         match self {
             PrList::Loading(None) => None,
-            PrList::Loading(Some(requests)) | PrList::Loaded(requests) => Some(count_text(requests.len())),
+            PrList::Loading(Some(requests)) | PrList::Loaded(requests) => Some(badge_text(requests)),
             PrList::NoRemote => Some("no remote".into()),
             PrList::Failed(_) => Some("offline".into()),
         }
     }
 }
 
-fn count_text(count: usize) -> String {
-    format!("{count} PR{}", if count == 1 { "" } else { "s" })
+fn waiting_for_you(requests: &[ChangeRequest]) -> usize {
+    requests.iter().filter(|request| request.requested_from_you).count()
+}
+
+fn badge_text(requests: &[ChangeRequest]) -> String {
+    match (waiting_for_you(requests), requests.len()) {
+        (0, 1) => "1 PR".into(),
+        (0, count) => format!("{count} PRs"),
+        (1, _) => "1 needs you".into(),
+        (count, _) => format!("{count} need you"),
+    }
 }
 
 #[derive(Default)]
@@ -128,6 +141,7 @@ mod tests {
             head_sha: String::new(),
             from_this_repo: true,
             review: Review::None,
+            requested_from_you: false,
             checks: Some(Outcome::Passed),
         }
     }
@@ -142,6 +156,24 @@ mod tests {
         assert_eq!(PrList::Loaded(Vec::new()).badge().as_deref(), Some("0 PRs"));
         assert_eq!(PrList::NoRemote.badge().as_deref(), Some("no remote"));
         assert_eq!(PrList::Failed("x".into()).badge().as_deref(), Some("offline"));
+    }
+
+    #[test]
+    fn the_badge_says_how_many_pull_requests_need_you() {
+        let mine = |number| ChangeRequest {
+            requested_from_you: true,
+            ..request(number)
+        };
+        let one = PrList::Loaded(vec![request(1), mine(2)]);
+        assert_eq!(one.badge().as_deref(), Some("1 needs you"));
+        assert_eq!(one.waiting_for_you(), 1);
+        let two = PrList::Loaded(vec![mine(1), mine(2), request(3)]);
+        assert_eq!(two.badge().as_deref(), Some("2 need you"));
+        assert_eq!(
+            PrList::Loading(Some(vec![mine(1)])).badge().as_deref(),
+            Some("1 needs you")
+        );
+        assert_eq!(PrList::NoRemote.waiting_for_you(), 0);
     }
 
     #[test]

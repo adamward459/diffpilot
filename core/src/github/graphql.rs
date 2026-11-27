@@ -94,6 +94,8 @@ pub struct PrNode {
     pub head_ref_name: String,
     pub head_ref_oid: String,
     pub review_decision: Option<ReviewDecision>,
+    #[serde(default)]
+    pub review_requests: Option<Connection<ReviewRequest>>,
     pub body: Option<String>,
     pub head_repository: Option<RepoRef>,
     pub commits: Option<Connection<CommitNode>>,
@@ -111,6 +113,24 @@ pub struct PrNode {
     pub changed_files: Option<u32>,
     #[serde(default)]
     pub is_cross_repository: Option<bool>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ReviewRequest {
+    #[serde(rename = "requestedReviewer")]
+    pub requested_reviewer: Option<RequestedReviewer>,
+}
+
+/// Only users have a login. A team request deserializes with `login: None`, because the API cannot say
+/// cheaply whether the viewer is in the team.
+#[derive(Deserialize, Debug)]
+pub struct RequestedReviewer {
+    pub login: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Viewer {
+    pub login: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -144,8 +164,23 @@ impl PrNode {
             .map(|rollup| rollup.state)
     }
 
-    pub fn into_pull_request(self) -> PullRequest {
+    fn requested_from(&self, viewer: &str) -> bool {
+        self.review_requests
+            .iter()
+            .flat_map(|requests| &requests.nodes)
+            .flatten()
+            .any(|request| {
+                request
+                    .requested_reviewer
+                    .as_ref()
+                    .and_then(|reviewer| reviewer.login.as_deref())
+                    .is_some_and(|login| login.eq_ignore_ascii_case(viewer))
+            })
+    }
+
+    pub fn into_pull_request(self, viewer: &str) -> PullRequest {
         let checks = self.checks();
+        let requested_from_you = self.requested_from(viewer);
         PullRequest {
             node_id: self.id,
             number: self.number,
@@ -158,6 +193,7 @@ impl PrNode {
             head_ref: self.head_ref_name,
             head_sha: self.head_ref_oid,
             review_decision: self.review_decision,
+            requested_from_you,
             checks,
             body: self.body.unwrap_or_default(),
             created_at: self.created_at.unwrap_or_default(),
@@ -173,14 +209,14 @@ impl PrNode {
 }
 
 fn pr_fields() -> &'static str {
-    "id number title url state isDraft author{login} baseRefName headRefName headRefOid reviewDecision body \
+    "id number title url state isDraft author{login} baseRefName headRefName headRefOid reviewDecision reviewRequests(first:20){nodes{requestedReviewer{... on User{login}}}} body \
      headRepository{nameWithOwner} commits(last:1){nodes{commit{statusCheckRollup{state}}}} \
      createdAt updatedAt additions deletions changedFiles isCrossRepository reviewThreads(first:1){totalCount}"
 }
 
 pub fn find_pr_query() -> String {
     format!(
-        "query($owner:String!,$name:String!,$branch:String!){{repository(owner:$owner,name:$name){{\
+        "query($owner:String!,$name:String!,$branch:String!){{viewer{{login}}repository(owner:$owner,name:$name){{\
          pullRequests(states:[OPEN,MERGED,CLOSED],headRefName:$branch,first:20,orderBy:{{field:UPDATED_AT,direction:DESC}}){{nodes{{{}}}}}}}}}",
         pr_fields()
     )
@@ -188,7 +224,7 @@ pub fn find_pr_query() -> String {
 
 pub fn list_prs_query() -> String {
     format!(
-        "query($owner:String!,$name:String!){{repository(owner:$owner,name:$name){{\
+        "query($owner:String!,$name:String!){{viewer{{login}}repository(owner:$owner,name:$name){{\
          pullRequests(states:OPEN,first:50,orderBy:{{field:UPDATED_AT,direction:DESC}}){{nodes{{{}}}}}}}}}",
         pr_fields()
     )
@@ -196,7 +232,7 @@ pub fn list_prs_query() -> String {
 
 pub fn get_pr_query() -> String {
     format!(
-        "query($owner:String!,$name:String!,$number:Int!){{repository(owner:$owner,name:$name){{\
+        "query($owner:String!,$name:String!,$number:Int!){{viewer{{login}}repository(owner:$owner,name:$name){{\
          pullRequest(number:$number){{{}}}}}}}",
         pr_fields()
     )
@@ -205,6 +241,8 @@ pub fn get_pr_query() -> String {
 #[derive(Deserialize, Debug)]
 pub struct RepositoryData<T> {
     pub repository: Option<T>,
+    #[serde(default)]
+    pub viewer: Option<Viewer>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -228,13 +266,14 @@ mod tests {
     #[test]
     fn parses_pull_requests() {
         let data: RepositoryData<PullRequestsField> = parse_response(PRS).unwrap();
+        assert_eq!(data.viewer.as_ref().map(|viewer| viewer.login.as_str()), Some("bob"));
         let prs: Vec<_> = data
             .repository
             .unwrap()
             .pull_requests
             .into_items()
             .into_iter()
-            .map(PrNode::into_pull_request)
+            .map(|node| node.into_pull_request("Bob"))
             .collect();
         assert_eq!(prs.len(), 3);
         let first = &prs[0];
@@ -263,6 +302,12 @@ mod tests {
         assert_eq!(second.head_repo, None);
         assert_eq!(second.updated_at, "");
 
+        assert_eq!(
+            prs.iter().map(|pr| pr.requested_from_you).collect::<Vec<_>>(),
+            [true, false, false],
+            "only a user request naming the viewer counts, not another user or a team"
+        );
+
         assert_eq!(prs[2].checks, Some(ChecksState::Pending));
         assert_eq!(prs[2].state, PrState::Merged);
     }
@@ -273,10 +318,11 @@ mod tests {
             "isDraft":false,"author":null,"baseRefName":"main","headRefName":"x","headRefOid":"s","reviewDecision":"FUTURE",
             "body":null,"headRepository":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"NEW_STATE"}}}]}}}}}"#;
         let data: RepositoryData<PullRequestField<PrNode>> = parse_response(text).unwrap();
-        let pr = data.repository.unwrap().pull_request.unwrap().into_pull_request();
+        let pr = data.repository.unwrap().pull_request.unwrap().into_pull_request("me");
         assert_eq!(pr.state, PrState::Unknown);
         assert_eq!(pr.review_decision, Some(ReviewDecision::Unknown));
         assert_eq!(pr.checks, Some(ChecksState::Unknown));
+        assert!(!pr.requested_from_you);
     }
 
     #[test]

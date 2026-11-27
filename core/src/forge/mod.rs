@@ -77,6 +77,7 @@ pub struct ChangeRequest {
     pub head_sha: String,
     pub from_this_repo: bool,
     pub review: Review,
+    pub requested_from_you: bool,
     pub checks: Option<Outcome>,
 }
 

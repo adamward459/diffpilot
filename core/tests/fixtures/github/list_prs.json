@@ -1,12 +1,14 @@
-{"data":{"repository":{"pullRequests":{"nodes":[
+{"data":{"viewer":{"login":"bob"},"repository":{"pullRequests":{"nodes":[
   {"id":"PR_kwDOA1","number":12,"title":"Add x","url":"https://github.com/o/r/pull/12","state":"OPEN","isDraft":false,
    "author":{"login":"alice"},"baseRefName":"main","headRefName":"feat","headRefOid":"abc123",
-   "reviewDecision":"CHANGES_REQUESTED","body":null,"headRepository":{"nameWithOwner":"o/r"},
+   "reviewDecision":"CHANGES_REQUESTED",
+   "reviewRequests":{"nodes":[{"requestedReviewer":{"login":"carol"}},{"requestedReviewer":{"login":"Bob"}}]},"body":null,"headRepository":{"nameWithOwner":"o/r"},
    "commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]},
    "createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-02-01T00:00:00Z","additions":5,"deletions":2,"changedFiles":3,
    "isCrossRepository":true,"reviewThreads":{"totalCount":2}},
   {"id":"PR_kwDOA2","number":13,"title":"Y","url":"https://github.com/o/r/pull/13","state":"OPEN","isDraft":true,"author":null,
-   "baseRefName":"main","headRefName":"b","headRefOid":"def456","reviewDecision":null,"body":"hi",
+   "baseRefName":"main","headRefName":"b","headRefOid":"def456","reviewDecision":null,
+   "reviewRequests":{"nodes":[{"requestedReviewer":{"slug":"core-team"}},null,{"requestedReviewer":null}]},"body":"hi",
    "headRepository":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":null}}]}},
   {"id":"PR_kwDOA3","number":14,"title":"Z","url":"https://github.com/o/r/pull/14","state":"MERGED","isDraft":false,
    "author":{"login":"bob"},"baseRefName":"main","headRefName":"z","headRefOid":"0a0a0a","reviewDecision":"APPROVED","body":"",

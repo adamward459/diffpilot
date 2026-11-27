@@ -527,7 +527,10 @@ pub fn branches_text(change: &ChangeRequest) -> String {
     }
 }
 
-pub fn review_pill(review: Review) -> Option<(&'static str, Tone)> {
+pub fn review_pill(review: Review, requested_from_you: bool) -> Option<(&'static str, Tone)> {
+    if requested_from_you {
+        return Some(("Review requested", Tone::Running));
+    }
     match review {
         Review::Approved => Some(("Approved", Tone::Passed)),
         Review::ChangesRequested => Some(("Changes requested", Tone::Failed)),
@@ -577,7 +580,11 @@ impl OpenFolderDialog {
         let name = folder_name(folder);
         let selected = self.selected.as_ref() == Some(folder);
         let detail = folder_detail(self.snapshots.get(folder).and_then(|loaded| loaded.status.as_ref()));
-        let badge = self.prs.read(cx).list(folder).map(PrList::badge);
+        let (badge, urgent) = self
+            .prs
+            .read(cx)
+            .list(folder)
+            .map_or((None, false), |list| (Some(list.badge()), list.waiting_for_you() > 0));
         let badge = match badge {
             Some(Some(text)) => tag(
                 div()
@@ -587,9 +594,13 @@ impl OpenFolderDialog {
                     .flex()
                     .items_center()
                     .rounded_full()
-                    .bg(tokens.chrome.badge_fill)
+                    .when(urgent, |badge| {
+                        badge.bg(tokens.amber.opacity(0.14)).text_color(tokens.amber)
+                    })
+                    .when(!urgent, |badge| {
+                        badge.bg(tokens.chrome.badge_fill).text_color(tokens.chrome.secondary)
+                    })
                     .text_size(text_px(text_size::SMALL))
-                    .text_color(tokens.chrome.secondary)
                     .whitespace_nowrap()
                     .child(SharedString::from(text.clone())),
                 {
@@ -804,7 +815,13 @@ impl OpenFolderDialog {
                                 .text_color(tokens.ui.muted)
                                 .child(SharedString::from(branches_text(change))),
                         )
-                        .children(review_pill(change.review).map(|(text, tone)| pill(text, tone, tokens)))
+                        .children(
+                            review_pill(change.review, change.requested_from_you).map(|(text, tone)| {
+                                tag(div().child(pill(text, tone, tokens)), move || {
+                                    format!("open:pr-pill:{number}:{text}")
+                                })
+                            }),
+                        )
                         .children(checks_pill(change.checks).map(|(text, tone)| pill(text, tone, tokens))),
                 ),
             move || format!("open:pr:{number}"),
@@ -1103,6 +1120,7 @@ mod tests {
             head_sha: String::new(),
             from_this_repo: true,
             review: Review::None,
+            requested_from_you: false,
             checks: None,
         }
     }
@@ -1165,8 +1183,19 @@ mod tests {
 
     #[test]
     fn the_pills_follow_review_and_checks() {
-        assert_eq!(review_pill(Review::Approved).map(|pill| pill.0), Some("Approved"));
-        assert_eq!(review_pill(Review::None), None);
+        assert_eq!(
+            review_pill(Review::Approved, false).map(|pill| pill.0),
+            Some("Approved")
+        );
+        assert_eq!(review_pill(Review::None, false), None);
+        assert_eq!(
+            review_pill(Review::Requested, true),
+            Some(("Review requested", Tone::Running))
+        );
+        assert_eq!(
+            review_pill(Review::ChangesRequested, true).map(|pill| pill.0),
+            Some("Review requested")
+        );
         assert_eq!(
             checks_pill(Some(Outcome::Failed)).map(|pill| pill.0),
             Some("Checks failed")

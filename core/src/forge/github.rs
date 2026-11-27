@@ -86,6 +86,7 @@ fn change_request(pr: PullRequest, slug: &RepoSlug) -> ChangeRequest {
             Some(ReviewDecision::ReviewRequired) => Review::Requested,
             Some(ReviewDecision::Unknown) | None => Review::None,
         },
+        requested_from_you: pr.requested_from_you,
         checks: pr.checks.and_then(rollup_outcome),
     }
 }
@@ -243,6 +244,10 @@ mod tests {
                 (12, "alice", true, Review::ChangesRequested, Some(Outcome::Passed)),
                 (13, "ghost", false, Review::None, None),
             ]
+        );
+        assert_eq!(
+            found.iter().map(|cr| cr.requested_from_you).collect::<Vec<_>>(),
+            [true, false]
         );
         assert_eq!(
             (

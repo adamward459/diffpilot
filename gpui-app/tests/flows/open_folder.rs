@@ -360,7 +360,18 @@ fn with_pull_requests(
     &'static mut gpui::VisualTestContext,
     Arc<Settings>,
 ) {
-    install_github(app, FakeGithub::new());
+    with_github(app, FakeGithub::new())
+}
+
+fn with_github(
+    app: &mut TestAppContext,
+    github: Arc<FakeGithub>,
+) -> (
+    diffpilot::testing::RemoteFixture,
+    &'static mut gpui::VisualTestContext,
+    Arc<Settings>,
+) {
+    install_github(app, github);
     let fixture = remote_fixture();
     fixture.add_pull_request(479, "bulk.txt");
     let settings = Arc::new(Settings::in_memory());
@@ -377,6 +388,21 @@ fn the_sheet_lists_pull_requests_and_a_badge_counts_them(app: &mut TestAppContex
     assert!(shows(cx, "open:badge:repo:2 PRs"));
     assert!(shows(cx, "open:prs-count:2"));
     assert!(shows(cx, "open:pr:482"));
+}
+
+#[gpui::test]
+fn a_pull_request_waiting_for_your_review_is_flagged(app: &mut TestAppContext) {
+    let (_fixture, cx, _) = with_github(app, FakeGithub::requesting_your_review());
+    assert!(shows(cx, "open:badge:repo:1 needs you"));
+    assert!(shows(cx, "open:pr-pill:479:Review requested"));
+    assert!(!shows(cx, "open:pr-pill:482:Review requested"));
+}
+
+#[gpui::test]
+fn a_pull_request_requested_from_someone_else_is_only_counted(app: &mut TestAppContext) {
+    let (_fixture, cx, _) = with_pull_requests(app);
+    assert!(shows(cx, "open:badge:repo:2 PRs"));
+    assert!(!shows(cx, "open:pr-pill:479:Review requested"));
 }
 
 #[gpui::test]
