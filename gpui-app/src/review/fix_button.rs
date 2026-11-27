@@ -1,7 +1,7 @@
 use crate::review::fix_picker::{FixPicker, PickerEvent};
 use crate::review::pill::RESULT_SECONDS;
 use crate::review::session::{ReviewEvent, ReviewSession};
-use diffpilot_core::run::{RunId, RunKind, RunState};
+use diffpilot_core::run::{RunId, RunState};
 use diffpilot_ui_kit::components::popover;
 use diffpilot_ui_kit::components::{Button, Look, filled_check, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
@@ -35,7 +35,7 @@ impl FixButton {
         let picker = cx.new(|cx| FixPicker::new(session.clone(), cx));
         let subscriptions = vec![
             cx.observe(&session, |this, _, cx| {
-                if this.open && this.session.read(cx).fixable().is_empty() {
+                if this.open && this.session.read(cx).fixable(cx).is_empty() {
                     this.set_open(false, cx);
                 }
                 cx.notify();
@@ -83,8 +83,8 @@ impl FixButton {
         let done = self
             .session
             .read(cx)
-            .current()
-            .filter(|run| run.kind == RunKind::FixComments && run.state == RunState::Done)
+            .fix_run(cx)
+            .filter(|run| run.state == RunState::Done)
             .map(|run| run.id);
         if done.is_none() {
             self.result_for = None;
@@ -127,7 +127,7 @@ impl FixButton {
                 .h(px(30.))
                 .gap(px(6.))
         };
-        if let Some(problem) = session.fix_problem() {
+        if let Some(problem) = session.fix_problem(cx) {
             return Some(
                 tag(button("fix-failed"), || "fix:failed")
                     .icon_color(Glyph::TriangleAlert, 16., theme.amber)
@@ -140,7 +140,7 @@ impl FixButton {
             );
         }
         if self.shows_result()
-            && let Some((fixed, open)) = session.fix_outcome()
+            && let Some((fixed, open)) = session.fix_outcome(cx)
         {
             let text = if open == 0 {
                 format!("Fixed {fixed}")
@@ -154,7 +154,7 @@ impl FixButton {
                     .into_any_element(),
             );
         }
-        let count = session.fixable().len();
+        let count = session.fixable(cx).len();
         if count == 0 {
             return None;
         }

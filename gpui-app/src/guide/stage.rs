@@ -244,7 +244,10 @@ impl GuideStage {
 
     fn start_card(&self, failure: Option<&str>, cx: &mut Context<Self>) -> AnyElement {
         let tokens = Theme::of(cx);
-        let model = self.settings.model_for(diffpilot_core::run::RunKind::Guide).title();
+        let model = diffpilot_core::run::RunKind::Guide
+            .activity()
+            .model(&self.settings)
+            .title();
         let retry = failure.is_some();
         Self::centered(
             card_shell(&tokens, tokens.ui.line)
@@ -300,6 +303,7 @@ impl GuideStage {
     fn writing_card(&self, chapters: usize, cx: &mut Context<Self>) -> AnyElement {
         let tokens = Theme::of(cx);
         let guide = self.guide.clone();
+        let paused = guide.read(cx).paused(cx);
         let progress = match chapters {
             0 => "Reading the diff".to_string(),
             1 => "1 chapter so far".to_string(),
@@ -312,13 +316,21 @@ impl GuideStage {
                 .child(
                     h_flex()
                         .gap(px(8.))
-                        .child(spinner("guide-writing", 16., tokens.ui.claude))
+                        .child(if paused {
+                            glyph_icon(Glyph::Pause, 16., tokens.ui.claude).into_any_element()
+                        } else {
+                            spinner("guide-writing", 16., tokens.ui.claude).into_any_element()
+                        })
                         .child(
                             div()
                                 .id("guide-writing")
                                 .text_size(diffpilot_ui_kit::text_px(15.))
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .child("Claude is writing the guide"),
+                                .child(if paused {
+                                    "The guide is paused"
+                                } else {
+                                    "Claude is writing the guide"
+                                }),
                         ),
                 )
                 .child(

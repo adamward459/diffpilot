@@ -10,7 +10,7 @@ use crate::changes;
 use crate::diff::{self, FileDiff};
 use crate::git;
 use crate::git_diff::GitDiff;
-use crate::policy::{APPROVE_TOOL, EditPermission, mcp_tools};
+use crate::policy::{APPROVE_TOOL, EditPermission};
 use crate::review::{FindingMeta, Severity};
 use crate::store::{NewComment, NewThread, SessionId, Store};
 use crate::threads::{Addressed, CLAUDE_NAME, CommentSource, ReviewThread, Side, ThreadAnchor, ThreadId, ThreadStatus};
@@ -178,7 +178,7 @@ pub fn definitions() -> Vec<ToolDef> {
 
 /// The names this run may call.
 pub fn allowed(binding: &Binding) -> Vec<&'static str> {
-    let mut names: Vec<&'static str> = mcp_tools(binding.kind).to_vec();
+    let mut names: Vec<&'static str> = binding.kind.activity().mcp_tools().to_vec();
     if binding.edits.is_some_and(|edit| edit != EditPermission::DontAsk) {
         names.push(APPROVE_TOOL);
     }
@@ -201,7 +201,7 @@ pub fn call(store: &Store, binding: &Binding, tool: &str, args: Value) -> Result
     if !allowed(binding).contains(&tool) {
         return Err(ToolError::new(format!(
             "The tool `{tool}` is not available in a {} run.",
-            binding.kind.title().to_lowercase()
+            binding.kind.activity().title().to_lowercase()
         )));
     }
     let ctx = Ctx { store, binding };

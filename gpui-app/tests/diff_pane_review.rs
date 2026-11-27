@@ -144,8 +144,12 @@ fn run_review(opened: &Opened, cx: &mut VisualTestContext) -> Vec<ReviewThread> 
     opened.session.update(cx, |session, cx| session.start_review(cx));
     cx.executor().allow_parking();
     let deadline = Instant::now() + Duration::from_secs(30);
-    while !opened.session.read_with(cx, |session, _| {
-        session.current().is_some_and(|run| run.state.is_finished())
+    while !opened.session.read_with(cx, |session, cx| {
+        session
+            .activity()
+            .read(cx)
+            .current()
+            .is_some_and(|run| run.state.is_finished())
     }) {
         assert!(Instant::now() < deadline, "the review did not end");
         cx.run_until_parked();

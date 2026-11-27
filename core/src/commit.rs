@@ -84,7 +84,7 @@ pub fn message_request(repo: &Path, session: SessionKey, model: ReviewModel) -> 
         repo,
         session,
         RunKind::CommitMessage,
-        RunKind::CommitMessage.title(),
+        RunKind::CommitMessage.activity().title(),
         &message_prompt(&stat, &diff),
         model,
     );

@@ -2,7 +2,7 @@ mod common;
 
 use common::*;
 use diffpilot::review::session::{NO_REPLY_MESSAGE, NO_REPO_MESSAGE};
-use diffpilot::review::{ReviewEvent, ThreadChange};
+use diffpilot::review::{ReviewEvent, ReviewHost, ReviewSession, ThreadChange};
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::policy::EditPermission;
 use diffpilot_core::review::{Effort, ModelName, ReviewModel, ReviewScope, Severity};
@@ -10,7 +10,7 @@ use diffpilot_core::run::{RunKind, RunState};
 use diffpilot_core::store::Store;
 use diffpilot_core::threads::ThreadStatus;
 use diffpilot_core::threads::{CLAUDE_NAME, Side, ThreadAnchor, ThreadId, USER_NAME};
-use gpui::TestAppContext;
+use gpui::{AppContext as _, TestAppContext};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -19,7 +19,7 @@ async fn a_run_ends_done_with_threads_planned_from_the_findings(cx: &mut TestApp
     let f = fixture(cx, two_findings());
     f.claude.hold();
     f.start(cx);
-    assert!(f.session.read_with(cx, |s, _| s.reviewing()));
+    assert!(f.session.read_with(cx, |s, cx| s.reviewing(cx)));
     f.claude.finish();
     f.wait_for_end(cx);
 
@@ -108,7 +108,12 @@ async fn stop_ends_the_run_as_stopped_and_adds_no_threads(cx: &mut TestAppContex
     f.claude.hold();
     f.start(cx);
     f.wait_for_launches(cx, 1);
-    f.session.update(cx, |session, cx| session.stop_claude(cx));
+    f.session.update(cx, |session, cx| {
+        session
+            .activity()
+            .clone()
+            .update(cx, |activity, cx| activity.stop_current(cx))
+    });
     f.wait_for_end(cx);
     assert_eq!(f.state(cx), Some(RunState::Stopped));
     assert_eq!(f.problem(cx), None);
@@ -118,11 +123,21 @@ async fn stop_ends_the_run_as_stopped_and_adds_no_threads(cx: &mut TestAppContex
 #[gpui::test]
 async fn stopping_when_nothing_runs_changes_nothing(cx: &mut TestAppContext) {
     let f = fixture(cx, two_findings());
-    f.session.update(cx, |session, cx| session.stop_claude(cx));
+    f.session.update(cx, |session, cx| {
+        session
+            .activity()
+            .clone()
+            .update(cx, |activity, cx| activity.stop_current(cx))
+    });
     assert!(f.events.borrow().is_empty());
     f.review(cx);
     let before = f.events.borrow().len();
-    f.session.update(cx, |session, cx| session.stop_claude(cx));
+    f.session.update(cx, |session, cx| {
+        session
+            .activity()
+            .clone()
+            .update(cx, |activity, cx| activity.stop_current(cx))
+    });
     assert_eq!(f.events.borrow().len(), before);
     assert_eq!(f.state(cx), Some(RunState::Done));
 }
@@ -134,7 +149,7 @@ async fn starting_while_a_run_is_going_queues_the_next_one_behind_it(cx: &mut Te
     f.start(cx);
     f.wait_for_launches(cx, 1);
     f.start(cx);
-    assert_eq!(f.session.read_with(cx, |s, _| s.queued().len()), 1);
+    assert_eq!(f.session.read_with(cx, |s, cx| s.activity().read(cx).queued().len()), 1);
     cx.run_until_parked();
     assert_eq!(f.claude.launches(), 1);
 
@@ -142,7 +157,10 @@ async fn starting_while_a_run_is_going_queues_the_next_one_behind_it(cx: &mut Te
     f.wait_for_launches(cx, 2);
     f.wait_for_end(cx);
     assert_eq!(f.claude.launches(), 2);
-    assert!(f.session.read_with(cx, |s, _| s.queued().is_empty()));
+    assert!(
+        f.session
+            .read_with(cx, |s, cx| s.activity().read(cx).queued().is_empty())
+    );
 }
 
 #[gpui::test]
@@ -259,9 +277,9 @@ async fn a_reply_to_a_thread_the_next_review_replaces_leaves_nothing_behind(cx: 
 #[gpui::test]
 async fn run_again_starts_a_review_with_the_current_setup_once_the_run_has_ended(cx: &mut TestAppContext) {
     let f = fixture(cx, two_findings());
-    assert!(!f.session.read_with(cx, |s, _| s.can_run_again()));
+    assert!(!f.session.read_with(cx, |s, cx| s.can_run_again(cx)));
     f.review(cx);
-    assert!(f.session.read_with(cx, |s, _| s.can_run_again()));
+    assert!(f.session.read_with(cx, |s, cx| s.can_run_again(cx)));
     f.session.update(cx, |session, cx| session.run_again(cx));
     f.wait_for_end(cx);
     assert_eq!(f.claude.launches(), 2);
@@ -377,8 +395,14 @@ async fn a_second_ask_while_a_reply_runs_is_ignored(cx: &mut TestAppContext) {
     f.post(cx, id, "@claude one");
     f.session.update(cx, |session, cx| session.ask_claude(id, cx));
     f.post(cx, id, "@claude two");
-    let runs = f.session.read_with(cx, |session, _| {
-        session.current().into_iter().chain(session.queued()).count()
+    let runs = f.session.read_with(cx, |session, cx| {
+        session
+            .activity()
+            .read(cx)
+            .current()
+            .into_iter()
+            .chain(session.activity().read(cx).queued())
+            .count()
     });
     assert_eq!(runs, 1);
     f.claude.finish();
@@ -459,7 +483,12 @@ async fn a_stopped_reply_run_leaves_no_note(cx: &mut TestAppContext) {
     let id = f.user_thread(cx);
     f.post(cx, id, "@claude hi");
     f.wait_for_launches(cx, 1);
-    f.session.update(cx, |session, cx| session.stop_claude(cx));
+    f.session.update(cx, |session, cx| {
+        session
+            .activity()
+            .clone()
+            .update(cx, |activity, cx| activity.stop_current(cx))
+    });
     f.wait_for_reply_end(cx, id);
     assert_eq!(f.state(cx), Some(RunState::Stopped));
     assert_eq!(f.thread(cx, id).unwrap().comments.len(), 1);
@@ -615,4 +644,40 @@ async fn resolving_keeps_the_thread_in_the_store_and_out_of_the_counts(cx: &mut 
         f.events.borrow().last(),
         Some(&ReviewEvent::ThreadsChanged(ThreadChange::Removed(id)))
     );
+}
+
+#[gpui::test]
+async fn every_session_of_a_repo_sees_the_same_run_whoever_started_it(cx: &mut TestAppContext) {
+    let f = fixture(cx, two_findings());
+    f.claude.hold();
+    let repo = f.session.read_with(cx, |s, _| s.host().repo.clone());
+    let other = {
+        let (settings, store) = (f.settings.clone(), f.store.clone());
+        let host = ReviewHost::new(repo, Comparison::WorkingTree);
+        cx.new(move |cx| ReviewSession::new(host, settings, store, cx))
+    };
+    f.start(cx);
+    f.wait_for_launches(cx, 1);
+    wait_until(cx, "the run to start", |cx| {
+        other.read_with(cx, |s, cx| {
+            s.activity()
+                .read(cx)
+                .current()
+                .is_some_and(|run| run.kind == RunKind::Review && run.state == RunState::Running)
+        })
+    });
+    let same = cx.read(|cx| f.session.read(cx).activity() == other.read(cx).activity());
+    assert!(same, "one model per repo");
+    assert!(
+        !other.read_with(cx, |s, cx| s.reviewing(cx)),
+        "only the session that started the review owns it"
+    );
+
+    other.update(cx, |s, cx| {
+        s.activity()
+            .clone()
+            .update(cx, |activity, cx| activity.stop_current(cx))
+    });
+    f.wait_for_end(cx);
+    assert_eq!(f.state(cx), Some(RunState::Stopped));
 }

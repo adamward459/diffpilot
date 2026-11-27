@@ -223,8 +223,8 @@ async fn answer_when_asked(
 ) {
     loop {
         let started = session
-            .read_with(cx, |session, _| {
-                session.current().is_some_and(|run| {
+            .read_with(cx, |session, cx| {
+                session.activity().read(cx).current().is_some_and(|run| {
                     run.kind == RunKind::Reply && run.state == RunState::Running && run.threads.contains(&id)
                 })
             })
@@ -376,15 +376,19 @@ async fn bench(cx: &mut AsyncApp) {
     let mut answered_at = None;
     let mut meter = Meter::start();
     while session
-        .read_with(cx, |session, _| session.is_replying(id))
+        .read_with(cx, |session, cx| session.is_replying(id, cx))
         .expect("app is alive")
     {
         cx.background_executor().timer(Duration::from_millis(33)).await;
         stream.push(draw(cx));
         meter.sample();
         let running = session
-            .read_with(cx, |session, _| {
-                session.current().is_some_and(|run| run.state == RunState::Running)
+            .read_with(cx, |session, cx| {
+                session
+                    .activity()
+                    .read(cx)
+                    .current()
+                    .is_some_and(|run| run.state == RunState::Running)
             })
             .expect("app is alive");
         match answered_at {

@@ -18,6 +18,27 @@ fn name(value: &impl serde::Serialize) -> String {
         .unwrap_or_default()
 }
 
+fn sql_limit(limit: usize) -> i64 {
+    i64::try_from(limit).unwrap_or(i64::MAX)
+}
+
+fn summary_of(row: &rusqlite::Row) -> rusqlite::Result<RunSummary> {
+    let model: String = row.get(4)?;
+    let (model_name, effort) = model.split_once(' ').unwrap_or(("opus", "high"));
+    Ok(RunSummary {
+        id: RunId(row.get(0)?),
+        kind: kind_of(&row.get::<_, String>(1)?),
+        title: row.get(2)?,
+        state: state_of(&row.get::<_, String>(3)?),
+        model: ReviewModel::new(
+            serde_json::from_value(serde_json::Value::String(model_name.into())).unwrap_or(ModelName::Opus),
+            serde_json::from_value(serde_json::Value::String(effort.into())).unwrap_or(Effort::High),
+        ),
+        started_at_ms: row.get(5)?,
+        finished_at_ms: row.get(6)?,
+    })
+}
+
 impl Store {
     /// Reserves the id of a run. Call `save_run` right after, so the row has its data.
     pub fn insert_run(&self, session: SessionId, kind: RunKind, title: &str) -> Result<RunId> {
@@ -65,29 +86,32 @@ impl Store {
             "SELECT id, kind, title, state, model, started_at, finished_at FROM runs
              WHERE session_id = ?1 ORDER BY id DESC LIMIT ?2",
         )?;
-        let rows = statement.query_map((session.0, i64::try_from(limit).unwrap_or(i64::MAX)), |row| {
-            let model: String = row.get(4)?;
-            let (model_name, effort) = model.split_once(' ').unwrap_or(("opus", "high"));
-            Ok(RunSummary {
-                id: RunId(row.get(0)?),
-                kind: kind_of(&row.get::<_, String>(1)?),
-                title: row.get(2)?,
-                state: state_of(&row.get::<_, String>(3)?),
-                model: ReviewModel::new(
-                    serde_json::from_value(serde_json::Value::String(model_name.into())).unwrap_or(ModelName::Opus),
-                    serde_json::from_value(serde_json::Value::String(effort.into())).unwrap_or(Effort::High),
-                ),
-                started_at_ms: row.get(5)?,
-                finished_at_ms: row.get(6)?,
-            })
-        })?;
+        let rows = statement.query_map((session.0, sql_limit(limit)), summary_of)?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// Runs left queued or running by an app that quit. They cannot continue.
+    /// Runs of every kind and every comparison of one branch, newest first, without the logs.
+    pub fn branch_run_summaries(&self, repo: &str, branch: &str, limit: usize) -> Result<Vec<RunSummary>> {
+        let conn = self.lock();
+        let mut statement = conn.prepare(
+            "SELECT runs.id, runs.kind, runs.title, runs.state, runs.model, runs.started_at, runs.finished_at
+             FROM runs JOIN sessions ON sessions.id = runs.session_id
+             WHERE sessions.repo = ?1 AND sessions.branch = ?2 ORDER BY runs.id DESC LIMIT ?3",
+        )?;
+        let rows = statement.query_map((repo, branch, sql_limit(limit)), summary_of)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Runs left queued, running or paused by an app that quit. They cannot continue: a paused run counts as stopped.
     pub fn fail_stale_runs(&self) -> Result<usize> {
         let conn = self.lock();
         let now = now_ms();
+        conn.execute(
+            "UPDATE runs SET state = 'stopped', finished_at = ?1,
+               data = json_set(data, '$.state', 'stopped', '$.finished_at_ms', ?1)
+             WHERE state = 'paused'",
+            [now],
+        )?;
         let failed = conn.execute(
             "UPDATE runs SET state = 'failed', finished_at = ?1,
                data = json_set(data, '$.state', 'failed', '$.finished_at_ms', ?1, '$.error', 'diffpilot quit during this run.')

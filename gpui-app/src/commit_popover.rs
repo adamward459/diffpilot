@@ -1,3 +1,4 @@
+use crate::claude_activity::ClaudeActivity;
 use crate::runs::Runs;
 use diffpilot_core::commit::{self, CommitMessage};
 use diffpilot_core::comparison::Comparison;
@@ -37,8 +38,9 @@ pub struct CommitPopover {
     message: Entity<InputState>,
     state: CommitState,
     session: SessionKey,
+    activity: Entity<ClaudeActivity>,
     turn: u64,
-    _subscription: Subscription,
+    _subscriptions: [Subscription; 2],
 }
 
 impl EventEmitter<CommitEvent> for CommitPopover {}
@@ -61,14 +63,17 @@ impl CommitPopover {
             },
         );
         let session = SessionKey::for_comparison(&repo, &Comparison::WorkingTree, None);
+        let activity = ClaudeActivity::for_repo(&repo, cx);
+        let observed = cx.observe(&activity, |_, _, cx| cx.notify());
         Self {
             repo,
             changed: 0,
             message,
             state: CommitState::Idle,
             session,
+            activity,
             turn: 0,
-            _subscription: subscription,
+            _subscriptions: [subscription, observed],
         }
     }
 
@@ -328,8 +333,21 @@ impl Render for CommitPopover {
 }
 
 impl CommitPopover {
+    /// What the commit message run is doing, as the Claude area and status line say it.
+    fn generating_text(&self, cx: &Context<Self>) -> &'static str {
+        let CommitState::Generating(Some(id)) = self.state else {
+            return "Writing\u{2026}";
+        };
+        match self.activity.read(cx).run(id).map(|run| run.state) {
+            Some(RunState::Queued) => "Waiting\u{2026}",
+            Some(RunState::Paused) => "Paused",
+            _ => "Writing\u{2026}",
+        }
+    }
+
     fn generate_control(&self, committing: bool, theme: Theme, cx: &mut Context<Self>) -> gpui::AnyElement {
         if self.generating() {
+            let text = self.generating_text(cx);
             return h_flex()
                 .gap_2()
                 .items_center()
@@ -338,7 +356,7 @@ impl CommitPopover {
                     div()
                         .text_size(diffpilot_ui_kit::text_px(12.))
                         .text_color(theme.ui.muted)
-                        .child("Writing\u{2026}"),
+                        .child(text),
                 )
                 .child(
                     tag(Button::new("commit-stop").label("Stop").regular(), || "commit:stop")

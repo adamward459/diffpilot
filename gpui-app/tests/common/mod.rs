@@ -125,7 +125,8 @@ pub fn wait_until(cx: &mut TestAppContext, what: &str, mut done: impl FnMut(&mut
 
 impl Fixture {
     pub fn current(&self, cx: &mut TestAppContext) -> Option<Run> {
-        self.session.read_with(cx, |session, _| session.current().cloned())
+        self.session
+            .read_with(cx, |session, cx| session.activity().read(cx).current().cloned())
     }
 
     pub fn state(&self, cx: &mut TestAppContext) -> Option<RunState> {
@@ -143,7 +144,8 @@ impl Fixture {
 
     pub fn wait_for_end(&self, cx: &mut TestAppContext) {
         wait_until(cx, "the run to end", |cx| {
-            self.state(cx).is_some_and(RunState::is_finished) && self.session.read_with(cx, |s, _| !s.is_busy())
+            self.state(cx).is_some_and(RunState::is_finished)
+                && self.session.read_with(cx, |s, cx| !s.activity().read(cx).is_busy())
         });
     }
 
@@ -152,7 +154,7 @@ impl Fixture {
     }
 
     pub fn problem(&self, cx: &mut TestAppContext) -> Option<String> {
-        self.session.read_with(cx, |session, _| session.review_problem())
+        self.session.read_with(cx, |session, cx| session.review_problem(cx))
     }
 
     pub fn thread(&self, cx: &mut TestAppContext, id: ThreadId) -> Option<ReviewThread> {
@@ -175,7 +177,7 @@ impl Fixture {
     }
 
     pub fn replying(&self, cx: &mut TestAppContext, id: ThreadId) -> bool {
-        self.session.read_with(cx, |session, _| session.is_replying(id))
+        self.session.read_with(cx, |session, cx| session.is_replying(id, cx))
     }
 
     pub fn wait_for_reply_end(&self, cx: &mut TestAppContext, id: ThreadId) {

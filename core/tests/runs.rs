@@ -7,7 +7,7 @@ use diffpilot_core::review::{Effort, ModelName, ReviewModel};
 use diffpilot_core::run::{LogKind, RunKind, RunOutcome, RunState, StepState};
 use diffpilot_core::runner::{EngineError, RunEvent, RunRequest};
 use diffpilot_core::snapshot::{self, Until};
-use diffpilot_core::store::Store;
+use diffpilot_core::store::{SessionKey, Store};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -515,4 +515,189 @@ fn only_the_newest_editing_runs_keep_their_snapshot_refs() {
     wait_finished(&rx, third, WITHIN);
     assert!(!refs().contains("runs/1/"), "{}", refs());
     assert!(refs().contains("runs/2/before") && refs().contains("runs/3/before"));
+}
+
+#[test]
+fn past_runs_list_every_kind_and_comparison_of_the_branch() {
+    let repo = temp_repo();
+    let work = tempfile::tempdir().unwrap();
+    let claude = fake_claude(
+        work.path(),
+        r#"echo '{"type":"result","subtype":"success","is_error":false,"result":"ok"}'"#,
+    );
+    let engine = engine(Arc::new(Store::open_in_memory().unwrap()), claude, work.path());
+    let rx = engine.subscribe();
+    let on = |branch: &str, base: &str, kind: RunKind| {
+        let key = SessionKey::new(&repo.path().to_string_lossy(), branch, base);
+        RunRequest::new(repo.path(), key, kind, kind.activity().title(), "Go.", model())
+    };
+    for request in [
+        on("main", "main", RunKind::MakeChanges),
+        on("main", "HEAD", RunKind::CommitMessage),
+        on("other", "main", RunKind::MakeChanges),
+    ] {
+        let id = engine.submit(request).unwrap();
+        wait_finished(&rx, id, WITHIN);
+    }
+
+    let kinds: Vec<RunKind> = engine
+        .past_runs(&key(repo.path()), 10)
+        .unwrap()
+        .iter()
+        .map(|run| run.kind)
+        .collect();
+    assert_eq!(kinds, [RunKind::CommitMessage, RunKind::MakeChanges]);
+}
+
+/// A `claude` that records the arguments of each launch in `out/launch-<n>.txt`. A first launch starts session
+/// `sess-1`, logs a read, and waits until it is stopped. A launch with `--resume` logs a message and ends well.
+fn pausable_claude(work: &Path) -> std::path::PathBuf {
+    let out = work.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    fake_claude(
+        work,
+        &format!(
+            r#"
+n=$(ls '{out}' | wc -l | tr -d ' ')
+for arg in "$@"; do printf '%s\n' "$arg" >> "{out}/launch-$n.txt"; done
+case " $* " in
+  *" --resume "*)
+    echo '{{"type":"system","subtype":"init","session_id":"sess-1"}}'
+    echo '{{"type":"assistant","message":{{"id":"m2","content":[{{"type":"text","text":"Picked it up again."}}]}}}}'
+    echo '{{"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"Done."}}'
+    ;;
+  *)
+    echo '{{"type":"system","subtype":"init","session_id":"sess-1"}}'
+    echo '{{"type":"assistant","message":{{"id":"m1","content":[{{"type":"tool_use","id":"t1","name":"Read","input":{{"file_path":"a.ts"}}}}]}}}}'
+    sleep 60 &
+    wait
+    ;;
+esac
+"#,
+            out = out.display(),
+        ),
+    )
+}
+
+fn launches(work: &Path) -> Vec<Vec<String>> {
+    let mut found: Vec<_> = std::fs::read_dir(work.join("out"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    found.sort();
+    found.iter().map(|path| lines(path)).collect()
+}
+
+fn wait_paused(engine: &diffpilot_core::runner::RunEngine, id: diffpilot_core::run::RunId) {
+    wait_for("the run to pause", WITHIN, || {
+        engine.run(id).unwrap().state == RunState::Paused
+    });
+}
+
+#[test]
+fn a_paused_run_holds_the_queue_and_continues_on_its_session() {
+    let repo = temp_repo();
+    let work = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let engine = engine(store, pausable_claude(work.path()), work.path());
+    let rx = engine.subscribe();
+    let first = engine.submit(request(repo.path(), RunKind::MakeChanges)).unwrap();
+    let second = engine.submit(request(repo.path(), RunKind::MakeChanges)).unwrap();
+    wait_for("the session id", WITHIN, || {
+        engine
+            .run(first)
+            .unwrap()
+            .log
+            .iter()
+            .any(|entry| entry.kind == LogKind::Read)
+            && engine.run(first).unwrap().claude_session.is_some()
+    });
+
+    assert!(engine.pause(first));
+    wait_paused(&engine, first);
+    assert_eq!(engine.active(repo.path()).map(|run| run.id), Some(first));
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(engine.run(second).unwrap().state, RunState::Queued, "the queue waits");
+    assert_eq!(launches(work.path()).len(), 1);
+    assert_eq!(
+        engine
+            .store()
+            .load_run(first)
+            .unwrap()
+            .unwrap()
+            .claude_session
+            .as_deref(),
+        Some("sess-1"),
+        "the session id is saved with the run"
+    );
+
+    assert!(engine.resume(first));
+    let (state, events) = wait_finished(&rx, first, WITHIN);
+    assert_eq!(state, RunState::Done);
+    assert!(events.contains(&RunEvent::Paused { run: first }));
+    assert!(events.contains(&RunEvent::Continued { run: first }));
+    let run = engine.run(first).unwrap();
+    let kinds: Vec<LogKind> = run.log.iter().map(|entry| entry.kind).collect();
+    assert_eq!(kinds, [LogKind::Read, LogKind::Message], "one log for both launches");
+
+    let all = launches(work.path());
+    let after = |args: &[String], flag: &str| args[args.iter().position(|arg| arg == flag).unwrap() + 1].clone();
+    assert_eq!(after(&all[1], "--resume"), "sess-1");
+    assert_eq!(after(&all[1], "-p"), diffpilot_core::runner::CONTINUE_PROMPT);
+    assert!(!all[0].contains(&"--resume".to_string()));
+    assert!(
+        all.iter().flatten().all(|arg| arg != "--no-session-persistence"),
+        "a run must keep its session to be resumed"
+    );
+
+    wait_for("the queued run to start once the paused one is done", WITHIN, || {
+        launches(work.path()).len() == 3
+    });
+    assert!(engine.stop(second));
+    wait_finished(&rx, second, WITHIN);
+}
+
+#[test]
+fn stopping_a_paused_run_ends_it_and_starts_the_next() {
+    let repo = temp_repo();
+    let work = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let engine = engine(store, pausable_claude(work.path()), work.path());
+    let rx = engine.subscribe();
+    let first = engine.submit(request(repo.path(), RunKind::MakeChanges)).unwrap();
+    let second = engine.submit(request(repo.path(), RunKind::MakeChanges)).unwrap();
+    wait_for("the run to start", WITHIN, || {
+        engine.run(first).unwrap().state == RunState::Running
+    });
+    assert!(!engine.resume(first), "only a paused run continues");
+    assert!(engine.pause(first));
+    wait_paused(&engine, first);
+    assert!(!engine.pause(first), "a paused run cannot pause again");
+
+    assert!(engine.stop(first));
+    let (state, _) = wait_finished(&rx, first, WITHIN);
+    assert_eq!(state, RunState::Stopped);
+    assert!(!engine.resume(first));
+    wait_for("the next run to start", WITHIN, || launches(work.path()).len() == 2);
+    assert!(engine.stop(second));
+    wait_finished(&rx, second, WITHIN);
+}
+
+#[test]
+fn a_run_paused_when_the_app_quit_shows_as_stopped() {
+    let repo = temp_repo();
+    let work = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let engine = engine(store.clone(), pausable_claude(work.path()), work.path());
+    let first = engine.submit(request(repo.path(), RunKind::MakeChanges)).unwrap();
+    wait_for("the run to start", WITHIN, || {
+        engine.run(first).unwrap().state == RunState::Running
+    });
+    assert!(engine.pause(first));
+    wait_paused(&engine, first);
+
+    store.fail_stale_runs().unwrap();
+    let run = store.load_run(first).unwrap().unwrap();
+    assert_eq!(run.state, RunState::Stopped);
+    assert!(run.finished_at_ms.is_some());
 }

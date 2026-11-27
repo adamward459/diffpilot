@@ -1,3 +1,4 @@
+use crate::claude_activity::ClaudeActivity;
 use crate::diff_pane::PaneNote;
 use crate::review::ReviewSession;
 use crate::review::session::NO_REPO_MESSAGE;
@@ -10,10 +11,10 @@ use diffpilot_core::guide::stale::{self, Staleness};
 use diffpilot_core::guide::{Diagram, prompt};
 use diffpilot_core::policy::EditPermission;
 use diffpilot_core::run::{RunKind, RunState};
-use diffpilot_core::runner::{RunEngine, RunEvent};
+use diffpilot_core::runner::RunEvent;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::{GuideId, RunId, SessionId, Store, StoredGuide};
-use gpui::{App, AppContext as _, Context, Entity, EventEmitter, PathPromptOptions, Subscription, Task};
+use gpui::{App, AppContext as _, Context, Entity, EventEmitter, PathPromptOptions, Subscription};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -56,9 +57,8 @@ pub struct GuideSession {
     run: GuideRun,
     step: Step,
     viewed: HashSet<String>,
-    engine: Option<RunEngine>,
-    events: Option<Task<()>>,
-    _review: Subscription,
+    activity: Entity<ClaudeActivity>,
+    _subscriptions: [Subscription; 2],
 }
 
 impl EventEmitter<GuideEvent> for GuideSession {}
@@ -71,7 +71,11 @@ impl GuideSession {
         cx: &mut Context<Self>,
     ) -> Self {
         let session = review.read(cx).session_id();
-        let observed = cx.observe(&review, |this, _, cx| this.files_may_have_changed(cx));
+        let activity = review.read(cx).activity().clone();
+        let subscriptions = [
+            cx.observe(&review, |this, _, cx| this.files_may_have_changed(cx)),
+            cx.subscribe(&activity, |this, _, event: &RunEvent, cx| this.apply(event, cx)),
+        ];
         let mut this = Self {
             review,
             store,
@@ -88,9 +92,8 @@ impl GuideSession {
             run: GuideRun::Idle,
             step: Step::Overview,
             viewed: HashSet::new(),
-            engine: None,
-            events: None,
-            _review: observed,
+            activity,
+            _subscriptions: subscriptions,
         };
         this.stored = this.store.current_guide(session).ok().flatten();
         this.adopt_live_run(cx);
@@ -99,18 +102,12 @@ impl GuideSession {
     }
 
     fn adopt_live_run(&mut self, cx: &mut Context<Self>) {
-        let Some(repo) = self.review.read(cx).host().repo.clone() else {
-            return;
-        };
-        let Some(engine) = cx.try_global::<Runs>().map(|runs| runs.engine().clone()) else {
-            return;
-        };
-        self.watch(&engine, cx);
-        let live = engine
-            .active(&repo)
-            .into_iter()
-            .chain(engine.queued(&repo))
-            .find(|run| run.kind == RunKind::Guide && run.session == self.session);
+        let live = self
+            .activity
+            .read(cx)
+            .live()
+            .find(|run| run.kind == RunKind::Guide && run.session == self.session)
+            .cloned();
         if let Some(run) = live {
             let chapters = self
                 .store
@@ -154,6 +151,17 @@ impl GuideSession {
 
     pub fn run(&self) -> &GuideRun {
         &self.run
+    }
+
+    /// The guide run was paused from the Claude area or the pill.
+    pub fn paused(&self, cx: &App) -> bool {
+        let GuideRun::Writing { run, .. } = self.run else {
+            return false;
+        };
+        self.activity
+            .read(cx)
+            .run(run)
+            .is_some_and(|run| run.state == RunState::Paused)
     }
 
     pub fn step(&self) -> Step {
@@ -456,11 +464,10 @@ impl GuideSession {
             repo,
             session: review.session_key(),
             revisions: review.host().comparison.revisions(),
-            model: self.settings.model_for(RunKind::Guide),
+            model: RunKind::Guide.activity().model(&self.settings),
             edit_permission: EditPermission::default(),
         };
         let linked = self.linked(cx);
-        self.watch(&engine, cx);
         self.run = match engine.submit(prompt::request(&target, "", &linked)) {
             Ok(run) => GuideRun::Writing { run, chapters: 0 },
             Err(error) => GuideRun::Failed(error.to_string()),
@@ -469,50 +476,29 @@ impl GuideSession {
     }
 
     pub fn stop(&mut self, cx: &mut Context<Self>) {
-        if let (Some(engine), GuideRun::Writing { run, .. }) = (&self.engine, &self.run) {
-            engine.stop(*run);
+        if let GuideRun::Writing { run, .. } = self.run {
+            self.activity.update(cx, |activity, cx| activity.stop(run, cx));
         }
         cx.notify();
     }
 
-    fn watch(&mut self, engine: &RunEngine, cx: &mut Context<Self>) {
-        if self.events.is_some() {
-            return;
-        }
-        self.engine = Some(engine.clone());
-        let events = engine.subscribe();
-        self.events = Some(cx.spawn(async move |this, cx| {
-            while let Ok(first) = events.recv().await {
-                let mut batch = vec![first];
-                while let Ok(more) = events.try_recv() {
-                    batch.push(more);
-                }
-                if this.update(cx, |session, cx| session.apply(batch, cx)).is_err() {
-                    return;
-                }
-            }
-        }));
-    }
-
-    fn apply(&mut self, events: Vec<RunEvent>, cx: &mut Context<Self>) {
+    fn apply(&mut self, event: &RunEvent, cx: &mut Context<Self>) {
         let GuideRun::Writing { run: own, .. } = self.run else {
             return;
         };
-        for event in events {
-            match event {
-                RunEvent::GuideChanged { run, session } if run == own && session == self.session => {
-                    let chapters = self
-                        .store
-                        .load_draft(run)
-                        .ok()
-                        .flatten()
-                        .map_or(0, |draft| draft.guide.chapters.len());
-                    self.run = GuideRun::Writing { run, chapters };
-                    self.announce(cx);
-                }
-                RunEvent::Finished { run, state } if run == own => return self.finish(run, state, cx),
-                _ => {}
+        match *event {
+            RunEvent::GuideChanged { run, session } if run == own && session == self.session => {
+                let chapters = self
+                    .store
+                    .load_draft(run)
+                    .ok()
+                    .flatten()
+                    .map_or(0, |draft| draft.guide.chapters.len());
+                self.run = GuideRun::Writing { run, chapters };
+                self.announce(cx);
             }
+            RunEvent::Finished { run, state } if run == own => self.finish(run, state, cx),
+            _ => {}
         }
     }
 
@@ -523,10 +509,10 @@ impl GuideSession {
             RunState::Done if written => GuideRun::Idle,
             RunState::Done => GuideRun::Failed(NOT_FINISHED_MESSAGE.into()),
             _ => GuideRun::Failed(
-                self.engine
-                    .as_ref()
-                    .and_then(|engine| engine.run(run))
-                    .and_then(|run| run.error)
+                self.activity
+                    .read(cx)
+                    .run(run)
+                    .and_then(|run| run.error.clone())
                     .unwrap_or_else(|| FAILED_MESSAGE.into()),
             ),
         };

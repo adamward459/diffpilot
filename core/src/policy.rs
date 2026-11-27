@@ -26,24 +26,6 @@ const READ_ONLY_GIT: [&str; 4] = [
     "Bash(git status:*)",
 ];
 
-/// The MCP tools a kind of run may call. The bridge enforces the same list.
-pub fn mcp_tools(kind: RunKind) -> &'static [&'static str] {
-    match kind {
-        RunKind::Review => &["get_diff", "list_threads", "add_comment", "add_general_comment"],
-        RunKind::FixComments | RunKind::Reply => &["get_diff", "list_threads", "reply", "resolve", "dismiss"],
-        RunKind::MakeChanges => &["get_diff", "list_threads"],
-        RunKind::CommitMessage => &[],
-        RunKind::Guide => &[
-            "get_diff",
-            "set_overview",
-            "add_chapter",
-            "add_note",
-            "add_diagram",
-            "finish_guide",
-        ],
-    }
-}
-
 /// Whether Claude may edit files without asking. The setting only applies to runs that can edit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -88,11 +70,11 @@ impl ToolPolicy {
         let mut tools = vec!["Read", "Grep", "Glob", "TodoWrite", "Bash"];
         let mut allowed: Vec<String> = vec!["Read".into(), "Grep".into(), "Glob".into(), "TodoWrite".into()];
         if has_mcp {
-            allowed.extend(mcp_tools(kind).iter().map(|name| mcp_tool(name)));
+            allowed.extend(kind.activity().mcp_tools().iter().map(|name| mcp_tool(name)));
         }
         let mut permission_mode = None;
         let mut permission_prompt_tool = None;
-        if let Some(edit) = edits.filter(|_| kind.edits()) {
+        if let Some(edit) = edits.filter(|_| kind.activity().edits()) {
             tools.extend(["Edit", "Write"]);
             match edit {
                 EditPermission::DontAsk => {
@@ -171,7 +153,7 @@ mod tests {
     use super::*;
 
     fn policy(kind: RunKind, edit: EditPermission, has_mcp: bool) -> ToolPolicy {
-        ToolPolicy::new(kind, kind.edits().then_some(edit), has_mcp).unwrap()
+        ToolPolicy::new(kind, kind.activity().edits().then_some(edit), has_mcp).unwrap()
     }
 
     fn after<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
@@ -185,16 +167,9 @@ mod tests {
 
     #[test]
     fn every_run_carries_the_push_deny_list() {
-        for kind in [
-            RunKind::Review,
-            RunKind::FixComments,
-            RunKind::MakeChanges,
-            RunKind::Reply,
-            RunKind::Guide,
-            RunKind::CommitMessage,
-        ] {
+        for kind in RunKind::ALL {
             for edit in EditPermission::ALL {
-                let Ok(policy) = ToolPolicy::new(kind, kind.edits().then_some(edit), true) else {
+                let Ok(policy) = ToolPolicy::new(kind, kind.activity().edits().then_some(edit), true) else {
                     continue;
                 };
                 let args = policy.arguments();
@@ -287,16 +262,9 @@ mod tests {
 
     #[test]
     fn the_deny_list_never_appears_in_the_allow_list() {
-        for kind in [
-            RunKind::Review,
-            RunKind::FixComments,
-            RunKind::MakeChanges,
-            RunKind::Reply,
-            RunKind::Guide,
-            RunKind::CommitMessage,
-        ] {
+        for kind in RunKind::ALL {
             for edit in EditPermission::ALL {
-                let policy = ToolPolicy::new(kind, kind.edits().then_some(edit), true).unwrap();
+                let policy = ToolPolicy::new(kind, kind.activity().edits().then_some(edit), true).unwrap();
                 assert!(policy.allowed.iter().all(|tool| !DENIED_TOOLS.contains(&tool.as_str())));
             }
         }

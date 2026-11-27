@@ -1,7 +1,8 @@
-use crate::claude_area::{ago, comments_of, state_glyph};
+use crate::claude_activity::ClaudeActivity;
+use crate::claude_area::{ago, state_glyph};
 use crate::review::ReviewSession;
 use crate::runs::now_ms;
-use diffpilot_core::run::{LogKind, Run, RunKind, RunState};
+use diffpilot_core::run::RunState;
 use diffpilot_ui_kit::components::{Button, Look, bar_button, glyph_icon, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
@@ -12,57 +13,43 @@ use gpui_component::h_flex;
 pub enum Status {
     Idle(String),
     Working(String),
+    Paused(String),
     Finished(RunState, String),
 }
 
 impl Status {
     pub fn text(&self) -> &str {
         match self {
-            Self::Idle(text) | Self::Working(text) | Self::Finished(_, text) => text,
+            Self::Idle(text) | Self::Working(text) | Self::Paused(text) | Self::Finished(_, text) => text,
         }
     }
 }
 
-pub fn status_of(session: &ReviewSession, now: i64) -> Status {
-    let Some(run) = session.current() else {
+pub fn status_of(activity: &ClaudeActivity, session: &ReviewSession, now: i64) -> Status {
+    let Some(run) = activity.current() else {
         return Status::Idle(match session.last_run() {
             Some(last) => {
                 let when = last
                     .finished_at_ms
                     .or(last.started_at_ms)
                     .map_or_else(String::new, |at| format!(" {}", ago(now, at)));
-                format!("Claude · last {}{when}", last.kind.title().to_lowercase())
+                format!("Claude · last {}{when}", last.kind.activity().title().to_lowercase())
             }
             None => "Claude · no runs yet".into(),
         });
     };
-    let title = run.kind.title();
+    let title = run.kind.activity().title();
     match run.state {
         RunState::Queued => Status::Working(format!("{title} · waiting for its turn")),
         RunState::Running => Status::Working(format!("{title} · {}", run.activity.as_deref().unwrap_or("starting"))),
-        RunState::Done => Status::Finished(run.state, format!("{title} finished · {}", counts(session, run))),
+        RunState::Paused => Status::Paused(format!("{title} · paused")),
+        RunState::Done => Status::Finished(
+            run.state,
+            format!("{title} finished · {}", activity.summary(run.id).unwrap_or_default()),
+        ),
         RunState::Failed => Status::Finished(run.state, format!("{title} failed")),
         RunState::Stopped => Status::Finished(run.state, format!("{title} stopped")),
     }
-}
-
-fn counts(session: &ReviewSession, run: &Run) -> String {
-    let calls = run
-        .log
-        .iter()
-        .filter(|entry| {
-            matches!(
-                entry.kind,
-                LogKind::Read | LogKind::Search | LogKind::Edit | LogKind::Command | LogKind::Comment | LogKind::Tool
-            )
-        })
-        .count();
-    let plural = |count: usize, noun: &str| format!("{count} {noun}{}", if count == 1 { "" } else { "s" });
-    let made = match run.kind {
-        RunKind::Guide => plural(session.guide_chapters().unwrap_or(0), "chapter"),
-        _ => plural(comments_of(run).len(), "comment"),
-    };
-    format!("{made} · {}", plural(calls, "tool call"))
 }
 
 pub struct Actions<T, L, A> {
@@ -72,7 +59,9 @@ pub struct Actions<T, L, A> {
 }
 
 pub fn status_row<T, L, A>(
+    activity: &ClaudeActivity,
     session: &ReviewSession,
+    cx: &App,
     open: bool,
     generation: u32,
     theme: &Theme,
@@ -83,16 +72,17 @@ where
     L: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     A: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
-    let status = status_of(session, now_ms());
+    let status = status_of(activity, session, now_ms());
     let icon = match &status {
         Status::Idle(_) => glyph_icon(Glyph::Sparkles, 14., theme.ui.muted).into_any_element(),
         Status::Working(_) => glyph_icon(Glyph::Sparkles, 14., theme.ui.claude).into_any_element(),
+        Status::Paused(_) => glyph_icon(Glyph::Pause, 14., theme.ui.muted).into_any_element(),
         Status::Finished(state, _) => {
             let (glyph, color) = state_glyph(*state, theme);
             glyph_icon(glyph, 14., color).into_any_element()
         }
     };
-    let can_run_again = matches!(status, Status::Finished(..)) && session.can_run_again();
+    let can_run_again = matches!(status, Status::Finished(..)) && session.can_run_again(cx);
     let showing_log = !matches!(status, Status::Idle(_));
     let text = status.text().to_string();
     let toggle = tag(

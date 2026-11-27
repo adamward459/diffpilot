@@ -457,8 +457,9 @@ pub fn clipboard(cx: &mut VisualTestContext) -> Option<String> {
 
 pub fn wait_for_run(cx: &mut VisualTestContext, session: &Entity<crate::review::ReviewSession>) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while !session.read_with(cx, |session, _| {
-        session.current().is_some_and(|run| run.state.is_finished()) && !session.is_busy()
+    while !session.read_with(cx, |session, cx| {
+        let activity = session.activity().read(cx);
+        activity.current().is_some_and(|run| run.state.is_finished()) && !activity.is_busy()
     }) {
         assert!(std::time::Instant::now() < deadline, "the run did not end");
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -562,14 +563,15 @@ impl FakeClaude {
         std::fs::write(self.work.path().join("after"), after.to_string()).expect("write after");
     }
 
+    /// Calls a tool as the newest launch. A launch is counted only after it copied its MCP config, so after
+    /// `wait_for_launches` the token here is the new run's, not the one before it.
     pub fn call_mcp_tool(&self, tool: &str, args: serde_json::Value) -> serde_json::Value {
         let file = self.work.path().join("mcp.json");
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while !file.exists() {
+        while self.launches() == 0 {
             assert!(std::time::Instant::now() < deadline, "no run got an MCP config");
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        std::thread::sleep(std::time::Duration::from_millis(50));
         let config: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(file).expect("a run is going")).expect("mcp.json is JSON");
         let args_list = config["mcpServers"]["diffpilot"]["args"].as_array().expect("args");
@@ -577,6 +579,13 @@ impl FakeClaude {
         let token = args_list[at + 1].as_str().expect("token text");
         let line = serde_json::json!({ "token": token, "tool": tool, "args": args });
         self._bridge.handle_line(&line.to_string())
+    }
+
+    /// The session ids that launches passed with `--resume`, in order.
+    pub fn resumed(&self) -> Vec<String> {
+        std::fs::read_to_string(self.work.path().join("resumed"))
+            .map(|text| text.lines().map(String::from).collect())
+            .unwrap_or_default()
     }
 
     pub fn prompt(&self) -> String {
@@ -645,15 +654,16 @@ pub fn fake_engine() -> FakeClaude {
         dir,
         "claude",
         &format!(
-            r#"echo $$ >> '{dir}/launches'
-printf '%s' "$2" > '{dir}/prompt'
+            r#"printf '%s' "$2" > '{dir}/prompt'
 while [ $# -gt 0 ]; do
   case "$1" in
     --model) echo "$2" > '{dir}/model' ;;
     --mcp-config) cp "$2" '{dir}/mcp.json' ;;
+    --resume) echo "$2" >> '{dir}/resumed' ;;
   esac
   shift
 done
+echo $$ >> '{dir}/launches'
 cat '{dir}/play'
 [ -f '{dir}/before' ] && cat '{dir}/before'
 echo

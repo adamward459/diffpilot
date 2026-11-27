@@ -66,7 +66,7 @@ impl FixPicker {
     }
 
     fn send(&mut self, cx: &mut Context<Self>) {
-        let chosen = self.chosen(&self.session.read(cx).fixable());
+        let chosen = self.chosen(&self.session.read(cx).fixable(cx));
         if chosen.is_empty() {
             return;
         }
@@ -138,7 +138,7 @@ impl Render for FixPicker {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::of(cx);
         let session = self.session.read(cx);
-        let fixable = session.fixable();
+        let fixable = session.fixable(cx);
         let blocker = session.fix_blocker(cx);
         let mut groups: BTreeMap<&str, Vec<&ReviewThread>> = BTreeMap::new();
         for id in &fixable {

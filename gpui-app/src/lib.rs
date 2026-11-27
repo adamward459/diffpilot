@@ -1,4 +1,5 @@
 pub mod bench;
+pub mod claude_activity;
 pub mod claude_area;
 mod claude_status;
 mod commit_popover;

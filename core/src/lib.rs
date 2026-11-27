@@ -1,3 +1,4 @@
+pub mod activity;
 pub mod anchor;
 pub mod cancel;
 pub mod changes;

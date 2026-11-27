@@ -115,9 +115,9 @@ impl Render for ReviewPopover {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::of(cx);
         let session = self.session.read(cx);
-        let problem = session.review_problem();
-        let done = session.review_run().is_some_and(|run| run.state == RunState::Done);
-        let busy = session.is_busy();
+        let problem = session.review_problem(cx);
+        let done = session.review_run(cx).is_some_and(|run| run.state == RunState::Done);
+        let busy = session.activity().read(cx).is_busy();
         let setup = session.setup().clone();
         let model = session.model();
         let files = session.file_count();

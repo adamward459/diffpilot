@@ -25,6 +25,7 @@ use diffpilot_core::editor;
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::refs::Refs;
 use diffpilot_core::run::RunState;
+use diffpilot_core::runner::RunEvent;
 use diffpilot_core::settings::{self, Settings};
 use diffpilot_core::store::Store;
 use diffpilot_core::tree;
@@ -330,7 +331,7 @@ impl RepoView {
     pub fn review_running(&self, cx: &App) -> bool {
         self.session
             .as_ref()
-            .is_some_and(|session| session.pill.read(cx).is_running(cx))
+            .is_some_and(|session| session.review.read(cx).activity().read(cx).is_busy())
     }
 
     fn sync_toolbar_room(&mut self, cx: &mut Context<Self>) {
@@ -462,6 +463,7 @@ impl RepoView {
             cx.new(|cx| ReviewSession::new(host, settings, store, cx))
         };
         pane.update(cx, |pane, cx| pane.set_review(review.clone(), window, cx));
+        let activity = review.read(cx).activity().clone();
         let pill = cx.new(|cx| ReviewPill::new(review.clone(), window, cx));
         let fix = cx.new(|cx| FixButton::new(review.clone(), window, cx));
         let comments = {
@@ -536,14 +538,25 @@ impl RepoView {
                     {
                         this.show_comment_counts(review, cx);
                     }
-                    ReviewEvent::RunFinished(RunState::Done)
-                        if review.read(cx).follows_current() && !review.read(cx).is_busy() =>
-                    {
-                        this.set_claude_area(false, cx);
-                    }
                     _ => {}
                 },
             ),
+            cx.subscribe(&activity, |this, activity, event: &RunEvent, cx| {
+                let done = matches!(
+                    event,
+                    RunEvent::Finished {
+                        state: RunState::Done,
+                        ..
+                    }
+                );
+                let following = this
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| session.area.read(cx).follows_current());
+                if done && following && !activity.read(cx).is_busy() {
+                    this.set_claude_area(false, cx);
+                }
+            }),
             cx.subscribe(&area, |this, _, ClaudeAreaEvent::Close, cx| {
                 this.set_claude_area(false, cx)
             }),
@@ -918,7 +931,7 @@ impl RepoView {
 
     fn show_claude_log(&mut self, cx: &mut Context<Self>) {
         if let Some(session) = &self.session {
-            session.review.update(cx, |review, cx| review.follow_current(cx));
+            session.area.update(cx, |area, cx| area.follow_current(cx));
         }
         self.set_claude_area(true, cx);
     }
@@ -1274,8 +1287,11 @@ impl RepoView {
             .id("bottom-bar")
             .h(px(BAR_HEIGHT))
             .children(self.session.as_ref().map(|session| {
+                let review = session.review.read(cx);
                 status_row(
-                    session.review.read(cx),
+                    review.activity().read(cx),
+                    review,
+                    cx,
                     self.claude_area.is_open(),
                     self.claude_area_generation,
                     &tokens,

@@ -188,7 +188,7 @@ pub const FEATURES: &[Feature] = &[
             "core/src/{review,threads,thread_groups,fix}.rs",
             "core/src/{fix_comments,make_changes,reply_thread}.md",
             "gpui-app/src/review/**",
-            "gpui-app/src/claude_{area,status}.rs",
+            "gpui-app/src/claude_{activity,area,status}.rs",
             "gpui-app/examples/review.rs",
             "gpui-app/tests/review_*.rs",
             "gpui-app/src/runs.rs",
@@ -339,7 +339,7 @@ pub const FEATURES: &[Feature] = &[
     Feature {
         name: "claude-runs",
         paths: &[
-            "core/src/{claude,run,runner,stream,stage,snapshot,guard,policy,prompt,connection,process_groups}.rs",
+            "core/src/{activity,claude,run,runner,stream,stage,snapshot,guard,policy,prompt,connection,process_groups}.rs",
             "core/src/{review_prompt,review_tools_step}.md",
             "core/src/mcp/**",
             "core/src/bin/**",
@@ -354,6 +354,10 @@ pub const FEATURES: &[Feature] = &[
             Lib {
                 package: CORE,
                 module: "run::",
+            },
+            Lib {
+                package: CORE,
+                module: "activity::",
             },
             Lib {
                 package: CORE,

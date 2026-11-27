@@ -37,11 +37,12 @@ impl Pill {
     fn wait_for_end(&self, cx: &mut VisualTestContext) {
         cx.executor().allow_parking();
         let deadline = Instant::now() + Duration::from_secs(30);
-        while !self
-            .f
-            .session
-            .read_with(cx, |s, _| s.current().is_some_and(|run| run.state.is_finished()))
-        {
+        while !self.f.session.read_with(cx, |s, cx| {
+            s.activity()
+                .read(cx)
+                .current()
+                .is_some_and(|run| run.state.is_finished())
+        }) {
             assert!(Instant::now() < deadline, "the run did not end");
             cx.run_until_parked();
             std::thread::sleep(Duration::from_millis(20));

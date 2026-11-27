@@ -2,7 +2,8 @@
 //!
 //! One run goes at a time in a repo. Others wait in a queue. Each run is `claude -p --output-format
 //! stream-json --verbose` in the repo folder, with the deny list and the PreToolUse hook from `policy`. A
-//! stop sends SIGTERM to the process group, then SIGKILL (see `claude::run_process`).
+//! stop sends SIGTERM to the process group, then SIGKILL (see `claude::run_process`). A pause ends the process the
+//! same way but keeps the run and its place in the repo; Continue starts `claude --resume` on its session.
 
 use crate::cancel::CancelToken;
 use crate::claude::{self, ReviewError};
@@ -54,10 +55,36 @@ pub enum RunEvent {
     /// Claude wants to edit or run a command and the edit permission says to ask. Answer with
     /// `RunEngine::answer_permission`.
     PermissionRequest(PermissionRequest),
+    Paused {
+        run: RunId,
+    },
+    Continued {
+        run: RunId,
+    },
     Finished {
         run: RunId,
         state: RunState,
     },
+}
+
+/// What a continued run is told. Its earlier turns come back with `--resume`.
+pub const CONTINUE_PROMPT: &str = "Go on with the task from where you stopped.";
+
+impl RunEvent {
+    pub fn run(&self) -> RunId {
+        match self {
+            Self::Queued { run }
+            | Self::Started { run }
+            | Self::Log { run, .. }
+            | Self::Updated { run }
+            | Self::GuideChanged { run, .. }
+            | Self::ThreadsChanged { run, .. }
+            | Self::Paused { run }
+            | Self::Continued { run }
+            | Self::Finished { run, .. } => *run,
+            Self::PermissionRequest(request) => request.run,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -136,7 +163,7 @@ impl RunRequest {
 
     /// How the run may edit files, or None when it may not.
     pub fn edits(&self) -> Option<EditPermission> {
-        (self.kind.edits() && !self.read_only).then_some(self.edit_permission)
+        (self.kind.activity().edits() && !self.read_only).then_some(self.edit_permission)
     }
 
     /// A review that returns its findings as structured output.
@@ -203,6 +230,7 @@ struct Live {
     /// The repo as the process sees it. macOS reports `/private/var/...` for a repo opened as `/var/...`.
     repo_real: PathBuf,
     cancel: CancelToken,
+    pausing: bool,
     saw_result: bool,
     answered: HashSet<ThreadId>,
 }
@@ -231,6 +259,12 @@ enum Ending {
     Done,
     Stopped,
     Failed(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Launch {
+    First,
+    Continue,
 }
 
 impl RunEngine {
@@ -295,7 +329,7 @@ impl RunEngine {
             return Err(EngineError::ClaudeNotFound);
         }
         inner.check_guard()?;
-        if request.kind == RunKind::Guide && !inner.has_mcp() {
+        if request.kind.activity().writes_guide() && !inner.has_mcp() {
             return Err(EngineError::GuideNeedsMcp);
         }
         ToolPolicy::new(request.kind, request.edits(), inner.has_mcp())?;
@@ -328,6 +362,7 @@ impl RunEngine {
                     repo_real: std::fs::canonicalize(&request.repo).unwrap_or_else(|_| request.repo.clone()),
                     request,
                     cancel: CancelToken::new(),
+                    pausing: false,
                     saw_result: false,
                     answered: HashSet::new(),
                 },
@@ -345,19 +380,60 @@ impl RunEngine {
         };
         inner.emit(RunEvent::Queued { run: id });
         if start_now {
-            Inner::spawn(inner.clone(), id);
+            Inner::spawn(inner.clone(), id, Launch::First);
         }
         Ok(id)
     }
 
-    /// Stops a running run, or takes a queued one out of the queue. Returns false for an unknown or finished run.
+    /// Ends the claude process of a running run and keeps the run, which holds the repo until it is continued or
+    /// stopped. Returns false when the run is not running.
+    pub fn pause(&self, id: RunId) -> bool {
+        let mut state = self.inner.state.lock().unwrap();
+        let Some(live) = state
+            .live
+            .get_mut(&id)
+            .filter(|live| live.run.state == RunState::Running)
+        else {
+            return false;
+        };
+        live.pausing = true;
+        live.cancel.cancel();
+        true
+    }
+
+    /// Starts a paused run again on its Claude session. Returns false when the run is not paused.
+    pub fn resume(&self, id: RunId) -> bool {
+        let paused = self
+            .inner
+            .with_run(id, |live| live.run.state == RunState::Paused)
+            .unwrap_or(false);
+        if paused {
+            Inner::spawn(self.inner.clone(), id, Launch::Continue);
+        }
+        paused
+    }
+
+    /// Stops a running or paused run, or takes a queued one out of the queue. Returns false for an unknown or
+    /// finished run.
     pub fn stop(&self, id: RunId) -> bool {
         let queued = {
             let mut state = self.inner.state.lock().unwrap();
-            let Some(live) = state.live.get(&id) else { return false };
+            let Some(live) = state.live.get_mut(&id) else {
+                return false;
+            };
             match live.run.state {
                 RunState::Running => {
+                    live.pausing = false;
                     live.cancel.cancel();
+                    return true;
+                }
+                RunState::Paused => {
+                    live.run.state = RunState::Stopped;
+                    let (inner, request) = (self.inner.clone(), live.request.clone());
+                    drop(state);
+                    let _ = std::thread::Builder::new()
+                        .name(format!("diffpilot-run-{}", id.0))
+                        .spawn(move || inner.conclude(id, &request, Ending::Stopped));
                     return true;
                 }
                 RunState::Queued => {
@@ -382,7 +458,7 @@ impl RunEngine {
             state
                 .live
                 .values()
-                .filter(|live| matches!(live.run.state, RunState::Running | RunState::Queued))
+                .filter(|live| !live.run.state.is_finished())
                 .filter(|live| scope.covers(&live.request.session.repo, &live.request.session.branch))
                 .map(|live| live.run.id)
                 .collect()
@@ -392,7 +468,7 @@ impl RunEngine {
         }
     }
 
-    /// The run now going in `repo`, if any.
+    /// The run that holds `repo`: going, paused, or about to start.
     pub fn active(&self, repo: &Path) -> Option<Run> {
         let state = self.inner.state.lock().unwrap();
         let id = state.running.get(&standardized(repo))?;
@@ -419,10 +495,12 @@ impl RunEngine {
         self.inner.config.store.load_run(id).ok().flatten()
     }
 
-    /// Past Runs of one review, newest first.
+    /// Past runs of every kind on the branch of `key`, whatever the comparison, newest first.
     pub fn past_runs(&self, key: &SessionKey, limit: usize) -> Result<Vec<RunSummary>, StoreError> {
-        let session = self.inner.config.store.session(key)?;
-        self.inner.config.store.run_summaries(session, limit)
+        self.inner
+            .config
+            .store
+            .branch_run_summaries(&key.repo, &key.branch, limit)
     }
 
     /// What the run changed, as a diff from the snapshot taken before it. `paths` limits it to those files.
@@ -546,23 +624,50 @@ impl Inner {
         }
     }
 
-    fn spawn(this: Arc<Self>, id: RunId) {
+    fn spawn(this: Arc<Self>, id: RunId, launch: Launch) {
         let _ = std::thread::Builder::new()
             .name(format!("diffpilot-run-{}", id.0))
-            .spawn(move || this.execute(id));
+            .spawn(move || this.execute(id, launch));
     }
 
-    fn execute(self: Arc<Self>, id: RunId) {
-        let Some((request, cancel)) = self.begin(id) else {
+    fn execute(self: Arc<Self>, id: RunId, launch: Launch) {
+        let Some((request, cancel)) = self.begin(id, launch) else {
             return;
         };
-        let ending = self.drive(id, &request, &cancel);
-        let ending = if request.kind == RunKind::Guide {
-            self.settle_guide(id, &request, ending)
+        let ending = self.drive(id, &request, launch, &cancel);
+        let pausing = self.with_run(id, |live| live.pausing).unwrap_or(false);
+        if pausing && matches!(ending, Ending::Stopped) {
+            return self.park(id);
+        }
+        self.conclude(id, &request, ending);
+    }
+
+    /// Wraps up a run that will not go on: what it changed, its guide, and how it ended.
+    fn conclude(self: &Arc<Self>, id: RunId, request: &RunRequest, ending: Ending) {
+        if request.edits().is_some() {
+            self.record_changes(id, &request.repo);
+            self.record_thread_files(id, request);
+        }
+        let ending = if request.kind.activity().writes_guide() {
+            self.settle_guide(id, request, ending)
         } else {
             ending
         };
         self.finish(id, &ending);
+    }
+
+    /// Keeps a run whose process a pause ended. It holds the repo, so the queue waits.
+    fn park(&self, id: RunId) {
+        let run = self.with_run(id, |live| {
+            live.pausing = false;
+            live.run.state = RunState::Paused;
+            live.run.activity = None;
+            live.run.clone()
+        });
+        if let Some(run) = run {
+            let _ = self.config.store.save_run(&run);
+            self.emit(RunEvent::Paused { run: id });
+        }
     }
 
     /// A guide run is done when its guide is saved. A guide Claude built but did not finish is finished here,
@@ -612,19 +717,29 @@ impl Inner {
         }
     }
 
-    fn begin(&self, id: RunId) -> Option<(RunRequest, CancelToken)> {
+    fn begin(&self, id: RunId, launch: Launch) -> Option<(RunRequest, CancelToken)> {
+        let from = match launch {
+            Launch::First => RunState::Queued,
+            Launch::Continue => RunState::Paused,
+        };
         let (request, cancel, run) = {
             let mut state = self.state.lock().unwrap();
-            let live = state
-                .live
-                .get_mut(&id)
-                .filter(|live| live.run.state == RunState::Queued)?;
+            let live = state.live.get_mut(&id).filter(|live| live.run.state == from)?;
             live.run.state = RunState::Running;
-            live.run.started_at_ms = Some(now_ms());
+            match launch {
+                Launch::First => live.run.started_at_ms = Some(now_ms()),
+                Launch::Continue => {
+                    live.cancel = CancelToken::new();
+                    live.saw_result = false;
+                }
+            }
             (live.request.clone(), live.cancel.clone(), live.run.clone())
         };
         let _ = self.config.store.save_run(&run);
-        self.emit(RunEvent::Started { run: id });
+        self.emit(match launch {
+            Launch::First => RunEvent::Started { run: id },
+            Launch::Continue => RunEvent::Continued { run: id },
+        });
         Some((request, cancel))
     }
 
@@ -632,7 +747,7 @@ impl Inner {
         self.state.lock().unwrap().live.get_mut(&id).map(change)
     }
 
-    fn drive(self: &Arc<Self>, id: RunId, request: &RunRequest, cancel: &CancelToken) -> Ending {
+    fn drive(self: &Arc<Self>, id: RunId, request: &RunRequest, launch: Launch, cancel: &CancelToken) -> Ending {
         let Some(binary) = self.claude() else {
             return Ending::Failed(EngineError::ClaudeNotFound.to_string());
         };
@@ -651,7 +766,7 @@ impl Inner {
         if let Err(error) = prepared {
             return Ending::Failed(format!("Could not prepare the run: {error}"));
         }
-        let snapshots = request.edits().is_some() && self.config.keep_snapshots > 0;
+        let snapshots = launch == Launch::First && request.edits().is_some() && self.config.keep_snapshots > 0;
         if snapshots {
             match snapshot::take(&request.repo, id) {
                 Ok(taken) => {
@@ -664,14 +779,22 @@ impl Inner {
             }
         }
 
+        let resume = match launch {
+            Launch::First => None,
+            Launch::Continue => self.with_run(id, |live| live.run.claude_session.clone()).flatten(),
+        };
+        let prompt = if resume.is_some() {
+            CONTINUE_PROMPT
+        } else {
+            &request.prompt
+        };
         let mut command = claude::claude_command(&binary, &request.repo);
         command.args([
             "-p",
-            &request.prompt,
+            prompt,
             "--output-format",
             "stream-json",
             "--verbose",
-            "--no-session-persistence",
             "--strict-mcp-config",
             "--model",
             request.model.name.as_str(),
@@ -680,6 +803,9 @@ impl Inner {
             "--settings",
         ]);
         command.arg(&settings);
+        if let Some(session) = &resume {
+            command.args(["--resume", session]);
+        }
         let attached = self.attach_mcp(id, request, &dir);
         if self.has_mcp() && attached.is_none() {
             let _ = std::fs::remove_dir_all(&dir);
@@ -712,12 +838,6 @@ impl Inner {
             mcp.bridge.unregister(token);
         }
         let ending = self.ending_of(id, result);
-        if snapshots {
-            self.record_changes(id, &request.repo);
-        }
-        if request.edits().is_some() {
-            self.record_thread_files(id, request);
-        }
         let _ = std::fs::remove_dir_all(&dir);
         ending
     }
@@ -741,14 +861,8 @@ impl Inner {
             Err(ReviewError::Cancelled) => Ending::Stopped,
             Err(error) => Ending::Failed(error.to_string()),
             Ok(finished) => {
-                let (error, saw_result, review_missing) = self
-                    .with_run(id, |live| {
-                        (
-                            live.run.error.clone(),
-                            live.saw_result,
-                            live.run.kind == RunKind::Review && live.run.outcome.is_none(),
-                        )
-                    })
+                let (error, saw_result) = self
+                    .with_run(id, |live| (live.run.error.clone(), live.saw_result))
                     .unwrap_or_default();
                 if let Some(error) = error {
                     Ending::Failed(error)
@@ -764,8 +878,6 @@ impl Inner {
                     })
                 } else if !saw_result {
                     Ending::Failed("Claude ended without a result.".into())
-                } else if review_missing {
-                    Ending::Failed("Claude returned no review.".into())
                 } else {
                     Ending::Done
                 }
@@ -869,7 +981,7 @@ impl Inner {
             state: run.state,
         });
         if let Some(next) = next {
-            Self::spawn(self.clone(), next);
+            Self::spawn(self.clone(), next, Launch::First);
         }
     }
 }

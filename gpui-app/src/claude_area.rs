@@ -1,7 +1,8 @@
+use crate::claude_activity::ClaudeActivity;
 use crate::review::popover::PopoverEvent;
 use crate::review::{ReviewPopover, ReviewSession};
 use crate::runs::now_ms;
-use diffpilot_core::run::{LogEntry, LogKind, Run, RunId, RunKind, RunOutcome, RunState, StepState};
+use diffpilot_core::run::{LogEntry, LogKind, Run, RunId, RunState, StepState, first_line};
 use diffpilot_ui_kit::components::menu::{MenuItem, MenuSection, menu_button};
 use diffpilot_ui_kit::components::popover;
 use diffpilot_ui_kit::components::{Button, Look, glyph_icon, spinner, tag};
@@ -30,8 +31,11 @@ pub enum ClaudeAreaEvent {
 
 pub struct ClaudeArea {
     session: Entity<ReviewSession>,
+    activity: Entity<ClaudeActivity>,
     popover: Entity<ReviewPopover>,
     queue_open: bool,
+    /// A past run the user picked. None follows the current run.
+    picked: Option<Run>,
     log_scroll: UniformListScrollHandle,
     log_follow: LogFollow,
     ticker: Option<Task<()>>,
@@ -68,8 +72,10 @@ impl LogFollow {
 
 impl ClaudeArea {
     pub fn new(session: Entity<ReviewSession>, popover: Entity<ReviewPopover>, cx: &mut Context<Self>) -> Self {
+        let activity = session.read(cx).activity().clone();
         let subscriptions = vec![
             cx.observe(&session, |this, _, cx| this.sync(cx)),
+            cx.observe(&activity, |this, _, cx| this.sync(cx)),
             cx.subscribe(&popover, |this, _, PopoverEvent::Dismiss, cx| {
                 this.queue_open = false;
                 cx.notify();
@@ -77,8 +83,10 @@ impl ClaudeArea {
         ];
         let mut this = Self {
             session,
+            activity,
             popover,
             queue_open: false,
+            picked: None,
             log_scroll: UniformListScrollHandle::new(),
             log_follow: LogFollow::default(),
             ticker: None,
@@ -88,12 +96,39 @@ impl ClaudeArea {
         this
     }
 
+    /// The picked run, or else the repo's current run.
+    fn shown<'a>(&'a self, cx: &'a App) -> Option<&'a Run> {
+        self.picked.as_ref().or(self.activity.read(cx).current())
+    }
+
+    pub fn follows_current(&self) -> bool {
+        self.picked.is_none()
+    }
+
+    fn show_run(&mut self, id: RunId, cx: &mut Context<Self>) {
+        let activity = self.activity.read(cx);
+        if activity.current().is_some_and(|run| run.id == id) {
+            return self.follow_current(cx);
+        }
+        if let Some(run) = activity.load(id) {
+            self.picked = Some(run);
+            cx.notify();
+        }
+    }
+
+    pub fn follow_current(&mut self, cx: &mut Context<Self>) {
+        self.picked = None;
+        cx.notify();
+    }
+
     fn sync(&mut self, cx: &mut Context<Self>) {
-        let running = self
-            .session
-            .read(cx)
-            .shown()
-            .is_some_and(|run| !run.state.is_finished());
+        if let Some(picked) = &self.picked
+            && !picked.state.is_finished()
+            && let Some(fresh) = self.activity.read(cx).run(picked.id)
+        {
+            self.picked = Some(fresh.clone());
+        }
+        let running = self.shown(cx).is_some_and(|run| !run.state.is_finished());
         if !running {
             self.ticker = None;
         } else if self.ticker.is_none() {
@@ -111,14 +146,14 @@ impl ClaudeArea {
 
     fn bar(&self, run: Option<&Run>, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session.read(cx);
-        let running = run.is_some_and(|run| !run.state.is_finished());
-        let queued = session.queued().len();
+        let state = run.map(|run| run.state);
+        let queued = self.activity.read(cx).queued().len();
         let (title, details) = match run {
-            Some(run) => (run.kind.title().to_string(), run_details(session, run)),
+            Some(run) => (run.kind.activity().title().to_string(), run_details(session, run)),
             None => ("Claude".to_string(), "No runs yet".to_string()),
         };
         let can_run_again =
-            run.is_some_and(|run| run.state.is_finished()) && session.can_run_again() && session.follows_current();
+            run.is_some_and(|run| run.state.is_finished()) && session.can_run_again(cx) && self.follows_current();
         let run_id = run.map(|run| run.id);
         h_flex()
             .h(px(BAR_HEIGHT))
@@ -160,8 +195,17 @@ impl ClaudeArea {
             .when(queued > 0, |bar| {
                 bar.child(tag(div(), || format!("claude-area:queued:{queued}")).child(format!("{queued} queued")))
             })
-            .when(running, |bar| {
-                bar.child(self.queue_button(cx)).child(stop_button(run_id, theme, cx))
+            .when(state == Some(RunState::Running), |bar| {
+                bar.child(self.queue_button(cx))
+                    .child(run_button(run_id, RunAction::Pause, cx))
+                    .child(stop_button(run_id, theme, cx))
+            })
+            .when(state == Some(RunState::Queued), |bar| {
+                bar.child(stop_button(run_id, theme, cx))
+            })
+            .when(state == Some(RunState::Paused), |bar| {
+                bar.child(run_button(run_id, RunAction::Continue, cx))
+                    .child(stop_button(run_id, theme, cx))
             })
             .when(can_run_again, |bar| {
                 bar.child(
@@ -176,7 +220,7 @@ impl ClaudeArea {
                     })),
                 )
             })
-            .child(self.past_runs_button())
+            .child(self.past_runs_button(cx))
             .child(
                 tag(
                     Button::new("claude-area-close")
@@ -211,20 +255,18 @@ impl ClaudeArea {
             .into_any_element()
     }
 
-    fn past_runs_button(&self) -> AnyElement {
-        let session = self.session.clone();
+    fn past_runs_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let area = cx.entity();
         let trigger = tag(
             Button::new("claude-area-past")
                 .icon(Glyph::Clock, 12.)
                 .label("Past Runs"),
             || "claude-area:past-runs",
         );
-        menu_button("claude-area-past-menu", trigger, move |_, cx| {
-            past_run_rows(&session, cx)
-        })
-        .anchor(Corner::BottomRight)
-        .min_width(320.)
-        .into_any_element()
+        menu_button("claude-area-past-menu", trigger, move |_, cx| past_run_rows(&area, cx))
+            .anchor(Corner::BottomRight)
+            .min_width(320.)
+            .into_any_element()
     }
 
     fn plan_pane(&self, run: Option<&Run>, theme: Theme) -> AnyElement {
@@ -238,8 +280,8 @@ impl ClaudeArea {
                 .child(text)
         };
         let steps = run.map(|run| run.steps.as_slice()).unwrap_or_default();
-        let comments = run.map(comments_of).unwrap_or_default();
-        let writes_comments = run.is_none_or(|run| run.kind != RunKind::Guide);
+        let comments = run.map(Run::comments).unwrap_or_default();
+        let writes_comments = run.is_none_or(|run| !run.kind.activity().writes_guide());
         let running = run.is_some_and(|run| !run.state.is_finished());
         v_flex()
             .id("claude-area-plan")
@@ -317,7 +359,7 @@ impl ClaudeArea {
     }
 
     fn log_pane(&mut self, run: Option<&Run>, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
-        let running = run.is_some_and(|run| !run.state.is_finished());
+        let running = run.is_some_and(|run| run.state == RunState::Running);
         let rows = run.map_or(0, |run| run.log.len() + usize::from(running));
         let at_bottom = {
             let state = self.log_scroll.0.borrow();
@@ -325,7 +367,7 @@ impl ClaudeArea {
                 || -state.base_handle.offset().y + px(1.) >= state.base_handle.max_offset().height
         };
         let scroll_to_last = self.log_follow.update(run.map(|run| run.id), rows, at_bottom);
-        let following = running && self.session.read(cx).follows_current() && self.log_follow.following;
+        let following = running && self.follows_current() && self.log_follow.following;
         if following && scroll_to_last {
             self.log_scroll.scroll_to_item(rows - 1, ScrollStrategy::Bottom);
         }
@@ -361,11 +403,10 @@ impl ClaudeArea {
     fn log_rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let theme = Theme::of(cx);
         let mono = cx.theme().mono_font_family.clone();
-        let session = self.session.read(cx);
-        let Some(run) = session.shown() else {
+        let Some(run) = self.shown(cx) else {
             return Vec::new();
         };
-        let running = !run.state.is_finished();
+        let running = run.state == RunState::Running;
         let elapsed = run.elapsed_ms(now_ms()).unwrap_or(0);
         range
             .filter_map(|index| match run.log.get(index) {
@@ -380,7 +421,7 @@ impl ClaudeArea {
 impl Render for ClaudeArea {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::of(cx);
-        let run = self.session.read(cx).shown().cloned();
+        let run = self.shown(cx).cloned();
         let bar = self.bar(run.as_ref(), theme, cx);
         let body = match &run {
             Some(_) => h_flex()
@@ -410,6 +451,29 @@ impl Render for ClaudeArea {
     }
 }
 
+#[derive(Clone, Copy)]
+enum RunAction {
+    Pause,
+    Continue,
+}
+
+fn run_button(run: Option<RunId>, action: RunAction, cx: &mut Context<ClaudeArea>) -> AnyElement {
+    let (id, glyph, label, name) = match action {
+        RunAction::Pause => ("claude-area-pause", Glyph::Pause, "Pause", "claude-area:pause"),
+        RunAction::Continue => ("claude-area-continue", Glyph::Play, "Continue", "claude-area:continue"),
+    };
+    tag(Button::new(id).icon(glyph, 12.).label(label), move || name)
+        .on_click(cx.listener(move |this, _, _, cx| {
+            if let Some(id) = run {
+                this.activity.update(cx, |activity, cx| match action {
+                    RunAction::Pause => activity.pause(id, cx),
+                    RunAction::Continue => activity.resume(id, cx),
+                });
+            }
+        }))
+        .into_any_element()
+}
+
 fn stop_button(run: Option<RunId>, theme: Theme, cx: &mut Context<ClaudeArea>) -> AnyElement {
     tag(
         Button::new("claude-area-stop")
@@ -420,7 +484,7 @@ fn stop_button(run: Option<RunId>, theme: Theme, cx: &mut Context<ClaudeArea>) -
     )
     .on_click(cx.listener(move |this, _, _, cx| {
         if let Some(id) = run {
-            this.session.update(cx, |session, cx| session.stop_run(id, cx));
+            this.activity.update(cx, |activity, cx| activity.stop(id, cx));
         }
     }))
     .into_any_element()
@@ -430,32 +494,38 @@ fn run_details(session: &ReviewSession, run: &Run) -> String {
     let branch = session.host().branch_name.clone().unwrap_or_else(|| "no branch".into());
     let elapsed = match run.state {
         RunState::Queued => "waiting".to_string(),
+        RunState::Paused => "paused".to_string(),
         _ => mmss(run.elapsed_ms(now_ms()).unwrap_or(0)),
     };
     format!("{branch} · {} · {elapsed}", run.model.title())
 }
 
-fn past_run_rows(session: &Entity<ReviewSession>, cx: &mut App) -> Vec<MenuSection> {
+fn past_run_rows(area: &Entity<ClaudeArea>, cx: &mut App) -> Vec<MenuSection> {
     let theme = Theme::of(cx);
     let (runs, shown, follows) = {
-        let session = session.read(cx);
+        let this = area.read(cx);
+        let key = this.session.read(cx).session_key();
         (
-            session.past_runs(PAST_RUNS),
-            session.shown().map(|run| run.id),
-            session.follows_current(),
+            this.activity.read(cx).past_runs(&key, PAST_RUNS),
+            this.shown(cx).map(|run| run.id),
+            this.follows_current(),
         )
     };
     let now = now_ms();
     let mut rows: Vec<_> = runs
         .into_iter()
         .map(|summary| {
-            let session = session.clone();
+            let area = area.clone();
             let when = summary.started_at_ms.map_or_else(|| "queued".into(), |at| ago(now, at));
             let (glyph, color) = state_glyph(summary.state, &theme);
             MenuItem::new(summary.title.clone(), move |_, cx| {
-                session.update(cx, |session, cx| session.show_run(summary.id, cx));
+                area.update(cx, |area, cx| area.show_run(summary.id, cx));
             })
-            .detail(format!("{} · {when}", summary.state.as_str()))
+            .detail(format!(
+                "{} · {} · {when}",
+                summary.kind.activity().title(),
+                summary.state.as_str()
+            ))
             .icon(glyph, Some(color))
             .checked(shown == Some(summary.id))
             .into()
@@ -466,12 +536,12 @@ fn past_run_rows(session: &Entity<ReviewSession>, cx: &mut App) -> Vec<MenuSecti
     }
     let mut sections = vec![MenuSection::new(rows)];
     if !follows {
-        let session = session.clone();
+        let area = area.clone();
         sections.insert(
             0,
             MenuSection::new(vec![
                 MenuItem::new("Follow current run", move |_, cx| {
-                    session.update(cx, |session, cx| session.follow_current(cx));
+                    area.update(cx, |area, cx| area.follow_current(cx));
                 })
                 .into(),
             ]),
@@ -485,29 +555,9 @@ pub fn state_glyph(state: RunState, theme: &Theme) -> (Glyph, Hsla) {
         RunState::Done => (Glyph::CircleCheck, theme.ui.green),
         RunState::Failed => (Glyph::CircleAlert, theme.danger),
         RunState::Stopped => (Glyph::CircleAlert, theme.ui.muted),
+        RunState::Paused => (Glyph::Pause, theme.ui.muted),
         RunState::Queued | RunState::Running => (Glyph::Spinner, theme.ui.muted),
     }
-}
-
-pub(crate) fn comments_of(run: &Run) -> Vec<(String, Option<u64>)> {
-    let logged: Vec<_> = run
-        .log
-        .iter()
-        .filter(|entry| entry.kind == LogKind::Comment)
-        .map(|entry| (first_line(&entry.text), Some(entry.at_ms)))
-        .collect();
-    match &run.outcome {
-        Some(RunOutcome::Review(result)) if logged.is_empty() => result
-            .findings
-            .iter()
-            .map(|finding| (finding.title.clone(), None))
-            .collect(),
-        _ => logged,
-    }
-}
-
-fn first_line(text: &str) -> String {
-    text.lines().next().unwrap_or_default().to_string()
 }
 
 fn kind_name(kind: LogKind) -> &'static str {

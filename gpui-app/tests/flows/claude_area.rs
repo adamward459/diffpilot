@@ -57,8 +57,8 @@ fn a_review_fills_the_area_with_its_plan_and_log_and_the_area_closes_when_it_is_
     assert!(shows(cx, "claude:status:Claude · no runs yet"));
 
     start_review(cx);
-    wait_until_shows(cx, "pill:stop-review:working");
-    click(cx, "pill:stop-review:working");
+    wait_until_shows(cx, "pill:working:Review");
+    click(cx, "pill:working:Review");
     assert!(shows(cx, "claude-area:1"), "a click on the running pill opens the area");
 
     wait_until_shows(cx, "claude-area:step:done:Read the diff");
@@ -134,8 +134,8 @@ fn past_runs_lists_the_earlier_run_and_picking_it_shows_its_log(app: &mut TestAp
     click(cx, "fix:open");
     click(cx, "fix:send");
     fake.wait_for_launches(cx, 2);
-    wait_until_shows(cx, "pill:stop-fix:working");
-    click(cx, "pill:stop-fix:working");
+    wait_until_shows(cx, "pill:working:Fix Comments");
+    click(cx, "pill:working:Fix Comments");
     assert!(shows(cx, "claude-area:1"));
     assert!(shows(cx, "claude-area:title:Fix Comments"));
     assert!(!shows(cx, "claude-area:title:Review"), "the area follows the fix run");
@@ -199,7 +199,7 @@ fn a_guide_run_shows_its_log_in_the_area_and_its_chapters_in_the_status(app: &mu
     wait_until_shows(cx, "claude-area:title:Guide");
     wait_until_shows(cx, "claude-area:log:search:Searched value");
     assert!(shows(cx, "claude-area:thinking"));
-    assert!(shows(cx, "pill:stop-run:working"), "the pill can stop the guide run");
+    assert!(shows(cx, "pill:working:Guide"), "the pill can stop the guide run");
 
     save_a_guide(&fake);
     fake.finish();
@@ -249,4 +249,51 @@ fn queue_starts_a_second_review_after_the_first(app: &mut TestAppContext) {
         "the area stays open while the queued review runs"
     );
     wait_until_shows(cx, "claude:toggle:2");
+}
+
+#[gpui::test]
+fn a_paused_run_keeps_its_queue_waiting_and_continue_resumes_its_session(app: &mut TestAppContext) {
+    let fake = fake_claude(app);
+    fake.review_with(&canned_review());
+    fake.hold();
+    let (_dir, cx) = open(app, Settings::in_memory());
+    start_review(cx);
+    fake.wait_for_launches(cx, 1);
+    click(cx, "claude:toggle:0");
+    wait_until_shows(cx, "claude-area:stop");
+    click(cx, "claude-area:queue");
+    click(cx, "review:start");
+    wait_until_shows(cx, "claude-area:queued:1");
+
+    click(cx, "claude-area:pause");
+    wait_until_shows(cx, "claude:status:Review · paused");
+    assert!(shows(cx, "claude-area:continue"));
+    assert!(shows(cx, "pill:continue"), "the pill offers Continue too");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert_eq!(fake.launches(), 1, "the queued review waits behind the paused one");
+
+    click(cx, "claude-area:continue");
+    fake.wait_for_launches(cx, 2);
+    assert_eq!(fake.resumed(), ["s-1"], "Continue resumes the run's Claude session");
+    fake.finish();
+    fake.wait_for_launches(cx, 3);
+    assert_eq!(fake.resumed().len(), 1, "the queued review starts a new session");
+}
+
+#[gpui::test]
+fn the_pill_pauses_and_stops_a_paused_run(app: &mut TestAppContext) {
+    let fake = fake_claude(app);
+    fake.review_with(&canned_review());
+    fake.hold();
+    let (_dir, cx) = open(app, Settings::in_memory());
+    start_review(cx);
+    fake.wait_for_launches(cx, 1);
+    wait_until_shows(cx, "pill:pause");
+
+    click(cx, "pill:pause");
+    wait_until_shows(cx, "claude:status:Review · paused");
+    click(cx, "pill:stop");
+    wait_until_shows(cx, "claude:status:Review stopped");
+    assert_eq!(fake.launches(), 1);
+    assert!(fake.resumed().is_empty());
 }

@@ -259,7 +259,7 @@ impl ThreadCard {
     }
 
     fn waiting(&self, cx: &App) -> Option<ThreadComment> {
-        self.session.read(cx).is_replying(self.id).then(waiting_reply)
+        self.session.read(cx).is_replying(self.id, cx).then(waiting_reply)
     }
 
     fn shows_composer(&self, kind: Kind) -> bool {
@@ -285,7 +285,7 @@ impl ThreadCard {
             border + m::COMMENT_TOP + m::NAME_LINE + m::NAME_GAP + text_lines(comment, comment_wrap) + m::COMMENT_BOTTOM
         };
         let first = thread.comments.first();
-        let waiting = session.is_replying(self.id).then(waiting_reply);
+        let waiting = session.is_replying(self.id, cx).then(waiting_reply);
         let waiting = waiting.as_ref();
         let mut total = 2.0 * m::BORDER;
         match kind {

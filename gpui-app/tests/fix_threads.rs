@@ -143,7 +143,7 @@ impl World {
 
     fn state(&self, cx: &mut TestAppContext) -> Option<RunState> {
         self.session
-            .read_with(cx, |session, _| session.fix_run().map(|run| run.state))
+            .read_with(cx, |session, cx| session.fix_run(cx).map(|run| run.state))
     }
 
     fn start_fix(&self, cx: &mut TestAppContext) {
@@ -170,12 +170,12 @@ impl World {
 async fn a_fix_run_moves_through_its_states_and_the_threads_follow_it(cx: &mut TestAppContext) {
     let w = world(cx, working_tree());
     let id = w.comment(cx, "Rename this.");
-    assert_eq!(w.session.read_with(cx, |s, _| s.fixable()), [id]);
+    assert_eq!(w.session.read_with(cx, |s, cx| s.fixable(cx)), [id]);
     assert_eq!(w.session.read_with(cx, |s, cx| s.fix_blocker(cx)), None);
 
     w.start_fix(cx);
-    assert!(w.session.read_with(cx, |s, _| s.fixing()));
-    assert!(w.session.read_with(cx, |s, _| s.fixable()).is_empty());
+    assert!(w.session.read_with(cx, |s, cx| s.fixing(cx)));
+    assert!(w.session.read_with(cx, |s, cx| s.fixable(cx)).is_empty());
 
     let reply = w.tool("reply", json!({ "threadId": id.0, "body": "Renaming it." }));
     assert_eq!(reply["ok"], true, "{reply}");
@@ -183,21 +183,21 @@ async fn a_fix_run_moves_through_its_states_and_the_threads_follow_it(cx: &mut T
     assert_eq!(resolved["ok"], true, "{resolved}");
 
     wait_until(cx, "the thread to show Claude's answer", |cx| {
-        w.session.read_with(cx, |session, _| {
+        w.session.read_with(cx, |session, cx| {
             session.thread(id).is_some_and(|thread| thread.addressed.is_some())
-                && session.fix_run().and_then(|run| run.progress()) == Some(Progress { done: 1, total: 1 })
+                && session.fix_run(cx).and_then(|run| run.progress()) == Some(Progress { done: 1, total: 1 })
         })
     });
     let thread = w.session.read_with(cx, |s, _| s.thread(id).cloned()).unwrap();
     let authors: Vec<_> = thread.comments.iter().map(|c| c.author.as_str()).collect();
     assert_eq!(authors, ["You", CLAUDE_NAME, CLAUDE_NAME]);
     assert_eq!(thread.addressed.unwrap().summary, "Fixed: renamed it.");
-    assert!(w.session.read_with(cx, |s, _| s.fixable()).is_empty());
+    assert!(w.session.read_with(cx, |s, cx| s.fixable(cx)).is_empty());
 
     std::fs::write(w.out("go"), "").unwrap();
     wait_until(cx, "the run to finish", |cx| w.state(cx) == Some(RunState::Done));
-    assert!(!w.session.read_with(cx, |s, _| s.fixing()));
-    assert_eq!(w.session.read_with(cx, |s, _| s.fix_outcome()), Some((1, 0)));
+    assert!(!w.session.read_with(cx, |s, cx| s.fixing(cx)));
+    assert_eq!(w.session.read_with(cx, |s, cx| s.fix_outcome(cx)), Some((1, 0)));
     assert!(
         w.events
             .lock()
@@ -212,22 +212,32 @@ async fn a_second_fix_queues_and_leaves_out_the_threads_the_first_one_has(cx: &m
     let first = w.comment(cx, "Rename this.");
     w.start_fix(cx);
     let second = w.comment_on_line(cx, 2, "And this.");
-    assert_eq!(w.session.read_with(cx, |s, _| s.fixable()), [second]);
+    assert_eq!(w.session.read_with(cx, |s, cx| s.fixable(cx)), [second]);
 
     w.session
         .update(cx, |session, cx| session.fix_threads(&[first, second], cx));
-    let (queued, failure, fixable) = w.session.read_with(cx, |s, _| {
+    let (queued, failure, fixable) = w.session.read_with(cx, |s, cx| {
         (
-            s.queued().iter().map(|run| run.threads.clone()).collect::<Vec<_>>(),
+            s.activity()
+                .read(cx)
+                .queued()
+                .iter()
+                .map(|run| run.threads.clone())
+                .collect::<Vec<_>>(),
             s.fix_failure().map(String::from),
-            s.fixable(),
+            s.fixable(cx),
         )
     });
     assert_eq!(queued, [vec![second]]);
     assert_eq!(failure, None);
     assert!(fixable.is_empty());
 
-    w.session.update(cx, |session, cx| session.stop_claude(cx));
+    w.session.update(cx, |session, cx| {
+        session
+            .activity()
+            .clone()
+            .update(cx, |activity, cx| activity.stop_current(cx))
+    });
 }
 
 #[gpui::test]
@@ -236,10 +246,15 @@ async fn stopping_a_fix_run_ends_it_as_stopped(cx: &mut TestAppContext) {
     w.comment(cx, "Rename this.");
     w.start_fix(cx);
 
-    w.session.update(cx, |session, cx| session.stop_claude(cx));
+    w.session.update(cx, |session, cx| {
+        session
+            .activity()
+            .clone()
+            .update(cx, |activity, cx| activity.stop_current(cx))
+    });
 
     wait_until(cx, "the run to stop", |cx| w.state(cx) == Some(RunState::Stopped));
-    assert!(!w.session.read_with(cx, |s, _| s.fixing()));
+    assert!(!w.session.read_with(cx, |s, cx| s.fixing(cx)));
 }
 
 #[gpui::test]
@@ -247,19 +262,32 @@ async fn run_again_after_a_fix_fixes_the_threads_that_are_still_open(cx: &mut Te
     let w = world(cx, working_tree());
     w.comment(cx, "Rename this.");
     w.start_fix(cx);
-    let first = w.session.read_with(cx, |s, _| s.fix_run().map(|run| run.id)).unwrap();
-    w.session.update(cx, |session, cx| session.stop_claude(cx));
+    let first = w
+        .session
+        .read_with(cx, |s, cx| s.fix_run(cx).map(|run| run.id))
+        .unwrap();
+    w.session.update(cx, |session, cx| {
+        session
+            .activity()
+            .clone()
+            .update(cx, |activity, cx| activity.stop_current(cx))
+    });
     wait_until(cx, "the run to stop", |cx| w.state(cx) == Some(RunState::Stopped));
-    assert!(w.session.read_with(cx, |s, _| s.can_run_again()));
+    assert!(w.session.read_with(cx, |s, cx| s.can_run_again(cx)));
 
     w.session.update(cx, |session, cx| session.run_again(cx));
     wait_until(cx, "the second fix to run", |cx| {
-        w.session.read_with(cx, |s, _| {
-            s.fix_run()
+        w.session.read_with(cx, |s, cx| {
+            s.fix_run(cx)
                 .is_some_and(|run| run.id != first && run.state == RunState::Running)
         })
     });
-    w.session.update(cx, |session, cx| session.stop_claude(cx));
+    w.session.update(cx, |session, cx| {
+        session
+            .activity()
+            .clone()
+            .update(cx, |activity, cx| activity.stop_current(cx))
+    });
 }
 
 #[gpui::test]
@@ -267,14 +295,19 @@ async fn run_again_after_a_fix_checks_the_edit_setting_again(cx: &mut TestAppCon
     let w = world(cx, working_tree());
     w.comment(cx, "Rename this.");
     w.start_fix(cx);
-    w.session.update(cx, |session, cx| session.stop_claude(cx));
+    w.session.update(cx, |session, cx| {
+        session
+            .activity()
+            .clone()
+            .update(cx, |activity, cx| activity.stop_current(cx))
+    });
     wait_until(cx, "the run to stop", |cx| w.state(cx) == Some(RunState::Stopped));
 
     w.settings.set_edit_permission(EditPermission::AskEach);
     w.session.update(cx, |session, cx| session.run_again(cx));
     let (fix, review) = w
         .session
-        .read_with(cx, |s, _| (s.fix_failure().map(String::from), s.review_problem()));
+        .read_with(cx, |s, cx| (s.fix_failure().map(String::from), s.review_problem(cx)));
     assert_eq!(fix.as_deref(), Some(FIX_NEEDS_DONT_ASK));
     assert_eq!(review, None);
 }
@@ -284,7 +317,12 @@ async fn run_again_after_a_fix_with_every_thread_resolved_starts_nothing(cx: &mu
     let w = world(cx, working_tree());
     let id = w.comment(cx, "Rename this.");
     w.start_fix(cx);
-    w.session.update(cx, |session, cx| session.stop_claude(cx));
+    w.session.update(cx, |session, cx| {
+        session
+            .activity()
+            .clone()
+            .update(cx, |activity, cx| activity.stop_current(cx))
+    });
     wait_until(cx, "the run to stop", |cx| w.state(cx) == Some(RunState::Stopped));
 
     w.session.update(cx, |session, cx| session.resolve_thread(id, cx));
@@ -316,13 +354,13 @@ async fn a_guide_run_shows_as_the_sessions_run_without_counting_as_a_review_or_a
         engine.run(id).is_some_and(|run| run.state == RunState::Running) && w.out("started").exists()
     });
 
-    let (current, busy, last, past, can_again) = w.session.read_with(cx, |s, _| {
+    let (current, busy, last, past, can_again) = w.session.read_with(cx, |s, cx| {
         (
-            s.current().map(|run| run.id),
-            s.is_busy(),
+            s.activity().read(cx).current().map(|run| run.id),
+            s.activity().read(cx).is_busy(),
             s.last_run().map(|run| run.id),
-            s.past_runs(10).len(),
-            s.can_run_again(),
+            s.activity().read(cx).past_runs(&s.session_key(), 10).len(),
+            s.can_run_again(cx),
         )
     });
     assert_eq!((current, busy, last, past, can_again), (Some(id), true, None, 1, false));
@@ -333,7 +371,7 @@ async fn a_guide_run_shows_as_the_sessions_run_without_counting_as_a_review_or_a
     );
     assert!(
         w.session
-            .read_with(cx, |s, _| s.review_run().is_none() && s.fix_run().is_none())
+            .read_with(cx, |s, cx| s.review_run(cx).is_none() && s.fix_run(cx).is_none())
     );
 
     std::fs::write(w.out("go"), "").unwrap();
@@ -341,11 +379,11 @@ async fn a_guide_run_shows_as_the_sessions_run_without_counting_as_a_review_or_a
         engine.run(id).is_some_and(|run| run.state.is_finished())
     });
     cx.run_until_parked();
-    assert!(w.session.read_with(cx, |s, _| {
-        s.current().is_some_and(|run| run.id == id) && s.last_run().is_some_and(|run| run.id == id)
+    assert!(w.session.read_with(cx, |s, cx| {
+        s.activity().read(cx).current().is_some_and(|run| run.id == id) && s.last_run().is_some_and(|run| run.id == id)
     }));
     assert!(
-        !w.session.read_with(cx, |s, _| s.can_run_again()),
+        !w.session.read_with(cx, |s, cx| s.can_run_again(cx)),
         "the guide has its own Write Guide"
     );
     assert!(

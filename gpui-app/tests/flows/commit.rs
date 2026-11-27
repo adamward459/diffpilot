@@ -99,13 +99,19 @@ fn the_run_shows_in_the_claude_area_and_stop_ends_it(app: &mut TestAppContext) {
     click(cx, "bottom-bar:commit");
     click(cx, "commit:generate");
     claude.wait_for_launches(cx, 1);
-    wait_until_shows(cx, "pill:stop-run:working");
-    click(cx, "pill:stop-run:working");
+    wait_until_shows(cx, "pill:working:Commit message");
+    click(cx, "pill:working:Commit message");
     wait_until_shows(cx, "claude-area:title:Commit message");
 
     click(cx, "bottom-bar:commit");
     click(cx, "commit:stop");
     wait_until_shows(cx, "commit:generate");
+    wait_until_shows(cx, "claude:status:Commit message stopped");
+    click(cx, "claude-area:past-runs");
+    assert!(
+        shows(cx, "claude-area-past-menu:Commit message"),
+        "the history lists runs of every kind"
+    );
 }
 
 #[gpui::test]

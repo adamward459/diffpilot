@@ -27,29 +27,13 @@ pub enum RunKind {
     CommitMessage,
 }
 
-impl RunKind {
-    /// Runs that may change files. They get a snapshot first.
-    pub fn edits(self) -> bool {
-        !matches!(self, Self::Review | Self::Guide | Self::CommitMessage)
-    }
-
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::Review => "Review",
-            Self::FixComments => "Fix Comments",
-            Self::MakeChanges => "Make Changes",
-            Self::Reply => "Reply",
-            Self::Guide => "Guide",
-            Self::CommitMessage => "Commit message",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RunState {
     Queued,
     Running,
+    /// Its claude process ended, and the run keeps the repo until it is continued or stopped.
+    Paused,
     Done,
     Failed,
     Stopped,
@@ -60,6 +44,7 @@ impl RunState {
         match self {
             Self::Queued => "queued",
             Self::Running => "running",
+            Self::Paused => "paused",
             Self::Done => "done",
             Self::Failed => "failed",
             Self::Stopped => "stopped",
@@ -350,29 +335,50 @@ impl Run {
             );
             return;
         }
-        if let Some(output) = &result.structured_output {
-            match serde_json::from_value::<ReviewResult>(output.clone()) {
-                Ok(review) => self.outcome = Some(RunOutcome::Review(review)),
-                Err(_) => self.error = Some("Claude returned a review in a shape diffpilot cannot read.".into()),
-            }
-        } else if let Some(review) = self
-            .kind
-            .eq(&RunKind::Review)
-            .then(|| result.result.as_deref().and_then(review_in_text))
-            .flatten()
-        {
-            self.outcome = Some(RunOutcome::Review(review));
-        } else if let Some(text) = result.result.as_deref().filter(|text| !text.trim().is_empty()) {
-            self.outcome = Some(RunOutcome::Text(text.trim().to_string()));
+        match self.kind.activity().outcome(result) {
+            Ok(outcome) => self.outcome = outcome,
+            Err(message) => self.error = Some(message),
         }
+    }
+
+    /// The comments the run wrote, with their time in the log. A review without the MCP tools has its findings.
+    pub fn comments(&self) -> Vec<(String, Option<u64>)> {
+        let logged: Vec<_> = self
+            .log
+            .iter()
+            .filter(|entry| entry.kind == LogKind::Comment)
+            .map(|entry| (first_line(&entry.text), Some(entry.at_ms)))
+            .collect();
+        match &self.outcome {
+            Some(RunOutcome::Review(result)) if logged.is_empty() => result
+                .findings
+                .iter()
+                .map(|finding| (finding.title.clone(), None))
+                .collect(),
+            _ => logged,
+        }
+    }
+
+    pub fn tool_calls(&self) -> usize {
+        self.log
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry.kind,
+                    LogKind::Read
+                        | LogKind::Search
+                        | LogKind::Edit
+                        | LogKind::Command
+                        | LogKind::Comment
+                        | LogKind::Tool
+                )
+            })
+            .count()
     }
 }
 
-/// A review Claude wrote as JSON text, when the structured output field is missing.
-fn review_in_text(text: &str) -> Option<ReviewResult> {
-    let start = text.find('{')?;
-    let end = text.rfind('}')?;
-    serde_json::from_str(text.get(start..=end)?).ok()
+pub fn first_line(text: &str) -> String {
+    text.lines().next().unwrap_or_default().to_string()
 }
 
 fn clipped(text: &str) -> String {
@@ -708,12 +714,5 @@ mod tests {
         use_tool(&mut run, "1", "Read", json!({"file_path": "/r/a"}));
         let json = serde_json::to_string(&run).unwrap();
         assert_eq!(serde_json::from_str::<Run>(&json).unwrap(), run);
-    }
-
-    #[test]
-    fn only_review_and_guide_runs_are_read_only() {
-        assert!(!RunKind::Review.edits());
-        assert!(RunKind::FixComments.edits() && RunKind::MakeChanges.edits() && RunKind::Reply.edits());
-        assert!(!RunKind::Guide.edits() && !RunKind::CommitMessage.edits());
     }
 }

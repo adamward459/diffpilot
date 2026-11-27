@@ -37,7 +37,7 @@ fn fix_with_claude_runs_on_the_comments_and_command_period_stops_it(app: &mut Te
 
     click(cx, "fix:open");
     click(cx, "fix:send");
-    wait_until_shows(cx, "pill:stop-fix:working");
+    wait_until_shows(cx, "pill:working:Fix Comments");
     claude.wait_for_launches(cx, 1);
 
     press(cx, "cmd-.");
@@ -100,7 +100,7 @@ fn the_fix_button_stays_while_a_review_runs(app: &mut TestAppContext) {
     click(cx, "review:open");
     click(cx, "review:start");
     claude.wait_for_launches(cx, 1);
-    wait_until_shows(cx, "pill:stop-review:working");
+    wait_until_shows(cx, "pill:working:Review");
     assert!(shows(cx, "fix:ready:1"), "Fix stays next to the working pill");
 
     click(cx, "fix:open");

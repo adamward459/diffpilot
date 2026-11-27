@@ -3,7 +3,6 @@ use crate::diff::DiffMode;
 use crate::editor::Editor;
 use crate::policy::EditPermission;
 use crate::review::ReviewModel;
-use crate::run::RunKind;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -155,14 +154,6 @@ impl Settings {
 
     pub fn set_fixes_model(&self, model: ReviewModel) {
         self.write(|data| data.fixes_model = Some(model));
-    }
-
-    pub fn model_for(&self, kind: RunKind) -> ReviewModel {
-        match kind {
-            RunKind::Review | RunKind::Guide => self.reviews_model(),
-            RunKind::FixComments | RunKind::MakeChanges | RunKind::Reply => self.fixes_model(),
-            RunKind::CommitMessage => ReviewModel::COMMIT_MESSAGE,
-        }
     }
 
     pub fn review_focuses(&self, repo: &Path) -> Vec<String> {
@@ -615,18 +606,6 @@ mod tests {
             Settings::at(file).reviews_model(),
             ReviewModel::new(ModelName::Sonnet, Effort::High)
         );
-    }
-
-    #[test]
-    fn each_kind_of_run_reads_its_own_model() {
-        let settings = Settings::in_memory();
-        settings.set_reviews_model(ReviewModel::new(ModelName::Haiku, Effort::Low));
-        settings.set_fixes_model(ReviewModel::new(ModelName::Opus, Effort::Medium));
-        assert_eq!(settings.model_for(RunKind::Review).name, ModelName::Haiku);
-        assert_eq!(settings.model_for(RunKind::Guide).name, ModelName::Haiku);
-        for kind in [RunKind::FixComments, RunKind::MakeChanges, RunKind::Reply] {
-            assert_eq!(settings.model_for(kind).name, ModelName::Opus);
-        }
     }
 
     #[test]

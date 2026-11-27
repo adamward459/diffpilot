@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ### Added
 
+- Pause a running Claude run from the pill or the Claude area, then Continue it where it stopped or Stop it. Queued runs wait while a run is paused.
 - Settings now show the app version at the bottom of the section list.
 - The Commit… button in the bottom bar now opens a message box and commits all uncommitted changes.
 - Generate in the commit box asks Claude to write the commit message from your uncommitted changes. You can edit it before you commit, and the run shows in the Claude area.
@@ -41,6 +42,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ### Changed
 
+- The toolbar pill, the bottom status line and the Claude area now show the same Claude run for the repo, whichever feature started it: review, fix, reply, guide or commit message.
+- Past Runs in the Claude area now lists runs of every kind on the branch, from every comparison, with their kind. Pick one to see its log.
 - The project and branch menus in the toolbar now have an arrow that points at the button that opened them, like the popovers.
 - Loading indicators now look like the native macOS spinner, and the bottom bar no longer spins a second one while Claude works.
 - Text across the app is a little larger (about 8%). The code in the diff keeps its size.

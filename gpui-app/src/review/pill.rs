@@ -1,9 +1,10 @@
+use crate::claude_activity::ClaudeActivity;
 use crate::review::popover::{PopoverEvent, ReviewPopover};
 use crate::review::session::{ReviewEvent, ReviewSession};
 use diffpilot_core::review::Severity;
-use diffpilot_core::run::{Progress, Run, RunId, RunKind, RunState};
+use diffpilot_core::run::{Run, RunId, RunState};
 use diffpilot_ui_kit::components::{Button, Look, filled_check, severity_badge, tag};
-use diffpilot_ui_kit::components::{popover, spinner};
+use diffpilot_ui_kit::components::{glyph_icon, popover, spinner};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -19,9 +20,9 @@ actions!(review_ui, [StopReview]);
 
 pub const RESULT_SECONDS: u64 = 5;
 
-/// Sessions with a pill on screen. ⌘. stops their reviews wherever the focus is.
+/// Repos with a pill on screen. ⌘. stops their runs wherever the focus is.
 #[derive(Default)]
-struct StopTargets(Vec<WeakEntity<ReviewSession>>);
+struct StopTargets(Vec<WeakEntity<ClaudeActivity>>);
 
 impl Global for StopTargets {}
 
@@ -34,7 +35,7 @@ pub fn init(cx: &mut App) {
             .filter(|target| target.upgrade().is_some())
             .collect();
         for target in &live {
-            target.update(cx, |session, cx| session.stop_claude(cx)).ok();
+            target.update(cx, |activity, cx| activity.stop_current(cx)).ok();
         }
         cx.default_global::<StopTargets>().0 = live;
     });
@@ -49,6 +50,7 @@ pub enum PillEvent {
 
 pub struct ReviewPill {
     session: Entity<ReviewSession>,
+    activity: Entity<ClaudeActivity>,
     popover: Entity<ReviewPopover>,
     open: bool,
     result_for: Option<RunId>,
@@ -63,9 +65,11 @@ impl EventEmitter<PillEvent> for ReviewPill {}
 impl ReviewPill {
     pub fn new(session: Entity<ReviewSession>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let popover = cx.new(|cx| ReviewPopover::new(session.clone(), window, cx));
-        cx.default_global::<StopTargets>().0.push(session.downgrade());
+        let activity = session.read(cx).activity().clone();
+        cx.default_global::<StopTargets>().0.push(activity.downgrade());
         let subscriptions = vec![
             cx.observe(&session, |_, _, cx| cx.notify()),
+            cx.observe(&activity, |this, _, cx| this.run_changed(cx)),
             cx.subscribe(&session, |this, _, event, cx| match event {
                 ReviewEvent::RunChanged => this.run_changed(cx),
                 ReviewEvent::RunFinished(RunState::Failed) => this.show_review_problem(cx),
@@ -75,6 +79,7 @@ impl ReviewPill {
         ];
         let mut pill = Self {
             session,
+            activity,
             popover,
             open: false,
             result_for: None,
@@ -96,7 +101,7 @@ impl ReviewPill {
     }
 
     pub fn is_running(&self, cx: &App) -> bool {
-        self.session.read(cx).is_busy()
+        self.activity.read(cx).is_busy()
     }
 
     pub fn is_open(&self) -> bool {
@@ -115,22 +120,20 @@ impl ReviewPill {
     }
 
     fn show_review_problem(&mut self, cx: &mut Context<Self>) {
-        if self.session.read(cx).review_problem().is_some() {
+        if self.session.read(cx).review_problem(cx).is_some() {
             self.open = true;
             cx.notify();
         }
     }
 
     fn run_changed(&mut self, cx: &mut Context<Self>) {
-        let (running, done_review) = {
-            let current = self.session.read(cx).current();
-            (
-                current.is_some_and(|run| !run.state.is_finished()),
-                current
-                    .filter(|run| run.kind == RunKind::Review && run.state == RunState::Done)
-                    .map(|run| run.id),
-            )
-        };
+        let running = self.running(cx);
+        let done_review = self
+            .session
+            .read(cx)
+            .review_run(cx)
+            .filter(|run| run.state == RunState::Done)
+            .map(|run| run.id);
         if !running {
             self.ticker = None;
         } else if self.ticker.is_none() {
@@ -159,13 +162,15 @@ impl ReviewPill {
         cx.notify();
     }
 
-    fn sync_room(&mut self, cx: &mut Context<Self>) {
-        let running = self
-            .session
+    fn running(&self, cx: &App) -> bool {
+        self.activity
             .read(cx)
             .current()
-            .is_some_and(|run| !run.state.is_finished());
-        let needs = running || self.shows_result();
+            .is_some_and(|run| !run.state.is_finished())
+    }
+
+    fn sync_room(&mut self, cx: &mut Context<Self>) {
+        let needs = self.running(cx) || self.shows_result();
         if needs != self.needs_room {
             self.needs_room = needs;
             cx.emit(PillEvent::NeedsRoomChanged(needs));
@@ -183,7 +188,7 @@ impl ReviewPill {
         })
     }
 
-    fn trigger(&self, session: &ReviewSession, visible: bool, theme: Theme) -> Button {
+    fn trigger(&self, session: &ReviewSession, visible: bool, theme: Theme, cx: &App) -> Button {
         let button = tag(
             Button::new("claude-pill")
                 .look(Look::Ghost)
@@ -210,7 +215,7 @@ impl ReviewPill {
                     })
                 }));
         }
-        if session.review_problem().is_some() {
+        if session.review_problem(cx).is_some() {
             return button
                 .icon_color(Glyph::TriangleAlert, 16., theme.amber)
                 .label("Review failed");
@@ -222,28 +227,21 @@ impl ReviewPill {
     }
 
     fn working(&self, run: &Run, theme: Theme, cx: &Context<Self>) -> AnyElement {
-        let label = match (run.kind, run.progress()) {
-            (_, _) if run.state == RunState::Queued => "Waiting".to_string(),
-            (RunKind::Review, _) => "Reviewing".to_string(),
-            (RunKind::FixComments, Some(Progress { done, total })) => format!("Fixing {done} of {total}"),
-            (RunKind::FixComments, None) => "Fixing".to_string(),
-            (RunKind::MakeChanges, _) => "Making changes".to_string(),
-            (RunKind::Guide, _) => "Writing guide".to_string(),
-            (RunKind::Reply, _) => "Replying".to_string(),
-            (RunKind::CommitMessage, _) => "Writing commit message".to_string(),
+        let activity = run.kind.activity();
+        let label = match run.state {
+            RunState::Queued => "Waiting".to_string(),
+            RunState::Paused => "Paused".to_string(),
+            _ => activity.running_label(run.progress()),
         };
         let seconds = run.elapsed_ms(crate::runs::now_ms()).unwrap_or(0) / 1000;
-        let stop_id = match run.kind {
-            RunKind::Review => "stop-review",
-            RunKind::FixComments => "stop-fix",
-            _ => "stop-run",
-        };
         working(
             Working {
+                run: run.id,
+                state: run.state,
+                title: activity.title(),
                 label,
                 activity: run.activity.clone().map(SharedString::from),
                 seconds,
-                stop_id,
             },
             theme,
             cx,
@@ -252,7 +250,7 @@ impl ReviewPill {
     }
 
     pub fn stop(&mut self, cx: &mut Context<Self>) {
-        self.session.update(cx, |session, cx| session.stop_claude(cx));
+        self.activity.update(cx, |activity, cx| activity.stop_current(cx));
     }
 }
 
@@ -261,7 +259,8 @@ impl Render for ReviewPill {
         let theme = Theme::of(cx);
         let session = self.session.read(cx);
         let visible = session.host().visible_path.is_some();
-        let claude = match session.current().filter(|run| !run.state.is_finished()) {
+        let working = self.activity.read(cx).current().filter(|run| !run.state.is_finished());
+        let claude = match working {
             Some(run) => self.working(run, theme, cx),
             None => popover("review-popover")
                 .anchor(Corner::TopRight)
@@ -273,7 +272,7 @@ impl Render for ReviewPill {
                         this.set_open(*open, cx);
                     }
                 }))
-                .trigger(self.trigger(session, visible, theme))
+                .trigger(self.trigger(session, visible, theme, cx))
                 .content({
                     let popover = self.popover.clone();
                     move |_, _, _| popover.clone()
@@ -290,19 +289,24 @@ impl Render for ReviewPill {
 }
 
 struct Working {
+    run: RunId,
+    state: RunState,
+    title: &'static str,
     label: String,
     activity: Option<SharedString>,
     seconds: u64,
-    stop_id: &'static str,
 }
 
 fn working(run: Working, theme: Theme, cx: &Context<ReviewPill>) -> impl IntoElement {
     let Working {
+        run,
+        state,
+        title,
         label,
         activity,
         seconds,
-        stop_id,
     } = run;
+    let paused = state == RunState::Paused;
     h_flex()
         .gap(px(7.))
         .pl_2p5()
@@ -310,16 +314,20 @@ fn working(run: Working, theme: Theme, cx: &Context<ReviewPill>) -> impl IntoEle
         .items_center()
         .child(
             h_flex()
-                .id((stop_id, 0usize))
+                .id("pill-working")
                 .gap(px(7.))
                 .items_center()
                 .cursor_pointer()
-                .child(spinner(("pill-spinner", 0usize), 16., theme.ui.muted))
+                .child(if paused {
+                    glyph_icon(Glyph::Pause, 16., theme.ui.muted).into_any_element()
+                } else {
+                    spinner(("pill-spinner", 0usize), 16., theme.ui.muted).into_any_element()
+                })
                 .child(
                     h_flex()
                         .gap_1()
                         .child(
-                            tag(div(), || format!("pill:{stop_id}:working"))
+                            tag(div(), move || format!("pill:working:{title}"))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .child(label),
                         )
@@ -334,16 +342,50 @@ fn working(run: Working, theme: Theme, cx: &Context<ReviewPill>) -> impl IntoEle
                 })
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(PillEvent::ShowArea))),
         )
+        .when(state == RunState::Running, |row| {
+            row.child(
+                tag(
+                    Button::new("pill-pause")
+                        .look(Look::Ghost)
+                        .rounded_full()
+                        .w(px(22.))
+                        .px(px(0.))
+                        .tooltip("Pause Claude")
+                        .icon(Glyph::Pause, 12.),
+                    || "pill:pause",
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.activity.update(cx, |activity, cx| activity.pause(run, cx));
+                })),
+            )
+        })
+        .when(paused, |row| {
+            row.child(
+                tag(
+                    Button::new("pill-continue")
+                        .look(Look::Ghost)
+                        .rounded_full()
+                        .w(px(22.))
+                        .px(px(0.))
+                        .tooltip("Continue Claude")
+                        .icon(Glyph::Play, 12.),
+                    || "pill:continue",
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.activity.update(cx, |activity, cx| activity.resume(run, cx));
+                })),
+            )
+        })
         .child(
             tag(
-                Button::new(stop_id)
+                Button::new("pill-stop")
                     .look(Look::Ghost)
                     .rounded_full()
                     .w(px(22.))
                     .px(px(0.))
                     .tooltip("Stop Claude (⌘.)")
                     .child(div().size(px(10.)).rounded(px(2.)).bg(theme.danger)),
-                || format!("pill:{stop_id}"),
+                || "pill:stop",
             )
             .on_click(cx.listener(|this, _, _, cx| this.stop(cx))),
         )
