@@ -1,18 +1,21 @@
 use crate::bench::{self, Bench, Mark};
 use crate::folder_menu::{FolderMenu, FolderMenuEvent, SHORTCUT_SLOTS};
+use crate::folder_picker::pick_folders;
+use crate::open_dialog::{OpenEvent, OpenFolderDialog};
 use crate::remote::SyncKind;
 use crate::repo_view::{Nav, RepoView};
 use crate::settings::{self, OpenSettings, PageEvent, Section, SettingsPage};
+use crate::tour::{self, Tour};
 use diffpilot_core::diff::DiffMode;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::{DataScope, Store};
 use diffpilot_core::viewed::ViewedStore;
 use diffpilot_ui_kit::Glyph;
-use diffpilot_ui_kit::components::{Presence, dialog};
+use diffpilot_ui_kit::components::{Presence, dialog, tour as tour_overlay, tour_card};
 use gpui::prelude::*;
 use gpui::{
-    App, Context, Entity, FocusHandle, IntoElement, Menu, MenuItem, ParentElement, PathPromptOptions, Render, Styled,
-    Subscription, Window, WindowControlArea, actions, div, px,
+    App, ClickEvent, Context, Entity, FocusHandle, IntoElement, KeyDownEvent, Menu, MenuItem, MouseDownEvent,
+    ParentElement, Render, Styled, Subscription, Window, WindowControlArea, actions, div, px,
 };
 use gpui_component::button::Button;
 use gpui_component::{ActiveTheme, Icon, Sizable, StyledExt, h_flex, v_flex};
@@ -51,7 +54,8 @@ actions!(
         PreviousChapter,
         ToggleInspector,
         ToggleClaudeArea,
-        ToggleComments
+        ToggleComments,
+        ShowTour
     ]
 );
 
@@ -84,6 +88,7 @@ pub fn init(cx: &mut App) {
     crate::sidebar::bind_keys(cx);
     crate::diff_pane::bind_keys(cx);
     crate::review::init(cx);
+    crate::open_dialog::init(cx);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.set_menus(vec![
         Menu {
@@ -121,6 +126,10 @@ pub fn init(cx: &mut App) {
                 MenuItem::action("Toggle Comments", ToggleComments),
             ],
         },
+        Menu {
+            name: "Help".into(),
+            items: vec![MenuItem::action("Show Tour", ShowTour)],
+        },
     ]);
 }
 
@@ -133,7 +142,11 @@ pub struct Workspace {
     benching: bool,
     settings_page: Option<(Entity<SettingsPage>, Subscription)>,
     settings_presence: Presence,
+    open_dialog: Option<(Entity<OpenFolderDialog>, Subscription)>,
     focus: FocusHandle,
+    tour: Tour,
+    tour_focus: FocusHandle,
+    tour_pending: bool,
     _menu_events: Subscription,
     _focus_lost: Subscription,
 }
@@ -163,7 +176,11 @@ impl Workspace {
             benching,
             settings_page: None,
             settings_presence: Presence::new(false),
+            open_dialog: None,
             focus: cx.focus_handle(),
+            tour: Tour::default(),
+            tour_focus: cx.focus_handle(),
+            tour_pending: false,
             _menu_events: menu_events,
             _focus_lost: focus_lost,
         };
@@ -180,8 +197,10 @@ impl Workspace {
     fn show_folder(&mut self, folder: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.settings_page = None;
         self.settings_presence = Presence::new(false);
+        self.open_dialog = None;
         let folder = folder.canonicalize().unwrap_or(folder);
         self.settings.remember_folder(&folder);
+        self.tour_pending = !self.benching && !self.settings.tour_seen();
         match self.views.iter().position(|(path, _)| *path == folder) {
             Some(index) => {
                 let view = self.views.remove(index);
@@ -256,19 +275,29 @@ impl Workspace {
     }
 
     pub fn open_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let picked = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: None,
-        });
+        let picked = pick_folders(false, cx);
         cx.spawn_in(window, async move |this, cx| {
-            let Ok(Ok(Some(paths))) = picked.await else { return };
-            let Some(folder) = paths.into_iter().next() else { return };
-            this.update_in(cx, |this, window, cx| this.show_folder(folder, window, cx))
+            let Some(folder) = picked.await.and_then(|paths| paths.into_iter().next()) else {
+                return;
+            };
+            this.update_in(cx, |this, window, cx| this.show_open_dialog(folder, window, cx))
                 .ok();
         })
         .detach();
+    }
+
+    fn show_open_dialog(&mut self, folder: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let settings = self.settings.clone();
+        let dialog = cx.new(|cx| OpenFolderDialog::new(settings, folder, window, cx));
+        let events = cx.subscribe_in(&dialog, window, |this, _, event: &OpenEvent, window, cx| match event {
+            OpenEvent::Open(draft) => {
+                this.settings.set_linked_folders(&draft.folder, draft.linked.clone());
+                this.show_folder(draft.folder.clone(), window, cx);
+            }
+            OpenEvent::Cancel => window.focus(&this.focus),
+        });
+        self.open_dialog = Some((dialog, events));
+        cx.notify();
     }
 
     pub fn open_settings(&mut self, section: Option<Section>, window: &mut Window, cx: &mut Context<Self>) {
@@ -300,10 +329,86 @@ impl Workspace {
     // The menu bar and every shortcut reach this view through the focused element, so focus must never rest on
     // an element that left the window.
     fn restore_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.tour.is_open() {
+            window.focus(&self.tour_focus);
+            return;
+        }
         match self.settings_page().cloned() {
             Some(page) => page.update(cx, |page, cx| page.focus_search(window, cx)),
             None => window.focus(&self.focus),
         }
+    }
+
+    fn start_tour(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.benching {
+            self.tour_pending = false;
+            return;
+        }
+        if !self.tour.start(&tour::shown(window, cx)) {
+            return;
+        }
+        self.tour_pending = false;
+        window.focus(&self.tour_focus);
+        cx.notify();
+    }
+
+    fn move_tour(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let shown = tour::shown(window, cx);
+        if forward && self.tour.is_last(&shown) {
+            self.close_tour(window, cx);
+            return;
+        }
+        if forward {
+            self.tour.next(&shown);
+        } else {
+            self.tour.back(&shown);
+        }
+        cx.notify();
+    }
+
+    fn close_tour(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.tour.is_open() {
+            return;
+        }
+        self.tour.close();
+        self.settings.set_tour_seen(true);
+        window.focus(&self.focus);
+        cx.notify();
+    }
+
+    fn tour_overlay(&self, shown: &[tour::Stop], cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let stop = self.tour.stop()?;
+        let (place, total) = self.tour.position(shown)?;
+        let card = tour_card(
+            stop.title(),
+            stop.body(),
+            format!("{place} of {total}"),
+            cx.listener(|this, _: &ClickEvent, window, cx| this.move_tour(false, window, cx)),
+            cx.listener(|this, _: &ClickEvent, window, cx| this.move_tour(true, window, cx)),
+            cx.listener(|this, _: &ClickEvent, window, cx| this.close_tour(window, cx)),
+        )
+        .can_go_back(!self.tour.is_first(shown))
+        .next_label(if self.tour.is_last(shown) { "Done" } else { "Next" });
+        Some(
+            tour_overlay("tour", self.tour.step()?)
+                .target(move |window, cx| tour::bounds_of(stop, window, cx))
+                .radius(stop.radius())
+                .track_focus(&self.tour_focus)
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                    if event.keystroke.modifiers.modified() {
+                        return;
+                    }
+                    match event.keystroke.key.as_str() {
+                        "right" | "enter" => this.move_tour(true, window, cx),
+                        "left" => this.move_tour(false, window, cx),
+                        "escape" => this.close_tour(window, cx),
+                        _ => {}
+                    }
+                }))
+                .on_dismiss(cx.listener(|this, _: &MouseDownEvent, window, cx| this.close_tour(window, cx)))
+                .card(card)
+                .into_any_element(),
+        )
     }
 
     fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -429,7 +534,16 @@ fn wait_for_bench(workspace: Entity<Workspace>, settle: usize, window: &mut Wind
 }
 
 impl Render for Workspace {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let shown = tour::shown(window, cx);
+        if self.tour_pending {
+            self.start_tour(window, cx);
+            if self.tour_pending {
+                window.request_animation_frame();
+            }
+        }
+        tour::begin_frame(window, cx);
+        let tour = self.tour_overlay(&shown, cx);
         let content = match self.active_view() {
             Some(repo) => repo.clone().into_any_element(),
             None => self.empty_state(cx).into_any_element(),
@@ -439,7 +553,12 @@ impl Render for Workspace {
             .as_ref()
             .filter(|_| self.settings_presence.is_mounted())
             .map(|(page, _)| self.settings_dialog(page, cx));
-        div()
+        let open_dialog = self
+            .open_dialog
+            .as_ref()
+            .filter(|(dialog, _)| dialog.read(cx).is_mounted())
+            .map(|(dialog, _)| dialog.clone());
+        let app = div()
             .id("workspace")
             .size_full()
             .on_action(cx.listener(|this, _: &OpenFolder, window, cx| this.open_folder(window, cx)))
@@ -494,6 +613,14 @@ impl Render for Workspace {
             .child(div().size_0().track_focus(&self.focus))
             .child(content)
             .children(dialog)
-            .when(self.benching, |this| this.child(bench::probe()))
+            .children(open_dialog)
+            .when(self.benching, |this| this.child(bench::probe()));
+        div()
+            .id("workspace-root")
+            .relative()
+            .size_full()
+            .on_action(cx.listener(|this, _: &ShowTour, window, cx| this.start_tour(window, cx)))
+            .child(app)
+            .children(tour)
     }
 }

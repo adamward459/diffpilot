@@ -18,6 +18,7 @@ use crate::review::{
     CommentsEvent, CommentsPanel, FixButton, FixEvent, PillEvent, ReviewEvent, ReviewHost, ReviewPill, ReviewSession,
 };
 use crate::sidebar::{LoadedChanges, Sidebar, SidebarEvent};
+use crate::tour::{Stop, anchor};
 use diffpilot_core::changes;
 use diffpilot_core::comparison::{self, Comparison};
 use diffpilot_core::diff::{self, DiffMode, FileDiff};
@@ -1358,7 +1359,7 @@ impl RepoView {
             _ => None,
         };
         let pill = self.session.as_ref().map(|session| {
-            capsule(&tokens, CAPSULE_HEIGHT)
+            anchor(capsule(&tokens, CAPSULE_HEIGHT), Stop::Review)
                 .id("toolbar-claude-slot")
                 .px(px(6.))
                 .child(session.pill.clone())
@@ -1431,8 +1432,7 @@ impl RepoView {
                 .gap_2()
                 .children(leading)
                 .child(
-                    v_flex()
-                        .min_w_0()
+                    anchor(v_flex().min_w_0(), Stop::Folder)
                         .child(match &self.folder_menu {
                             Some(menu) => menu.clone().into_any_element(),
                             None => div()
@@ -1506,6 +1506,7 @@ impl Render for RepoView {
             (None, _) => div().flex_1().into_any_element(),
         };
         let chapter_open = self.chapter_open(cx);
+        let shows_diff = self.session.is_some() && (self.nav == Nav::Files || chapter_open);
         let detail_content = match &self.session {
             Some(session) if self.nav == Nav::Guide && !chapter_open => session.stage.clone().into_any_element(),
             Some(session) if chapter_open => {
@@ -1582,7 +1583,7 @@ impl Render for RepoView {
                                 .bg(tokens.chrome.gutter),
                         )
                         .child(
-                            v_flex()
+                            anchor(v_flex(), Stop::Sidebar)
                                 .absolute()
                                 .top(px(PANEL_INSET))
                                 .bottom(px(PANEL_INSET))
@@ -1607,13 +1608,15 @@ impl Render for RepoView {
                                     )
                                     .child(toggle),
                                 )
-                                .child(div().px(px(10.)).pb(px(8.)).child(switch_bar(
-                                    &tokens,
-                                    "nav-tab",
-                                    &NAV_TABS,
-                                    selected_nav,
-                                    on_nav,
-                                )))
+                                .child(div().px(px(10.)).pb(px(8.)).child(
+                                    tag(anchor(div(), Stop::Guide), || "nav-switch").child(switch_bar(
+                                        &tokens,
+                                        "nav-tab",
+                                        &NAV_TABS,
+                                        selected_nav,
+                                        on_nav,
+                                    )),
+                                ))
                                 .child(div().flex_1().min_h_0().child(sidebar_content)),
                         )
                         .child(
@@ -1655,7 +1658,8 @@ impl Render for RepoView {
                                     .flex_1()
                                     .min_w_0()
                                     .h_full()
-                                    .child(detail_content),
+                                    .child(detail_content)
+                                    .when(shows_diff, |this| anchor(this, Stop::Diff)),
                             )
                             .children(inspector),
                     )

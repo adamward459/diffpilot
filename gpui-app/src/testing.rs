@@ -1,3 +1,4 @@
+use crate::folder_picker::CannedPicks;
 use crate::repo_view::RepoView;
 use crate::runs::Runs;
 use crate::settings::{self, Section, Services};
@@ -246,7 +247,7 @@ pub fn open_settings(
 ) -> &'static mut VisualTestContext {
     install_settings(cx, settings.clone());
     let store = engine_store(cx);
-    let vcx = open_window(cx, folder, settings, store);
+    let vcx = open_window(cx, folder, settings, store, false);
     show_settings(vcx, section);
     vcx
 }
@@ -281,7 +282,44 @@ pub fn open_workspace(
 ) -> &'static mut VisualTestContext {
     ready(cx);
     let store = engine_store(cx);
-    open_window(cx, Some(folder), settings, store)
+    open_window(cx, Some(folder), settings, store, false)
+}
+
+/// Like `open_workspace`, but a tour that `settings` has not seen starts, as for a new user.
+pub fn open_workspace_with_tour(
+    cx: &mut TestAppContext,
+    folder: &Path,
+    settings: Arc<Settings>,
+) -> &'static mut VisualTestContext {
+    ready(cx);
+    let store = engine_store(cx);
+    open_window(cx, Some(folder), settings, store, true)
+}
+
+/// A workspace with no folder open, which shows the empty state.
+pub fn open_empty_workspace(cx: &mut TestAppContext, settings: Arc<Settings>) -> &'static mut VisualTestContext {
+    ready(cx);
+    let store = engine_store(cx);
+    open_window(cx, None, settings, store, false)
+}
+
+/// Answers the next folder picker with these folders. The OS picker cannot be driven in tests.
+pub fn pick_next(cx: &mut VisualTestContext, folders: &[&Path]) {
+    queue_pick(cx, Some(folders.iter().map(|folder| folder.to_path_buf()).collect()));
+}
+
+/// Cancels the next folder picker.
+pub fn cancel_next_pick(cx: &mut VisualTestContext) {
+    queue_pick(cx, None);
+}
+
+fn queue_pick(cx: &mut VisualTestContext, answer: Option<Vec<PathBuf>>) {
+    cx.update(|_, cx| {
+        if !cx.has_global::<CannedPicks>() {
+            cx.set_global(CannedPicks::default());
+        }
+        cx.global::<CannedPicks>().0.borrow_mut().push_back(answer);
+    });
 }
 
 fn open_window(
@@ -289,7 +327,11 @@ fn open_window(
     folder: Option<&Path>,
     settings: Arc<Settings>,
     review_store: Arc<Store>,
+    tour: bool,
 ) -> &'static mut VisualTestContext {
+    if !tour {
+        settings.set_tour_seen(true);
+    }
     let folder = folder.map(Path::to_path_buf);
     let handle = cx.add_window(|window, cx| {
         let workspace = cx.new(|cx| {

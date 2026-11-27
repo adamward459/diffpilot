@@ -476,6 +476,7 @@ pub const FEATURES: &[Feature] = &[
             "core/src/store/guides.rs",
             "core/tests/guide.rs",
             "gpui-app/src/guide/**",
+            "gpui-app/src/linked_folders.rs",
             "gpui-app/tests/guide.rs",
         ],
         tests: &[
@@ -530,7 +531,7 @@ pub const FEATURES: &[Feature] = &[
     Feature {
         name: "app-shell",
         paths: &[
-            "gpui-app/src/{main,lib,workspace,repo_view,bench,testing,folder_menu,commit_popover}.rs",
+            "gpui-app/src/{main,lib,workspace,repo_view,bench,testing,folder_menu,folder_picker,open_dialog,commit_popover,tour}.rs",
             "core/src/{folder_status,commit}.rs",
             "gpui-app/tests/flows.rs",
             "gpui-app/tests/flows/**",

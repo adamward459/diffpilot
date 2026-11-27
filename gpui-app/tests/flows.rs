@@ -13,6 +13,7 @@ mod flows {
     mod filter;
     mod fix;
     mod folders;
+    mod open_folder;
     mod preview;
     mod remote;
     mod review;
@@ -24,5 +25,6 @@ mod flows {
     mod sidebar_keys;
     mod thread_cards;
     mod threads;
+    mod tour;
     mod viewed;
 }

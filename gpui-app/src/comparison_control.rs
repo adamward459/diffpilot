@@ -3,6 +3,7 @@ use crate::comparison_menu::{
     branch_title, branch_tooltip,
 };
 use crate::remote::RemoteMenu;
+use crate::tour::{Stop, anchor};
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::refs::Refs;
 use diffpilot_ui_kit::Theme;
@@ -27,7 +28,7 @@ pub fn comparison_control(
     let branch_select = select.clone();
     let base_select = select;
     let chip = remote.chip_element(tokens);
-    capsule(tokens, CAPSULE_HEIGHT)
+    anchor(capsule(tokens, CAPSULE_HEIGHT), Stop::Comparison)
         .px(px(4.))
         .gap(px(4.))
         .child(

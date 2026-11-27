@@ -29,6 +29,7 @@ struct Data {
     appearance: Option<AppearanceChoice>,
     wrap_lines: Option<bool>,
     editor: Option<Editor>,
+    tour_seen: Option<bool>,
 }
 
 type Listener = Box<dyn Fn() + Send + Sync>;
@@ -230,6 +231,14 @@ impl Settings {
         self.write(|data| data.appearance = Some(choice));
     }
 
+    pub fn tour_seen(&self) -> bool {
+        self.read(|data| data.tour_seen).unwrap_or(false)
+    }
+
+    pub fn set_tour_seen(&self, seen: bool) {
+        self.write(|data| data.tour_seen = Some(seen));
+    }
+
     pub fn wrap_lines(&self) -> bool {
         self.read(|data| data.wrap_lines).unwrap_or(false)
     }
@@ -314,6 +323,7 @@ impl Data {
             appearance: field(take("appearance")),
             wrap_lines: field(take("wrapLines")),
             editor: field(take("editor")),
+            tour_seen: field(take("tourSeen")),
         }
     }
 }
@@ -746,6 +756,15 @@ mod tests {
         let settings = Settings::at(file);
         assert_eq!(settings.editor(), None);
         assert!(settings.wrap_lines());
+    }
+
+    #[test]
+    fn the_tour_is_unseen_until_it_is_marked_and_the_mark_is_saved() {
+        let (_dir, file) = temp_file();
+        let settings = Settings::at(file.clone());
+        assert!(!settings.tour_seen());
+        settings.set_tour_seen(true);
+        assert!(Settings::at(file).tour_seen());
     }
 
     #[test]

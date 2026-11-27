@@ -1,11 +1,12 @@
 use crate::claude_activity::ClaudeActivity;
 use crate::diff_pane::PaneNote;
+use crate::folder_picker::pick_folders;
 use crate::review::ReviewSession;
 use crate::review::session::NO_REPO_MESSAGE;
 use crate::runs::Runs;
 use diffpilot_core::diff::FileDiff;
 use diffpilot_core::fix::Target;
-use diffpilot_core::guide::linked::{self, LinkError};
+use diffpilot_core::guide::linked;
 use diffpilot_core::guide::reading::{ChapterKey, Reading, ReadingChapter, reading};
 use diffpilot_core::guide::stale::{self, Staleness};
 use diffpilot_core::guide::{Diagram, prompt};
@@ -14,7 +15,7 @@ use diffpilot_core::run::{RunKind, RunState};
 use diffpilot_core::runner::RunEvent;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::{GuideId, RunId, SessionId, Store, StoredGuide};
-use gpui::{App, AppContext as _, Context, Entity, EventEmitter, PathPromptOptions, Subscription};
+use gpui::{App, AppContext as _, Context, Entity, EventEmitter, Subscription};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -392,40 +393,33 @@ impl GuideSession {
             .is_some_and(|stored| stored.guide.context != linked::readable(&self.linked(cx)))
     }
 
-    pub fn link(&mut self, input: &str, cx: &mut Context<Self>) -> Result<(), LinkError> {
-        let Some(repo) = self.review.read(cx).host().repo.clone() else {
-            return Err(LinkError::NotFound);
-        };
-        let mut folders = self.settings.linked_folders(&repo);
-        folders.push(linked::check(&repo, &folders, input)?);
+    pub fn repo(&self, cx: &App) -> Option<PathBuf> {
+        self.review.read(cx).host().repo.clone()
+    }
+
+    pub fn set_linked(&mut self, folders: Vec<PathBuf>, cx: &mut Context<Self>) {
+        let Some(repo) = self.repo(cx) else { return };
         self.settings.set_linked_folders(&repo, folders);
         self.announce(cx);
-        Ok(())
     }
 
     pub fn unlink(&mut self, folder: &PathBuf, cx: &mut Context<Self>) {
-        let Some(repo) = self.review.read(cx).host().repo.clone() else {
-            return;
-        };
-        let mut folders = self.settings.linked_folders(&repo);
+        let mut folders = self.linked(cx);
         folders.retain(|linked| linked != folder);
-        self.settings.set_linked_folders(&repo, folders);
-        self.announce(cx);
+        self.set_linked(folders, cx);
     }
 
-    /// A picked folder that can't be linked is dropped silently. Only the start card's path field shows errors.
+    /// A picked folder that can't be linked is dropped silently. The start card lists each refusal.
     pub fn pick_folder(&mut self, cx: &mut Context<Self>) {
-        let picked = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: None,
-        });
+        let picked = pick_folders(true, cx);
         cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(paths))) = picked.await else { return };
-            let Some(folder) = paths.into_iter().next() else { return };
-            this.update(cx, |this, cx| this.link(&folder.to_string_lossy(), cx).ok())
-                .ok();
+            let Some(paths) = picked.await else { return };
+            this.update(cx, |this, cx| {
+                let Some(repo) = this.repo(cx) else { return };
+                let added = linked::add_all(&repo, &this.linked(cx), &paths);
+                this.set_linked(added.folders, cx);
+            })
+            .ok();
         })
         .detach();
     }

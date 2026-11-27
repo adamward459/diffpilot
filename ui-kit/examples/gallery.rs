@@ -5,23 +5,27 @@ use diffpilot_ui_kit::components::menu::{Menu, MenuItem, MenuRow, MenuSection};
 use diffpilot_ui_kit::components::{
     BadgeTone, Button, Fills, Look, Presence, State, avatar, capsule, card_shell, chip, dialog, filled_check,
     filter_field, glass_button, icon_button, interactive, popover, segmented, segmented_control, severity_badge,
-    side_sheet, status_badge, toggle_capsule, viewed_toggle,
+    side_sheet, status_badge, toggle_capsule, tour, tour_card, viewed_toggle,
 };
 use diffpilot_ui_kit::{Assets, Glyph, Theme};
 use gpui::{
-    AnyElement, App, Application, Bounds, Context, Corner, Entity, IntoElement, ParentElement, Render, Styled, Window,
-    WindowBounds, WindowOptions, div, font, point, prelude::*, px, size,
+    AnyElement, App, Application, Bounds, ClickEvent, Context, Corner, Entity, IntoElement, ParentElement, Pixels,
+    Render, Styled, Window, WindowBounds, WindowOptions, canvas, div, font, point, prelude::*, px, size,
 };
 use gpui_component::{Icon, Root, Selectable, h_flex, v_flex};
 use std::rc::Rc;
+
+type Target = Rc<std::cell::Cell<Option<Bounds<Pixels>>>>;
 
 struct Gallery {
     menu: Entity<Menu>,
     sheet: Presence,
     dialog: Presence,
+    tour: Option<usize>,
+    targets: [Target; 2],
 }
 
-fn shells(theme: &Theme, cx: &mut Context<Gallery>) -> impl IntoElement {
+fn shells(theme: &Theme, targets: &[Target; 2], cx: &mut Context<Gallery>) -> impl IntoElement {
     let button = |id: &'static str, label: &'static str, field: fn(&mut Gallery) -> &mut Presence| {
         Button::new(id)
             .label(label)
@@ -32,9 +36,32 @@ fn shells(theme: &Theme, cx: &mut Context<Gallery>) -> impl IntoElement {
     };
     h_flex()
         .gap(px(8.))
-        .child(button("sheet-toggle", "Toggle side sheet", |this| &mut this.sheet))
-        .child(button("dialog-toggle", "Toggle dialog", |this| &mut this.dialog))
+        .child(measured(
+            &targets[0],
+            button("sheet-toggle", "Toggle side sheet", |this| &mut this.sheet),
+        ))
+        .child(measured(
+            &targets[1],
+            button("dialog-toggle", "Toggle dialog", |this| &mut this.dialog),
+        ))
+        .child(
+            Button::new("tour-start")
+                .label("Start tour")
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.tour = Some(0);
+                    cx.notify();
+                })),
+        )
         .text_color(theme.ui.text)
+}
+
+fn measured(target: &Target, element: impl IntoElement) -> impl IntoElement {
+    let target = target.clone();
+    div().relative().child(element).child(
+        canvas(move |bounds, _, _| target.set(Some(bounds)), |_, _, _, _| {})
+            .absolute()
+            .size_full(),
+    )
 }
 
 fn section(theme: &Theme, title: &'static str, body: impl IntoElement) -> impl IntoElement {
@@ -503,7 +530,11 @@ impl Render for Gallery {
                 states(&theme),
             )))
             .child(section(&theme, "Overlays", overlays(&theme, &self.menu)))
-            .child(section(&theme, "Side sheet and dialog", shells(&theme, cx)));
+            .child(section(
+                &theme,
+                "Side sheet and dialog",
+                shells(&theme, &self.targets, cx),
+            ));
         let panel_text = |text: &'static str| {
             div()
                 .p(px(16.))
@@ -515,6 +546,37 @@ impl Render for Gallery {
             this.sheet.set_open(false, cx, |this| &mut this.sheet);
             this.dialog.set_open(false, cx, |this| &mut this.dialog);
         });
+        let tour_step = self.tour;
+        let tour_card = tour_step.map(|step| {
+            let (title, body) = [
+                (
+                    "The side sheet",
+                    "This button slides a glass panel in from the right edge.",
+                ),
+                ("The dialog", "This button fades a dialog in over a dimmed backdrop."),
+            ][step];
+            let last = step == 1;
+            tour_card(
+                title,
+                body,
+                format!("{} of 2", step + 1),
+                cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.tour = this.tour.map(|step| step.saturating_sub(1));
+                    cx.notify();
+                }),
+                cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.tour = (!last).then(|| step + 1);
+                    cx.notify();
+                }),
+                cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.tour = None;
+                    cx.notify();
+                }),
+            )
+            .can_go_back(step > 0)
+            .next_label(if last { "Done" } else { "Next" })
+        });
+        let tour_target = self.targets.clone();
         let dialog_close = cx.listener(|this, _, _, cx| this.dialog.set_open(false, cx, |this| &mut this.dialog));
         h_flex()
             .relative()
@@ -538,6 +600,12 @@ impl Render for Gallery {
                     .size(420., 220.)
                     .on_backdrop_click(dialog_close)
                     .child(panel_text("A dialog fades in over a dimmed backdrop."))
+            }))
+            .children(tour_step.zip(tour_card).map(|(step, card)| {
+                tour("gallery-tour", step)
+                    .target(move |_, _| tour_target[step].get())
+                    .radius(8.)
+                    .card(card)
             }))
     }
 }
@@ -572,6 +640,8 @@ fn main() {
                 }),
                 sheet: Presence::new(false),
                 dialog: Presence::new(false),
+                tour: None,
+                targets: [Target::default(), Target::default()],
             });
             cx.new(|cx| Root::new(gallery, window, cx))
         })

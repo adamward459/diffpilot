@@ -45,6 +45,24 @@ fn expand_home(input: &str, home: Option<&Path>) -> PathBuf {
     }
 }
 
+pub struct Added {
+    pub folders: Vec<PathBuf>,
+    pub refused: Vec<(PathBuf, LinkError)>,
+}
+
+/// Links every picked folder that passes `check`, and says why each of the others was refused.
+pub fn add_all(repo: &Path, linked: &[PathBuf], picked: &[PathBuf]) -> Added {
+    let mut folders = linked.to_vec();
+    let mut refused = Vec::new();
+    for path in picked {
+        match check(repo, &folders, &path.to_string_lossy()) {
+            Ok(folder) => folders.push(folder),
+            Err(error) => refused.push((path.clone(), error)),
+        }
+    }
+    Added { folders, refused }
+}
+
 /// The linked folders a run can still read. A folder that was moved or deleted is left out.
 pub fn readable(linked: &[PathBuf]) -> Vec<PathBuf> {
     linked.iter().filter(|folder| folder.is_dir()).cloned().collect()
@@ -84,6 +102,24 @@ mod tests {
         assert_eq!(
             check(&repo, std::slice::from_ref(&other), &path("shared")),
             Err(LinkError::AlreadyLinked)
+        );
+    }
+
+    #[test]
+    fn a_pick_of_many_links_the_good_ones_and_names_each_refusal() {
+        let (_root, repo, other) = folders();
+        let base = repo.parent().unwrap();
+        let (missing, inside) = (base.join("missing"), repo.join("core"));
+        let picked = [other.clone(), missing.clone(), other.clone(), inside.clone()];
+        let added = add_all(&repo, &[], &picked);
+        assert_eq!(added.folders, [other]);
+        assert_eq!(
+            added.refused,
+            [
+                (missing, LinkError::NotFound),
+                (picked[2].clone(), LinkError::AlreadyLinked),
+                (inside, LinkError::InsideRepo),
+            ]
         );
     }
 

@@ -7,8 +7,11 @@ mod comparison_control;
 mod comparison_menu;
 pub mod diff_pane;
 mod folder_menu;
+pub mod folder_picker;
 mod format;
 pub mod guide;
+mod linked_folders;
+mod open_dialog;
 mod pane;
 pub mod remote;
 pub mod repo_view;
@@ -19,4 +22,5 @@ mod sidebar;
 mod sidebar_rows;
 #[cfg(feature = "testing")]
 pub mod testing;
+pub mod tour;
 pub mod workspace;

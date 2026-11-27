@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- A short app tour shows the main parts of the window the first time you open a folder. It dims the window and points at each part. Start it again from Help, Show Tour.
+
 ### Changed
 
 - Text across the app is smaller and uses four sizes, like VS Code on macOS: 13 px body, 12 px captions, 11 px badges, and 14 px bold titles. Diff lines are 18 px tall.
@@ -14,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - Menus and popovers now fade out when they close, as they already did when they open.
 - The Previous thread and Next thread arrows are now dimmed when there is no thread in that direction.
 - Switches slide their thumb, segmented controls fade the highlight to the new segment, and the Viewed check mark fades in.
+- Open Folder now asks which folders to link before it opens the repo. Add several folders at once, or type a path. The Guide and the Link Folder menu can add several at once too.
 
 ### Fixed
 
