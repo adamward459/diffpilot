@@ -366,7 +366,7 @@ impl Render for FolderMenu {
                 .look(Look::Ghost)
                 .regular()
                 .rounded_full()
-                .h(px(30.))
+                .h(px(24.))
                 .gap(px(6.))
                 .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::TITLE))
                 .font_weight(FontWeight::SEMIBOLD)
@@ -446,11 +446,13 @@ impl Render for FolderMenu {
         });
         let has_extras = linked_pill.is_some() || changed.is_some();
         tag(v_flex(), || format!("folder-active:{name}"))
-            .min_w_0()
+            .flex_none()
+            .items_start()
             .child(popover)
             .when(has_extras, |this| {
                 this.child(
                     h_flex()
+                        .pl(px(6.))
                         .gap(px(4.))
                         .items_center()
                         .min_w_0()
