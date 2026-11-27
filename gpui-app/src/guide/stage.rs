@@ -1,8 +1,10 @@
+use crate::folder_menu::folder_name;
 use crate::guide::diagram::diagram_card;
 use crate::guide::rich::{self, Body, OnRef};
 use crate::guide::session::{GuideEvent, GuideRun, GuideSession, Step};
 use crate::guide::text::{CodeRef, Inline};
-use crate::linked_folders::{LinkedEvent, LinkedFolders};
+use crate::linked_folders::folder_chip;
+use crate::workspace::EditLinkedFolders;
 use diffpilot_core::guide::Attention;
 use diffpilot_core::guide::reading::{ChapterKey, ReadingChapter, phase_groups};
 use diffpilot_core::settings::Settings;
@@ -10,9 +12,9 @@ use diffpilot_ui_kit::components::{Button, ChipTone, Look, card_shell, chip_labe
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FontWeight, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
-    Window, div, px,
+    AnyElement, App, ClickEvent, Context, Entity, EventEmitter, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
+    px,
 };
 use gpui_component::{ActiveTheme, h_flex, v_flex};
 use std::rc::Rc;
@@ -28,33 +30,18 @@ pub enum StageEvent {
 pub struct GuideStage {
     guide: Entity<GuideSession>,
     settings: Arc<Settings>,
-    linked: Entity<LinkedFolders>,
     _guide: Subscription,
-    _linked: Subscription,
 }
 
 impl EventEmitter<StageEvent> for GuideStage {}
 
 impl GuideStage {
     pub fn new(guide: Entity<GuideSession>, settings: Arc<Settings>, cx: &mut Context<Self>) -> Self {
-        let repo = guide.read(cx).repo(cx).unwrap_or_default();
-        let folders = guide.read(cx).linked(cx);
-        let linked = cx.new(|_| LinkedFolders::new(repo, folders));
-        let synced = linked.clone();
-        let subscription = cx.subscribe(&guide, move |_, guide, _: &GuideEvent, cx| {
-            let folders = guide.read(cx).linked(cx);
-            synced.update(cx, |linked, cx| linked.set_folders(folders, cx));
-            cx.notify();
-        });
-        let edits = cx.subscribe(&linked, |this, _, LinkedEvent::Changed(folders), cx| {
-            this.guide.update(cx, |guide, cx| guide.set_linked(folders.clone(), cx));
-        });
+        let subscription = cx.subscribe(&guide, |_, _, _: &GuideEvent, cx| cx.notify());
         Self {
             guide,
             settings,
-            linked,
             _guide: subscription,
-            _linked: edits,
         }
     }
 
@@ -98,7 +85,7 @@ impl GuideStage {
                         .text_color(tokens.ui.text2)
                         .child("Claude explains what this change does, then splits it into chapters in the order to read them, with notes under the lines that matter."),
                 )
-                .child(self.linked.clone())
+                .child(self.linked_row(&tokens, cx))
                 .when_some(failure.map(str::to_owned), |card, message| {
                     card.child(
                         h_flex()
@@ -130,6 +117,55 @@ impl GuideStage {
                         ),
                 ),
             )
+    }
+
+    fn linked_row(&self, tokens: &Theme, cx: &Context<Self>) -> AnyElement {
+        let folders = self.guide.read(cx).linked(cx);
+        let small = diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL);
+        let edit = |label: &'static str| {
+            tag(
+                Button::new("guide-linked-edit")
+                    .look(Look::Ghost)
+                    .label(label)
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(EditLinkedFolders), cx)),
+                || "guide-linked-edit",
+            )
+        };
+        if folders.is_empty() {
+            return h_flex()
+                .gap(px(6.))
+                .text_size(small)
+                .text_color(tokens.ui.muted)
+                .child(tag(div(), || "guide-linked-none").child("No linked folders"))
+                .child(edit("Link…"))
+                .into_any_element();
+        }
+        let chips = folders.iter().map(|folder| {
+            let name = folder_name(folder);
+            if folder.is_dir() {
+                tag(folder_chip(tokens, Glyph::Folder, &name), move || {
+                    format!("guide-linked-chip:{name}")
+                })
+                .into_any_element()
+            } else {
+                let shown = format!("{name} · skipped, not found");
+                tag(chip_label(tokens, shown, ChipTone::Amber), move || {
+                    format!("guide-linked-missing:{name}")
+                })
+                .into_any_element()
+            }
+        });
+        v_flex()
+            .gap(px(6.))
+            .child(
+                div()
+                    .text_size(small)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(tokens.ui.muted)
+                    .child("Claude can also read"),
+            )
+            .child(h_flex().flex_wrap().gap(px(6.)).children(chips).child(edit("Edit…")))
+            .into_any_element()
     }
 
     fn writing_card(&self, chapters: usize, cx: &mut Context<Self>) -> AnyElement {

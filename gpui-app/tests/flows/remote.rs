@@ -102,35 +102,6 @@ fn the_branch_with_a_pull_request_shows_its_chip_checks_and_review(app: &mut Tes
 }
 
 #[gpui::test]
-fn the_branch_menu_lists_the_open_pull_requests(app: &mut TestAppContext) {
-    install_github(app, FakeGithub::new());
-    let fixture = remote_fixture();
-    let cx = open(app, &fixture);
-    wait_until_shows(cx, "remote:pr-chip:482");
-
-    click(cx, "comparison-branch");
-    assert!(shows(cx, "comparison-branch:#479 Bulk select in the inbox"));
-    assert!(shows(cx, "comparison-branch:#482 Undo keeps a timer per message"));
-    assert!(shows(cx, "comparison-branch:Open on GitHub"));
-}
-
-#[gpui::test]
-fn picking_a_pull_request_compares_it_with_its_base_without_a_checkout(app: &mut TestAppContext) {
-    install_github(app, FakeGithub::new());
-    let fixture = remote_fixture();
-    fixture.add_pull_request(479, "bulk.txt");
-    let cx = open(app, &fixture);
-    wait_until_shows(cx, "remote:pr-chip:482");
-
-    click(cx, "comparison-branch");
-    click(cx, "comparison-branch:#479 Bulk select in the inbox");
-
-    wait_until_shows(cx, "sidebar:row:bulk.txt");
-    let head = std::fs::read_to_string(fixture.repo.join(".git/HEAD")).expect("HEAD");
-    assert_eq!(head.trim(), "ref: refs/heads/feature", "the checkout did not move");
-}
-
-#[gpui::test]
 fn the_checks_popover_lists_the_jobs_and_reruns_the_failed_ones(app: &mut TestAppContext) {
     let github = FakeGithub::new();
     install_github(app, github.clone());
@@ -167,8 +138,6 @@ fn without_a_github_login_the_pull_request_parts_stay_hidden(app: &mut TestAppCo
     let fixture = remote_fixture();
     let cx = open(app, &fixture);
     wait_until_shows(cx, "remote:counts:0:0");
-    click(cx, "comparison-branch");
-    assert!(shows(cx, "comparison-branch:feature"));
-    assert!(!shows(cx, "comparison-branch:Open on GitHub"));
     assert!(!shows(cx, "remote:checks"));
+    assert!(!shows(cx, "remote:pr-chip:482"));
 }

@@ -2,7 +2,7 @@ use diffpilot::diff_pane::rows::{BlockId, RowKind};
 use diffpilot::guide::session::{GuideRun, Step};
 use diffpilot::repo_view::{Nav, RepoView};
 use diffpilot::runs::Runs;
-use diffpilot::testing::{self, demo_guide, fixture, open_repo_in};
+use diffpilot::testing::{self, demo_guide, fixture, open_repo_in_workspace};
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::FileDiff;
 use diffpilot_core::guide::{Diagram, DiagramKind, FlowStep, Guide};
@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 struct World {
     view: Entity<RepoView>,
     store: Arc<Store>,
+    settings: Arc<Settings>,
     repo: tempfile::TempDir,
     work: tempfile::TempDir,
 }
@@ -72,10 +73,11 @@ fn open(cx: &mut TestAppContext, with_runs: bool) -> (World, &'static mut Visual
         let engine = RunEngine::new(config);
         cx.update(|cx| cx.set_global(Runs::with_engine(engine)));
     }
-    let (view, vcx) = open_repo_in(
+    let settings = Arc::new(Settings::in_memory());
+    let (view, vcx) = open_repo_in_workspace(
         cx,
         repo.path(),
-        Arc::new(Settings::in_memory()),
+        settings.clone(),
         Arc::new(ViewedStore::in_memory()),
         store.clone(),
     );
@@ -83,6 +85,7 @@ fn open(cx: &mut TestAppContext, with_runs: bool) -> (World, &'static mut Visual
         World {
             view,
             store,
+            settings,
             repo,
             work,
         },
@@ -199,25 +202,32 @@ fn write_guide_submits_a_guide_run_and_reports_a_run_that_wrote_nothing(app: &mu
 }
 
 #[gpui::test]
+fn the_overview_bar_button_opens_the_linked_folders_popover(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    store_guide(&world, cx);
+    show_guide(&world, cx);
+    testing::draw(cx);
+    assert!(testing::shows(cx, "guide-linked"), "the overview bar has the button");
+
+    click(cx, "guide-linked");
+    assert!(testing::shows(cx, "linked-title"), "it opens the title bar popover");
+}
+
+#[gpui::test]
 fn a_folder_linked_by_path_is_passed_to_the_guide_run(app: &mut TestAppContext) {
     let (world, cx) = open(app, true);
     show_guide(&world, cx);
     let shared = tempfile::tempdir().unwrap();
     let folder = shared.path().canonicalize().unwrap();
 
-    testing::click(cx, "guide-link-folder");
-    testing::type_text(cx, &folder.display().to_string());
-    testing::click(cx, "guide-link-submit");
-    assert!(testing::shows(cx, &format!("guide-linked-folder:{}", folder.display())));
-
-    testing::click(cx, "guide-link-folder");
-    testing::type_text(cx, &world.repo.path().join("src").display().to_string());
-    testing::click(cx, "guide-link-submit");
+    world
+        .settings
+        .set_linked_folders(&world.repo.path().canonicalize().unwrap(), vec![folder.clone()]);
+    let name = folder.file_name().unwrap().to_string_lossy().into_owned();
     assert!(
-        testing::shows(cx, "guide-link-error"),
-        "a folder inside the repo is refused"
+        testing::shows(cx, &format!("guide-linked-chip:{name}")),
+        "the start card lists the linked folder"
     );
-    testing::click(cx, "guide-link-cancel");
 
     click(cx, "guide-write");
     let started = world.work.path().join("out/started");
@@ -294,8 +304,7 @@ fn the_guide_follows_the_branch_to_another_comparison_and_shows_as_out_of_date(a
         .view
         .update_in(cx, |view, window, cx| view.show_nav(Nav::Files, window, cx));
     cx.run_until_parked();
-    click(cx, "comparison-base");
-    click(cx, "comparison-base:Working Tree Changes Only");
+    testing::compare_to(cx, "Working Tree Changes Only");
     testing::draw(cx);
     show_guide(&world, cx);
     testing::draw(cx);

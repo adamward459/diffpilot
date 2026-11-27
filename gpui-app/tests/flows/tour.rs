@@ -42,8 +42,7 @@ fn the_first_open_starts_the_tour_and_the_cut_out_wraps_the_real_control(app: &m
     click(cx, "tour:next");
     assert!(shows(cx, "tour:title:What you compare"));
     let spot = spotlight(cx);
-    let (branch, base) = (bounds(cx, "comparison-branch"), bounds(cx, "comparison-base"));
-    let controls = branch.union(&base);
+    let controls = bounds(cx, "comparison-label");
     assert!(spot.contains(&controls.origin) && spot.contains(&controls.bottom_right()));
     assert!(
         spot.left() > controls.left() - px(16.)
@@ -74,16 +73,16 @@ fn the_cut_out_follows_its_control_when_the_window_resizes(app: &mut TestAppCont
 #[gpui::test]
 fn next_and_back_move_between_stops_and_the_last_next_closes(app: &mut TestAppContext) {
     let (cx, settings, _dir) = open_unseen(app);
-    assert!(!spotlights(cx, "comparison-branch"), "the first stop is the folder");
+    assert!(!spotlights(cx, "comparison-label"), "the first stop is the folder");
 
     click(cx, "tour:next");
-    assert!(spotlights(cx, "comparison-branch"));
+    assert!(spotlights(cx, "comparison-label"));
     press(cx, "right");
     assert!(spotlights(cx, "sidebar:toggle"), "the arrow key goes forward");
     press(cx, "left");
-    assert!(spotlights(cx, "comparison-branch"), "the arrow key goes back");
+    assert!(spotlights(cx, "comparison-label"), "the arrow key goes back");
     click(cx, "tour:back");
-    assert!(!spotlights(cx, "comparison-branch"), "the Back button goes back");
+    assert!(!spotlights(cx, "comparison-label"), "the Back button goes back");
 
     for _ in 0..5 {
         press(cx, "enter");
@@ -94,9 +93,9 @@ fn next_and_back_move_between_stops_and_the_last_next_closes(app: &mut TestAppCo
 
     press(cx, "enter");
     assert!(settings.tour_seen(), "the last Next closes the tour");
-    click(cx, "comparison-base");
+    click(cx, "comparison-label");
     assert!(
-        shows(cx, "comparison-base:Staged Changes Only"),
+        shows(cx, "open-folder:dialog"),
         "the app answers again once the tour is gone"
     );
 }
@@ -106,8 +105,8 @@ fn escape_closes_the_tour_and_a_later_open_does_not_start_it(app: &mut TestAppCo
     let (cx, settings, dir) = open_unseen(app);
     press(cx, "escape");
     assert!(settings.tour_seen());
-    click(cx, "comparison-base");
-    assert!(shows(cx, "comparison-base:Staged Changes Only"));
+    click(cx, "comparison-label");
+    assert!(shows(cx, "open-folder:dialog"));
 
     let again = open_workspace_with_tour(app, dir.path(), settings);
     assert!(
@@ -149,7 +148,7 @@ fn a_stop_whose_element_is_hidden_is_skipped_and_not_counted(app: &mut TestAppCo
         "the file list is skipped"
     );
     press(cx, "left");
-    assert!(spotlights(cx, "comparison-branch"), "going back skips it too");
+    assert!(spotlights(cx, "comparison-label"), "going back skips it too");
 }
 
 #[gpui::test]
@@ -163,12 +162,12 @@ fn the_scrim_blocks_the_app_and_app_shortcuts_while_the_tour_is_open(app: &mut T
         "the shortcut did not hide the sidebar"
     );
 
-    click(cx, "comparison-base");
+    click(cx, "comparison-label");
     assert!(settings.tour_seen(), "a click on the scrim closes the tour");
     assert!(
-        !shows(cx, "comparison-base:Staged Changes Only"),
+        !shows(cx, "open-folder:dialog"),
         "the click did not reach the control under the scrim"
     );
-    click(cx, "comparison-base");
-    assert!(shows(cx, "comparison-base:Staged Changes Only"));
+    click(cx, "comparison-label");
+    assert!(shows(cx, "open-folder:dialog"));
 }

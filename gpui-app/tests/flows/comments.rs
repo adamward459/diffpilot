@@ -1,6 +1,6 @@
 use crate::common::{comment_on_file, open_on as open};
 use diffpilot::testing::{
-    bounds, click, fake_claude, fixture, hover, open_workspace, press, settled_bounds, shows, type_text,
+    bounds, click, compare_to, fake_claude, fixture, hover, open_workspace, press, settled_bounds, shows, type_text,
     wait_for_motion,
 };
 use diffpilot_core::settings::Settings;
@@ -136,12 +136,11 @@ fn opening_the_panel_again_during_its_close_keeps_it_open(app: &mut TestAppConte
 
 #[gpui::test]
 fn all_views_lists_comments_of_other_views_to_read_without_actions(app: &mut TestAppContext) {
-    let fake = fake_claude(app);
+    let _fake = fake_claude(app);
     let dir = fixture();
-    let cx = open(app, dir.path(), fake.store());
+    let cx = open_workspace(app, dir.path(), Arc::new(Settings::in_memory()));
     comment_on_file(cx, "docs/committed.md", "From the branch view.");
-    click(cx, "comparison-base");
-    click(cx, "comparison-base:Staged Changes Only");
+    compare_to(cx, "Staged Changes Only");
     comment_on_file(cx, "src/staged.rs", "From the staged view.");
 
     click(cx, "toolbar:comments");

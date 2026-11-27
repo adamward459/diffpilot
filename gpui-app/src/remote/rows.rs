@@ -1,4 +1,4 @@
-use diffpilot_core::forge::{ChangeRequest, Counts, ForgeKind, Outcome, Overall, Review};
+use diffpilot_core::forge::{Counts, ForgeKind, Outcome, Overall, Review};
 use diffpilot_core::sync::{BranchStatus, PullMode};
 use diffpilot_ui_kit::Theme;
 use gpui::Hsla;
@@ -34,7 +34,6 @@ impl Tone {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    pub requests: &'static str,
     pub host: &'static str,
     short: &'static str,
     marker: char,
@@ -43,13 +42,11 @@ pub struct Words {
 pub fn words(kind: ForgeKind) -> Words {
     match kind {
         ForgeKind::GitHub => Words {
-            requests: "Pull requests",
             host: "GitHub",
             short: "PR",
             marker: '#',
         },
         ForgeKind::GitLab => Words {
-            requests: "Merge requests",
             host: "GitLab",
             short: "MR",
             marker: '!',
@@ -64,10 +61,6 @@ impl Words {
 
     pub fn label(&self, number: u64) -> String {
         format!("{} {}", self.short, self.reference(number))
-    }
-
-    pub fn open_on_host(&self) -> String {
-        format!("Open on {}", self.host)
     }
 }
 
@@ -173,52 +166,12 @@ pub fn pull_first_warning(status: &BranchStatus) -> Option<String> {
     })
 }
 
-pub fn review_text(review: Review) -> Option<&'static str> {
-    match review {
-        Review::Approved => Some("approved"),
-        Review::ChangesRequested => Some("changes requested"),
-        Review::Requested => Some("review requested"),
-        Review::None => None,
-    }
-}
-
 pub fn review_badge(review: Review) -> Option<(&'static str, Tone)> {
     match review {
         Review::Approved => Some(("Approved", Tone::Passed)),
         Review::ChangesRequested => Some(("Changes requested", Tone::Failed)),
         Review::Requested | Review::None => None,
     }
-}
-
-pub fn pr_title(change: &ChangeRequest, words: Words) -> String {
-    format!("{} {}", words.reference(change.number), change.title)
-}
-
-pub fn pr_detail(change: &ChangeRequest) -> String {
-    let mut parts = vec![change.author.as_str()];
-    parts.extend(review_text(change.review));
-    parts.push(change.head_ref.as_str());
-    parts.join(" · ")
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PrRow {
-    pub number: u64,
-    pub title: String,
-    pub detail: String,
-    pub checked: bool,
-}
-
-pub fn pr_rows(changes: &[ChangeRequest], current: Option<u64>, words: Words) -> Vec<PrRow> {
-    changes
-        .iter()
-        .map(|change| PrRow {
-            number: change.number,
-            title: pr_title(change, words),
-            detail: pr_detail(change),
-            checked: current == Some(change.number),
-        })
-        .collect()
 }
 
 pub fn overall_tone(overall: Overall) -> Option<Tone> {
@@ -273,21 +226,6 @@ mod tests {
             behind,
             dirty: false,
             last_fetch: None,
-        }
-    }
-
-    fn pr(number: u64, review: Review) -> ChangeRequest {
-        ChangeRequest {
-            number,
-            title: "Bulk select in the inbox".into(),
-            url: format!("https://github.com/o/r/pull/{number}"),
-            author: "jordan-lee".into(),
-            head_ref: "feature/bulk-select".into(),
-            base_ref: "main".into(),
-            head_sha: "a".repeat(40),
-            from_this_repo: true,
-            review,
-            checks: None,
         }
     }
 
@@ -357,33 +295,6 @@ mod tests {
     }
 
     #[test]
-    fn a_pull_request_row_shows_author_review_and_branch() {
-        let github = words(ForgeKind::GitHub);
-        let row = &pr_rows(&[pr(479, Review::Requested)], None, github)[0];
-        assert_eq!(row.title, "#479 Bulk select in the inbox");
-        assert_eq!(row.detail, "jordan-lee · review requested · feature/bulk-select");
-        assert_eq!(
-            pr_detail(&pr(1, Review::ChangesRequested)),
-            "jordan-lee · changes requested · feature/bulk-select"
-        );
-        assert_eq!(
-            pr_detail(&pr(1, Review::Approved)),
-            "jordan-lee · approved · feature/bulk-select"
-        );
-        assert_eq!(pr_detail(&pr(1, Review::None)), "jordan-lee · feature/bulk-select");
-    }
-
-    #[test]
-    fn the_row_of_the_checked_out_branch_is_marked() {
-        let rows = pr_rows(
-            &[pr(1, Review::None), pr(2, Review::None)],
-            Some(2),
-            words(ForgeKind::GitHub),
-        );
-        assert_eq!(rows.iter().map(|row| row.checked).collect::<Vec<_>>(), [false, true]);
-    }
-
-    #[test]
     fn dots_follow_the_state_of_the_checks() {
         assert_eq!(overall_tone(Overall::Pending), Some(Tone::Running));
         assert_eq!(overall_tone(Overall::Failing), Some(Tone::Failed));
@@ -428,34 +339,13 @@ mod tests {
     fn words_come_from_the_forge_kind() {
         let github = words(ForgeKind::GitHub);
         assert_eq!(
-            (
-                github.requests,
-                github.reference(5),
-                github.label(5),
-                github.open_on_host()
-            ),
-            (
-                "Pull requests",
-                "#5".to_string(),
-                "PR #5".to_string(),
-                "Open on GitHub".to_string()
-            )
+            (github.reference(5), github.label(5)),
+            ("#5".to_string(), "PR #5".to_string())
         );
         let gitlab = words(ForgeKind::GitLab);
         assert_eq!(
-            (
-                gitlab.requests,
-                gitlab.reference(5),
-                gitlab.label(5),
-                gitlab.open_on_host()
-            ),
-            (
-                "Merge requests",
-                "!5".to_string(),
-                "MR !5".to_string(),
-                "Open on GitLab".to_string()
-            )
+            (gitlab.reference(5), gitlab.label(5)),
+            ("!5".to_string(), "MR !5".to_string())
         );
-        assert_eq!(pr_title(&pr(5, Review::None), gitlab), "!5 Bulk select in the inbox");
     }
 }

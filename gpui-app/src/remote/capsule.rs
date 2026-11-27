@@ -1,7 +1,7 @@
 use super::checks_popover::ChecksPopover;
 use super::rows::{Tone, checks_detail, outcome_tone, overall_tone, review_badge};
 use super::sync_popover::SyncPopover;
-use super::{RemoteStatus, ReviewState, SyncState};
+use super::{RemoteStatus, SyncState};
 use diffpilot_ui_kit::components::popover;
 use diffpilot_ui_kit::components::{Button, Look, activity_capsule, glyph_icon, spinner, status_dot, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
@@ -73,8 +73,7 @@ impl Render for RemoteCapsule {
         let Some(branch) = remote.branch().cloned() else {
             return div().into_any_element();
         };
-        let failed = matches!(remote.sync(), SyncState::Failed { .. })
-            || matches!(remote.review_state(), ReviewState::Failed { .. });
+        let failed = matches!(remote.sync(), SyncState::Failed { .. });
         let running = matches!(remote.sync(), SyncState::Running(_));
         let pr = remote.branch_pr().cloned();
         let checks = remote.checks().cloned();

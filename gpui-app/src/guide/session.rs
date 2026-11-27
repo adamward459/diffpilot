@@ -1,6 +1,5 @@
 use crate::claude_activity::ClaudeActivity;
 use crate::diff_pane::PaneNote;
-use crate::folder_picker::pick_folders;
 use crate::review::ReviewSession;
 use crate::review::session::NO_REPO_MESSAGE;
 use crate::runs::Runs;
@@ -395,33 +394,6 @@ impl GuideSession {
 
     pub fn repo(&self, cx: &App) -> Option<PathBuf> {
         self.review.read(cx).host().repo.clone()
-    }
-
-    pub fn set_linked(&mut self, folders: Vec<PathBuf>, cx: &mut Context<Self>) {
-        let Some(repo) = self.repo(cx) else { return };
-        self.settings.set_linked_folders(&repo, folders);
-        self.announce(cx);
-    }
-
-    pub fn unlink(&mut self, folder: &PathBuf, cx: &mut Context<Self>) {
-        let mut folders = self.linked(cx);
-        folders.retain(|linked| linked != folder);
-        self.set_linked(folders, cx);
-    }
-
-    /// A picked folder that can't be linked is dropped silently. The start card lists each refusal.
-    pub fn pick_folder(&mut self, cx: &mut Context<Self>) {
-        let picked = pick_folders(true, cx);
-        cx.spawn(async move |this, cx| {
-            let Some(paths) = picked.await else { return };
-            this.update(cx, |this, cx| {
-                let Some(repo) = this.repo(cx) else { return };
-                let added = linked::add_all(&repo, &this.linked(cx), &paths);
-                this.set_linked(added.folders, cx);
-            })
-            .ok();
-        })
-        .detach();
     }
 
     pub fn blocker(&self, cx: &App) -> Option<String> {

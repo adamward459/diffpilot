@@ -20,9 +20,9 @@ fn settings_open_over_the_repo_and_escape_brings_the_repo_back(app: &mut TestApp
     assert!(settings.wrap_lines(), "a row found by search still works");
 
     press(cx, "escape");
-    click(cx, "comparison-base");
+    click(cx, "comparison-label");
     assert!(
-        shows(cx, "comparison-base:Staged Changes Only"),
+        shows(cx, "open-folder:dialog"),
         "escape closes the page and the repo works as before"
     );
 }
@@ -35,7 +35,7 @@ fn settings_open_as_a_dialog_over_the_app_and_a_click_outside_closes_it(app: &mu
 
     let window = bounds(cx, "settings:backdrop");
     let dialog = bounds(cx, "settings:dialog");
-    let repo = bounds(cx, "comparison-base");
+    let repo = bounds(cx, "comparison-label");
     assert!(
         dialog.size.width < window.size.width && dialog.size.height < window.size.height,
         "the dialog is smaller than the window"
@@ -49,9 +49,9 @@ fn settings_open_as_a_dialog_over_the_app_and_a_click_outside_closes_it(app: &mu
     assert!(shows(cx, "settings:search"), "a click inside the dialog keeps it open");
 
     click_corner(cx, "settings:backdrop");
-    click(cx, "comparison-base");
+    click(cx, "comparison-label");
     assert!(
-        shows(cx, "comparison-base:Staged Changes Only"),
+        shows(cx, "open-folder:dialog"),
         "a click on the backdrop closes the dialog and the app works again"
     );
 }
@@ -68,9 +68,9 @@ fn the_dialog_is_still_on_screen_while_it_closes_and_gone_after(app: &mut TestAp
     );
 
     wait_for_motion(cx);
-    click(cx, "comparison-base");
+    click(cx, "comparison-label");
     assert!(
-        shows(cx, "comparison-base:Staged Changes Only"),
+        shows(cx, "open-folder:dialog"),
         "after the close time the app answers clicks"
     );
 }
@@ -83,9 +83,9 @@ fn opening_settings_again_during_the_close_keeps_the_dialog_open(app: &mut TestA
     press(cx, "escape");
     press(cx, "cmd-,");
     wait_for_motion(cx);
-    click(cx, "comparison-base");
+    click(cx, "comparison-label");
     assert!(
-        !shows(cx, "comparison-base:Staged Changes Only"),
+        !shows(cx, "open-folder:dialog"),
         "the dialog stayed open, so the click landed on its backdrop"
     );
 }
@@ -134,7 +134,7 @@ fn settings_open_from_the_guide(app: &mut TestAppContext) {
 #[gpui::test]
 fn settings_open_after_a_menu_closes(app: &mut TestAppContext) {
     opens_after(app, |cx| {
-        click(cx, "comparison-base");
+        click(cx, "comparison-label");
         press(cx, "escape");
     });
 }

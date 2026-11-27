@@ -1,5 +1,6 @@
-use diffpilot::testing::{click, fixture, open_repo, shows};
+use diffpilot::testing::{click, compare_to, fixture, open_repo_in_workspace, shows};
 use diffpilot_core::settings::Settings;
+use diffpilot_core::store::Store;
 use diffpilot_core::viewed::ViewedStore;
 use gpui::TestAppContext;
 use std::sync::Arc;
@@ -10,11 +11,11 @@ fn a_viewed_file_stays_viewed_when_the_repo_is_reopened(app: &mut TestAppContext
     let settings = Arc::new(Settings::in_memory());
     let store = Arc::new(ViewedStore::in_memory());
 
-    let (_, cx) = open_repo(app, dir.path(), settings.clone(), store.clone());
+    let review_store = Arc::new(Store::open_in_memory().expect("an in-memory store opens"));
+    let (_, cx) = open_repo_in_workspace(app, dir.path(), settings.clone(), store.clone(), review_store);
     assert!(shows(cx, "sidebar:summary:0/3 viewed"));
 
-    click(cx, "comparison-base");
-    click(cx, "comparison-base:Staged Changes Only");
+    compare_to(cx, "Staged Changes Only");
     assert!(
         shows(cx, "sidebar:summary:0/1 viewed"),
         "the sidebar lists the staged file only"
@@ -34,7 +35,8 @@ fn a_viewed_file_stays_viewed_when_the_repo_is_reopened(app: &mut TestAppContext
     );
     assert!(shows(cx, "sidebar:is-viewed:src/staged.rs"));
 
-    let (_, cx) = open_repo(app, dir.path(), settings, store);
+    let review_store = Arc::new(Store::open_in_memory().expect("an in-memory store opens"));
+    let (_, cx) = open_repo_in_workspace(app, dir.path(), settings, store, review_store);
     assert!(
         shows(cx, "sidebar:summary:1/1 viewed"),
         "the reopened repo remembers the staged comparison and the viewed file"

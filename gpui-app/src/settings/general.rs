@@ -34,6 +34,27 @@ pub(super) fn open_last(page: &SettingsPage, t: &Theme, cx: &mut Context<Setting
     .into_any_element()
 }
 
+pub(super) fn ask_before_stopping(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) -> AnyElement {
+    let ask = page.settings.ask_before_stopping_runs();
+    grouped(
+        t,
+        vec![
+            Row::new(t, "Ask before stopping Claude")
+                .subtitle(caption(t, "When you switch folders while Claude is running"))
+                .control(
+                    tag(switch(t, "ask-before-stopping", ask, true), || "ask-before-stopping").on_click(cx.listener(
+                        move |this, _, _, cx| {
+                            this.settings.set_ask_before_stopping_runs(!ask);
+                            cx.notify();
+                        },
+                    )),
+                )
+                .into_any_element(),
+        ],
+    )
+    .into_any_element()
+}
+
 pub(super) fn editor(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) -> AnyElement {
     let saved = page.settings.editor();
     let detected = page.detected_editor.clone();
@@ -236,8 +257,9 @@ fn keycaps(t: &Theme, cx: &App, keys: &str) -> Div {
 
 const NAMESPACES: [&str; 4] = ["diffpilot", "review_ui", "settings", "sidebar"];
 
-const TITLES: [(&str, &str); 9] = [
+const TITLES: [(&str, &str); 10] = [
     ("diffpilot::OpenFolder", "Open Folder…"),
+    ("diffpilot::EditLinkedFolders", "Linked Folders…"),
     ("diffpilot::ToggleSidebar", "Toggle Sidebar"),
     ("diffpilot::Quit", "Quit Diffpilot"),
     ("settings::OpenSettings", "Settings…"),

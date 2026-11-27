@@ -37,6 +37,10 @@ pub fn check(repo: &Path, linked: &[PathBuf], input: &str) -> Result<PathBuf, Li
     Ok(folder)
 }
 
+pub fn expand_tilde(input: &str) -> PathBuf {
+    expand_home(input, dirs::home_dir().as_deref())
+}
+
 fn expand_home(input: &str, home: Option<&Path>) -> PathBuf {
     match (input, home) {
         ("~", Some(home)) => home.to_path_buf(),
@@ -61,6 +65,21 @@ pub fn add_all(repo: &Path, linked: &[PathBuf], picked: &[PathBuf]) -> Added {
         }
     }
     Added { folders, refused }
+}
+
+pub fn relink(repo: &Path, linked: &[PathBuf], old: &Path, new: &Path) -> Result<Vec<PathBuf>, LinkError> {
+    let others: Vec<PathBuf> = linked.iter().filter(|folder| *folder != old).cloned().collect();
+    let folder = check(repo, &others, &new.to_string_lossy())?;
+    Ok(linked
+        .iter()
+        .map(|current| {
+            if current == old {
+                folder.clone()
+            } else {
+                current.clone()
+            }
+        })
+        .collect())
 }
 
 /// The linked folders a run can still read. A folder that was moved or deleted is left out.
@@ -121,6 +140,35 @@ mod tests {
                 (inside, LinkError::InsideRepo),
             ]
         );
+    }
+
+    #[test]
+    fn a_moved_folder_is_replaced_in_place_by_its_new_home() {
+        let (_root, repo, other) = folders();
+        let base = repo.parent().unwrap();
+        let (gone, first, moved) = (base.join("gone"), base.join("first"), base.join("moved"));
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&moved).unwrap();
+        let linked = [first.clone(), gone.clone(), other.clone()];
+        assert_eq!(relink(&repo, &linked, &gone, &moved), Ok(vec![first, moved, other]));
+    }
+
+    #[test]
+    fn a_new_home_that_is_not_a_good_link_changes_nothing() {
+        let (_root, repo, shared) = folders();
+        let base = repo.parent().unwrap();
+        let gone = base.join("gone");
+        let linked = [gone.clone()];
+        assert_eq!(
+            relink(&repo, &linked, &gone, &base.join("missing")),
+            Err(LinkError::NotFound)
+        );
+        assert_eq!(
+            relink(&repo, &linked, &gone, &repo.join("core")),
+            Err(LinkError::InsideRepo)
+        );
+        let linked = [gone.clone(), shared.clone()];
+        assert_eq!(relink(&repo, &linked, &gone, &shared), Err(LinkError::AlreadyLinked));
     }
 
     #[test]

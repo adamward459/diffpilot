@@ -331,28 +331,65 @@ fn open_window(
     review_store: Arc<Store>,
     tour: bool,
 ) -> &'static mut VisualTestContext {
+    let viewed = Arc::new(ViewedStore::in_memory());
+    open_window_with(cx, folder, settings, viewed, review_store, tour).1
+}
+
+fn open_window_with(
+    cx: &mut TestAppContext,
+    folder: Option<&Path>,
+    settings: Arc<Settings>,
+    viewed: Arc<ViewedStore>,
+    review_store: Arc<Store>,
+    tour: bool,
+) -> (Entity<Workspace>, &'static mut VisualTestContext) {
     if !tour {
         settings.set_tour_seen(true);
     }
     let folder = folder.map(Path::to_path_buf);
+    let mut workspace = None;
     let handle = cx.add_window(|window, cx| {
-        let workspace = cx.new(|cx| {
-            Workspace::new(
-                settings,
-                Arc::new(ViewedStore::in_memory()),
-                review_store,
-                folder,
-                false,
-                window,
-                cx,
-            )
-        });
-        gpui_component::Root::new(workspace, window, cx)
+        let entity = cx.new(|cx| Workspace::new(settings, viewed, review_store, folder, false, window, cx));
+        workspace = Some(entity.clone());
+        gpui_component::Root::new(entity, window, cx)
     });
     let vcx = VisualTestContext::from_window(handle.into(), cx).into_mut();
     vcx.executor().allow_parking();
     draw(vcx);
-    vcx
+    let workspace = workspace.expect("the window builds the workspace");
+    vcx.update(|_, cx| cx.set_global(OpenWorkspace(workspace.clone())));
+    (workspace, vcx)
+}
+
+struct OpenWorkspace(Entity<Workspace>);
+
+impl Global for OpenWorkspace {}
+
+pub fn open_repo_in_workspace(
+    cx: &mut TestAppContext,
+    repo: &Path,
+    settings: Arc<Settings>,
+    viewed: Arc<ViewedStore>,
+    review_store: Arc<Store>,
+) -> (Entity<RepoView>, &'static mut VisualTestContext) {
+    ready(cx);
+    let (workspace, vcx) = open_window_with(cx, Some(repo), settings, viewed, review_store, false);
+    let view = workspace.read_with(vcx, |workspace, _| workspace.active_view().cloned());
+    (view.expect("the workspace shows the folder"), vcx)
+}
+
+pub fn compare_to(cx: &mut VisualTestContext, base: &str) {
+    click(cx, "comparison-label");
+    let workspace = cx.update(|_, cx| cx.global::<OpenWorkspace>().0.clone());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !workspace.read_with(cx, |workspace, cx| workspace.sheet_is_loaded(cx)) {
+        assert!(std::time::Instant::now() < deadline, "the sheet did not load");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        draw(cx);
+    }
+    click(cx, "open-base");
+    click(cx, &format!("open-base:{base}"));
+    click(cx, "open-folder-confirm");
 }
 
 pub fn draw(cx: &mut VisualTestContext) {
@@ -426,7 +463,15 @@ fn below(bounds: Bounds<Pixels>, (dx, dy): (f32, f32)) -> gpui::Point<Pixels> {
 /// Clicks `count` times at `(dx, dy)` from the left edge and bottom of the tagged element.
 pub fn click_below(cx: &mut VisualTestContext, selector: &str, at: (f32, f32), count: usize) {
     let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
-    let position = below(bounds, at);
+    click_times(cx, below(bounds, at), count);
+}
+
+pub fn double_click(cx: &mut VisualTestContext, selector: &str) {
+    let bounds = settled_bounds(cx, selector);
+    click_times(cx, bounds.center(), 2);
+}
+
+fn click_times(cx: &mut VisualTestContext, position: gpui::Point<Pixels>, count: usize) {
     cx.simulate_mouse_move(position, None, Modifiers::default());
     draw(cx);
     for click_count in 1..=count {

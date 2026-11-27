@@ -476,7 +476,6 @@ pub const FEATURES: &[Feature] = &[
             "core/src/store/guides.rs",
             "core/tests/guide.rs",
             "gpui-app/src/guide/**",
-            "gpui-app/src/linked_folders.rs",
             "gpui-app/tests/guide.rs",
         ],
         tests: &[
@@ -531,7 +530,7 @@ pub const FEATURES: &[Feature] = &[
     Feature {
         name: "app-shell",
         paths: &[
-            "gpui-app/src/{main,lib,workspace,repo_view,bench,testing,folder_menu,folder_picker,open_dialog,commit_popover,tour}.rs",
+            "gpui-app/src/{main,lib,workspace,repo_view,bench,testing,folder_menu,folder_picker,folder_prs,linked_folders,open_dialog,switch_alert,commit_popover,tour}.rs",
             "core/src/{folder_status,commit}.rs",
             "gpui-app/tests/flows.rs",
             "gpui-app/tests/flows/**",
@@ -546,6 +545,18 @@ pub const FEATURES: &[Feature] = &[
             Lib {
                 package: APP,
                 module: "bench::",
+            },
+            Lib {
+                package: APP,
+                module: "folder_menu::",
+            },
+            Lib {
+                package: APP,
+                module: "folder_prs::",
+            },
+            Lib {
+                package: APP,
+                module: "open_dialog::",
             },
             Lib {
                 package: CORE,

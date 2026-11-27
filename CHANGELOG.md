@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- A pill next to the folder name shows how many folders are linked. Click it to add or remove linked folders, or press ⌥⌘L. The folder menu has a Linked Folders item, and shows each folder's links.
+- Linked folders that moved or were deleted say so. Choose Locate… to point to the new place, or Remove.
+- Switching folders while Claude is running now asks to stop the runs first. Choose Don't ask again, or turn it off in Settings, to stop and switch right away with a Go back button.
+- Open Folder is now one sheet. It lists your recent folders with their branch, changed files, and open pull requests, and has a search for folders, paths, pull request titles, or #123. Browse… picks any other folder.
+- On the Open Folder sheet, choose what to compare before you open: a branch and its base, or a pull request. Picking a pull request fills in both branches and opens it without a checkout. Edit… changes the linked folders.
+- The Open Folder sheet shows when you start Diffpilot with no folder open.
+
+### Changed
+
+- Adding a linked folder is simpler: type a path and press Enter, drop a folder on the field, or choose Choose…. Changes save as you edit. The Guide start card lists the linked folders as chips, with Edit….
+- The folder menu item Add Folder… is now called Open Folder…. Open Folder… and ⌘O open the sheet, not the system folder picker.
+- The title bar now shows what you compare as one label, like feature → main. Click it to open the Open Folder sheet on this folder and change the branches or pick a pull request.
+- The Linked button in the Guide overview bar now opens the same Linked Folders popover as the title bar.
+
 ## [0.1.1] - 2026-11-27
 
 ### Added

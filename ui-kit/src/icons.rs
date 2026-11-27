@@ -69,6 +69,7 @@ glyphs! {
     Github => "github",
     Keyboard => "keyboard",
     Laptop => "laptop",
+    Link => "link",
     List => "list",
     ListFilter => "list-filter",
     ListPlus => "list-plus",

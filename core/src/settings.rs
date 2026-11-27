@@ -30,6 +30,7 @@ struct Data {
     wrap_lines: Option<bool>,
     editor: Option<Editor>,
     tour_seen: Option<bool>,
+    ask_before_stopping_runs: Option<bool>,
 }
 
 type Listener = Box<dyn Fn() + Send + Sync>;
@@ -239,6 +240,14 @@ impl Settings {
         self.write(|data| data.tour_seen = Some(seen));
     }
 
+    pub fn ask_before_stopping_runs(&self) -> bool {
+        self.read(|data| data.ask_before_stopping_runs).unwrap_or(true)
+    }
+
+    pub fn set_ask_before_stopping_runs(&self, ask: bool) {
+        self.write(|data| data.ask_before_stopping_runs = Some(ask));
+    }
+
     pub fn wrap_lines(&self) -> bool {
         self.read(|data| data.wrap_lines).unwrap_or(false)
     }
@@ -324,6 +333,7 @@ impl Data {
             wrap_lines: field(take("wrapLines")),
             editor: field(take("editor")),
             tour_seen: field(take("tourSeen")),
+            ask_before_stopping_runs: field(take("askBeforeStoppingRuns")),
         }
     }
 }
@@ -765,6 +775,15 @@ mod tests {
         assert!(!settings.tour_seen());
         settings.set_tour_seen(true);
         assert!(Settings::at(file).tour_seen());
+    }
+
+    #[test]
+    fn stopping_runs_asks_first_until_it_is_turned_off_and_the_choice_is_saved() {
+        let (_dir, file) = temp_file();
+        let settings = Settings::at(file.clone());
+        assert!(settings.ask_before_stopping_runs());
+        settings.set_ask_before_stopping_runs(false);
+        assert!(!Settings::at(file).ask_before_stopping_runs());
     }
 
     #[test]

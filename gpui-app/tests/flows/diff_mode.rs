@@ -1,7 +1,8 @@
 use diffpilot::settings::Section;
-use diffpilot::testing::{click, fixture, open_repo, open_settings, shows};
+use diffpilot::testing::{click, compare_to, fixture, open_repo_in_workspace, open_settings, shows};
 use diffpilot_core::diff::DiffMode;
 use diffpilot_core::settings::Settings;
+use diffpilot_core::store::Store;
 use diffpilot_core::viewed::ViewedStore;
 use gpui::TestAppContext;
 use std::sync::Arc;
@@ -17,19 +18,18 @@ fn the_diff_mode_chosen_in_settings_applies_to_every_session_of_a_repo_opened_af
 
     let dir = fixture();
     let store = Arc::new(ViewedStore::in_memory());
-    let (_, cx) = open_repo(app, dir.path(), settings.clone(), store);
+    let review_store = Arc::new(Store::open_in_memory().expect("an in-memory store opens"));
+    let (_, cx) = open_repo_in_workspace(app, dir.path(), settings.clone(), store, review_store);
     assert!(
         shows(cx, "diff-mode:Split:selected"),
         "a repo opened now starts in Split"
     );
 
-    click(cx, "comparison-base");
-    click(cx, "comparison-base:Staged Changes Only");
+    compare_to(cx, "Staged Changes Only");
     assert!(shows(cx, "sidebar:summary:0/1 viewed"));
     assert!(shows(cx, "diff-mode:Split:selected"), "so does the next session");
 
-    click(cx, "comparison-base");
-    click(cx, "comparison-base:Working Tree Changes Only");
+    compare_to(cx, "Working Tree Changes Only");
     assert!(shows(cx, "sidebar:summary:0/2 viewed"));
     assert!(shows(cx, "diff-mode:Split:selected"));
 }

@@ -62,6 +62,13 @@ pub const ENTRIES: &[Entry] = &[
         render: claude,
     },
     Entry {
+        section: Section::Claude,
+        title: "Ask before stopping Claude",
+        detail: "When you switch folders while Claude is running",
+        keywords: "switch folder stop run alert confirm",
+        render: general::ask_before_stopping,
+    },
+    Entry {
         section: Section::Accounts,
         title: "GitHub",
         detail: "Sign in to read and reply to pull requests.",

@@ -52,14 +52,6 @@ pub fn branch_glyph(comparison: &Comparison) -> Glyph {
     }
 }
 
-pub fn branch_tooltip(comparison: &Comparison) -> &'static str {
-    if comparison.branch_name().is_none() {
-        "Checked-out branch"
-    } else {
-        "Read only. This branch is not checked out."
-    }
-}
-
 pub fn base_title(comparison: &Comparison) -> String {
     match comparison {
         Comparison::WorkingTree => "Working Tree Changes".to_string(),
@@ -261,14 +253,12 @@ mod tests {
         let checked_out = Comparison::checked_out("origin/main", true);
         assert_eq!(branch_title(&refs, &checked_out), "feature");
         assert_eq!(branch_glyph(&checked_out), Glyph::GitBranch);
-        assert_eq!(branch_tooltip(&checked_out), "Checked-out branch");
         assert_eq!(base_title(&checked_out), "origin/main");
         assert_eq!(base_glyph(&checked_out), Glyph::ArrowLeftRight);
 
         let other = Comparison::branch("other", "main");
         assert_eq!(branch_title(&refs, &other), "other");
         assert_eq!(branch_glyph(&other), Glyph::Eye);
-        assert_eq!(branch_tooltip(&other), "Read only. This branch is not checked out.");
         assert_eq!(base_title(&other), "main");
 
         let pull_request = Comparison::branch(&forge::pr_ref(479), "origin/main");

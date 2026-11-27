@@ -2,7 +2,7 @@ use crate::bench::{Bench, Mark};
 use crate::claude_area::{ClaudeArea, ClaudeAreaEvent, HEIGHT as CLAUDE_AREA_HEIGHT};
 use crate::claude_status::{Actions, status_row};
 use crate::commit_popover::{CommitEvent, CommitPopover};
-use crate::comparison_control::{Select, comparison_control};
+use crate::comparison_control::comparison_control;
 use crate::diff_pane::layout::SPLIT_MIN_WIDTH;
 use crate::folder_menu::FolderMenu;
 use crate::guide::chrome::{chapter_bar, overview_bar};
@@ -209,6 +209,7 @@ pub struct RepoView {
     commit: Entity<CommitPopover>,
     commit_open: bool,
     comparison: Option<Comparison>,
+    pending_comparison: Option<Comparison>,
     session: Option<Session>,
     next_session_id: u64,
     nav: Nav,
@@ -247,14 +248,9 @@ impl RepoView {
         let wrap = settings.wrap_lines();
         let remote = cx.new(|cx| RemoteStatus::new(repo.clone(), cx));
         let remote_capsule = cx.new(|cx| RemoteCapsule::new(remote.clone(), cx));
-        let remote_events = cx.subscribe_in(
-            &remote,
-            window,
-            |this, _, event: &RemoteEvent, window, cx| match event {
-                RemoteEvent::Synced => this.load_refs(window, cx),
-                RemoteEvent::Review(comparison) => this.select_comparison(comparison.clone(), window, cx),
-            },
-        );
+        let remote_events = cx.subscribe_in(&remote, window, |this, _, RemoteEvent::Synced, window, cx| {
+            this.load_refs(window, cx)
+        });
         let commit = cx.new(|cx| CommitPopover::new(repo.clone(), window, cx));
         let commit_events = cx.subscribe(&commit, |this, _, CommitEvent::Dismiss, cx| {
             this.commit_open = false;
@@ -275,6 +271,7 @@ impl RepoView {
             commit,
             commit_open: false,
             comparison: None,
+            pending_comparison: None,
             session: None,
             next_session_id: 0,
             nav: Nav::Files,
@@ -319,6 +316,10 @@ impl RepoView {
             session.pane.update(cx, |pane, cx| pane.set_wrap(wrap, cx));
         }
         cx.notify();
+    }
+
+    pub fn comparison(&self) -> Option<&Comparison> {
+        self.comparison.as_ref()
     }
 
     pub fn set_title(&mut self, menu: Entity<FolderMenu>, cx: &mut Context<Self>) {
@@ -399,6 +400,13 @@ impl RepoView {
     }
 
     fn apply_refs(&mut self, refs: Refs, comparison: Comparison, window: &mut Window, cx: &mut Context<Self>) {
+        let comparison = match self.pending_comparison.take() {
+            Some(next) => {
+                self.save_comparison(&refs, &comparison, next.clone(), cx);
+                next
+            }
+            None => comparison,
+        };
         self.refs = Some(refs);
         self.comparison = Some(comparison);
         self.remote.update(cx, |remote, cx| remote.refresh(cx));
@@ -410,20 +418,25 @@ impl RepoView {
 
     pub fn select_comparison(&mut self, next: Comparison, window: &mut Window, cx: &mut Context<Self>) {
         let (Some(refs), Some(current)) = (self.refs.clone(), self.comparison.clone()) else {
+            self.pending_comparison = Some(next);
             return;
         };
         if next == current {
             return;
         }
         self.comparison = Some(next.clone());
-        let repo = self.repo.clone();
-        let settings = self.settings.clone();
+        self.save_comparison(&refs, &current, next, cx);
+        self.ensure_session(window, cx);
+        cx.notify();
+    }
+
+    fn save_comparison(&self, refs: &Refs, current: &Comparison, next: Comparison, cx: &mut Context<Self>) {
+        let (repo, settings) = (self.repo.clone(), self.settings.clone());
+        let (refs, current) = (refs.clone(), current.clone());
         cx.background_spawn(async move {
             comparison::select_comparison(&settings, &repo, &refs, &current, next);
         })
         .detach();
-        self.ensure_session(window, cx);
-        cx.notify();
     }
 
     fn ensure_session(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -1345,16 +1358,10 @@ impl RepoView {
 
     fn toolbar(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let tokens = Theme::of(cx);
-        let view = cx.entity().downgrade();
-        let select: Select = Rc::new(move |next, window, cx| {
-            view.update(cx, |this, cx| this.select_comparison(next, window, cx))
-                .ok();
-        });
-        let remote_menu = RemoteMenu::new(&self.remote, self.comparison.as_ref(), cx);
+        let remote_menu = RemoteMenu::new(&self.remote, cx);
         let control = match (&self.refs, &self.comparison) {
             (Some(refs), Some(comparison)) => Some(
-                comparison_control(refs, comparison, self.compact_toolbar, select, remote_menu, &tokens)
-                    .into_any_element(),
+                comparison_control(refs, comparison, self.compact_toolbar, remote_menu, &tokens).into_any_element(),
             ),
             _ => None,
         };

@@ -1,5 +1,5 @@
 use super::rows::{SyncRow, fetch_detail, pull_first_warning, pull_row, push_row, sync_header};
-use super::{RemoteStatus, ReviewState, SyncKind, SyncState};
+use super::{RemoteStatus, SyncKind, SyncState};
 use diffpilot_ui_kit::components::{
     DISABLED_OPACITY, OVERLAY_DETAIL_TEXT, OVERLAY_ROW_RADIUS, OVERLAY_TEXT, glyph_icon, spinner, tag,
 };
@@ -99,15 +99,6 @@ impl Render for SyncPopover {
         let header = sync_header(&branch);
         let warning = pull_first_warning(&branch);
         let sync = remote.sync().clone();
-        let review_failure = match remote.review_state() {
-            ReviewState::Failed { number, message } => {
-                let reference = remote
-                    .words()
-                    .map_or_else(|| number.to_string(), |words| words.reference(*number));
-                Some(format!("Could not review {reference}. {message}"))
-            }
-            _ => None,
-        };
         let fetch = SyncRow {
             title: "Fetch".into(),
             detail: fetch_detail(branch.last_fetch, SystemTime::now()),
@@ -155,21 +146,6 @@ impl Render for SyncPopover {
             .when_some(failure, |this, (kind, message)| {
                 this.child(
                     tag(h_flex(), move || format!("remote:error:{}", kind.name()))
-                        .mx(px(6.))
-                        .mb(px(4.))
-                        .px(px(8.))
-                        .py(px(6.))
-                        .gap(px(8.))
-                        .items_start()
-                        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
-                        .text_color(theme.danger)
-                        .child(glyph_icon(Glyph::CircleAlert, 14., theme.danger))
-                        .child(div().min_w_0().child(message)),
-                )
-            })
-            .when_some(review_failure, |this, message| {
-                this.child(
-                    tag(h_flex(), || "remote:review-error")
                         .mx(px(6.))
                         .mb(px(4.))
                         .px(px(8.))

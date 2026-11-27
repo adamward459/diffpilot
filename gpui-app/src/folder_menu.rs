@@ -1,25 +1,28 @@
-use diffpilot_core::comparison;
+use crate::linked_folders::{LinkedEvent, LinkedFolders};
+use diffpilot_core::comparison::{self, Comparison};
 use diffpilot_core::folder_status::{FolderStatus, folder_status};
+use diffpilot_core::refs::Refs;
 use diffpilot_core::settings::Settings;
 use diffpilot_ui_kit::components::menu::{MenuItem, MenuSection, menu_button};
-use diffpilot_ui_kit::components::{BadgeTone, Button, Look, status_badge, tag};
+use diffpilot_ui_kit::components::{BadgeTone, Button, Look, popover, status_badge, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, EventEmitter, FontWeight, IntoElement, ParentElement, Render, SharedString, Styled, Task,
-    WeakEntity, Window, div, font, px,
+    AnyElement, Context, Corner, Entity, EventEmitter, FontWeight, IntoElement, ParentElement, Render, SharedString,
+    Styled, Subscription, Task, WeakEntity, Window, div, font, px,
 };
-use gpui_component::{ActiveTheme, h_flex};
+use gpui_component::{ActiveTheme, h_flex, v_flex};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 const MENU_WIDTH: f32 = 420.0;
+const LINKED_WIDTH: f32 = 380.0;
 pub const SHORTCUT_SLOTS: usize = 9;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FolderMenuEvent {
     Select(PathBuf),
-    Add,
+    Open,
 }
 
 #[derive(Debug, Clone)]
@@ -43,7 +46,23 @@ impl FolderRow {
     }
 }
 
-fn folder_name(path: &Path) -> String {
+pub(crate) struct FolderSnapshot {
+    pub refs: Refs,
+    pub comparison: Comparison,
+    pub status: Option<FolderStatus>,
+}
+
+pub(crate) fn snapshot(path: &Path, settings: &Settings) -> FolderSnapshot {
+    let (refs, comparison) = comparison::load_comparison(path, settings);
+    let status = folder_status(path, &comparison).ok();
+    FolderSnapshot {
+        refs,
+        comparison,
+        status,
+    }
+}
+
+pub(crate) fn folder_name(path: &Path) -> String {
     path.file_name()
         .unwrap_or(path.as_os_str())
         .to_string_lossy()
@@ -55,18 +74,53 @@ pub struct FolderMenu {
     rows: Vec<FolderRow>,
     active: Option<PathBuf>,
     refresh_task: Option<Task<()>>,
+    editor: Entity<LinkedFolders>,
+    linked_open: bool,
+    _editor: Subscription,
 }
 
 impl EventEmitter<FolderMenuEvent> for FolderMenu {}
 
 impl FolderMenu {
-    pub fn new(settings: Arc<Settings>) -> Self {
+    pub fn new(settings: Arc<Settings>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let editor = cx.new(|cx| LinkedFolders::new(PathBuf::new(), Vec::new(), window, cx));
+        let edits = cx.subscribe(&editor, |this, _, LinkedEvent::Changed(folders), cx| {
+            if let Some(active) = &this.active {
+                this.settings.set_linked_folders(active, folders.clone());
+            }
+            cx.notify();
+        });
         Self {
             settings,
             rows: Vec::new(),
             active: None,
             refresh_task: None,
+            editor,
+            linked_open: false,
+            _editor: edits,
         }
+    }
+
+    pub fn open_linked(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_linked_open(true, window, cx);
+    }
+
+    fn set_linked_open(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.linked_open == open {
+            return;
+        }
+        let Some(active) = self.active.clone().filter(|_| open || self.linked_open) else {
+            return;
+        };
+        self.linked_open = open;
+        if open {
+            let linked = self.settings.linked_folders(&active);
+            self.editor.update(cx, |editor, cx| {
+                editor.set_repo(active, linked, cx);
+                editor.focus_input(window, cx);
+            });
+        }
+        cx.notify();
     }
 
     pub fn set_folders(&mut self, folders: Vec<PathBuf>, active: &Path, cx: &mut Context<Self>) {
@@ -81,6 +135,9 @@ impl FolderMenu {
             })
             .collect();
         self.rows = rows;
+        if self.active.as_deref() != Some(active) {
+            self.linked_open = false;
+        }
         self.active = Some(active.to_path_buf());
         self.refresh(cx);
         cx.notify();
@@ -96,8 +153,7 @@ impl FolderMenu {
                     paths
                         .into_iter()
                         .map(|path| {
-                            let (_, comparison) = comparison::load_comparison(&path, &settings);
-                            let status = folder_status(&path, &comparison).ok();
+                            let status = snapshot(&path, &settings).status;
                             (path, status)
                         })
                         .collect::<Vec<_>>()
@@ -119,8 +175,8 @@ impl FolderMenu {
         cx.emit(FolderMenuEvent::Select(path));
     }
 
-    fn add(&mut self, cx: &mut Context<Self>) {
-        cx.emit(FolderMenuEvent::Add);
+    fn open(&mut self, cx: &mut Context<Self>) {
+        cx.emit(FolderMenuEvent::Open);
     }
 
     fn others_changed(&self) -> usize {
@@ -165,9 +221,18 @@ fn stats(status: &FolderStatus, theme: &Theme, mono: SharedString, highlighted: 
         .into_any_element()
 }
 
+fn detail_line(branch: Option<String>, links: &[String]) -> Option<String> {
+    let links = (!links.is_empty()).then(|| format!("links {}", links.join(", ")));
+    match (branch, links) {
+        (Some(branch), Some(links)) => Some(format!("{branch} · {links}")),
+        (branch, links) => branch.or(links),
+    }
+}
+
 fn row_item(
     index: usize,
     row: &FolderRow,
+    links: &[String],
     active: bool,
     theme: Theme,
     mono: SharedString,
@@ -192,14 +257,75 @@ fn row_item(
             })
             .into_any_element()
     });
-    let item = match row.status.as_ref().and_then(|status| status.branch.clone()) {
-        Some(branch) => item.detail(branch),
+    let branch = row.status.as_ref().and_then(|status| status.branch.clone());
+    let item = match detail_line(branch, links) {
+        Some(detail) => item.detail(detail),
         None => item,
     };
     if index < SHORTCUT_SLOTS {
         item.shortcut(format!("⌃⌘{}", index + 1))
     } else {
         item
+    }
+}
+
+impl FolderMenu {
+    fn linked_pill(&self, name: &str, count: usize, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let muted = count == 0;
+        let color = if muted { theme.ui.muted } else { theme.ui.text2 };
+        let label = if muted {
+            "Link folders".to_string()
+        } else {
+            format!("{count} linked")
+        };
+        let text = SharedString::from(label.clone());
+        let trigger = tag(
+            Button::new("linked-pill")
+                .look(Look::Ghost)
+                .rounded_full()
+                .icon_color(Glyph::Link, 12., color)
+                .text_color(color)
+                .child(tag(div(), move || format!("linked-count:{label}")).child(text)),
+            || "linked-pill",
+        );
+        let menu = cx.entity().downgrade();
+        let editor = self.editor.clone();
+        let (title, theme) = (format!("Linked to {name}"), *theme);
+        popover("linked-popover")
+            .anchor(Corner::TopLeft)
+            .open(self.linked_open)
+            .on_open_change(move |open, window, cx| {
+                let open = *open;
+                menu.update(cx, |menu, cx| menu.set_linked_open(open, window, cx)).ok();
+            })
+            .trigger(trigger)
+            .content(move |_, _, _| {
+                v_flex()
+                    .w(px(LINKED_WIDTH))
+                    .gap(px(10.))
+                    .text_color(theme.ui.text)
+                    .child(tag(
+                        div()
+                            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(title.clone()),
+                        || "linked-title",
+                    ))
+                    .child(
+                        div()
+                            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
+                            .text_color(theme.ui.text2)
+                            .child("Claude can read these for context. They are not reviewed."),
+                    )
+                    .child(editor.clone())
+                    .child(
+                        div()
+                            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
+                            .text_color(theme.ui.muted)
+                            .child("Saved as you edit. A Guide run that is running keeps its links; the next run uses the new ones."),
+                    )
+            })
+            .into_any_element()
     }
 }
 
@@ -212,6 +338,23 @@ impl Render for FolderMenu {
         let others = self.others_changed();
         let rows = self.rows.clone();
         let active = self.active.clone();
+        let link_names: Vec<Vec<String>> = rows
+            .iter()
+            .map(|row| {
+                self.settings
+                    .linked_folders(&row.path)
+                    .iter()
+                    .map(|folder| folder_name(folder))
+                    .collect()
+            })
+            .collect();
+        let linked_count = active
+            .as_deref()
+            .map_or(0, |active| self.settings.linked_folders(active).len());
+        let linked_pill = active
+            .is_some()
+            .then(|| self.linked_pill(&name, linked_count, &theme, cx));
+        let has_active = active.is_some();
 
         let trigger = tag(
             Button::new("folder-title")
@@ -228,23 +371,44 @@ impl Render for FolderMenu {
         );
 
         let refresh = menu.clone();
+        let menu_name = name.clone();
         let popover = menu_button("folder", trigger, move |_, _| {
             let folders = rows
                 .iter()
                 .enumerate()
                 .map(|(index, row)| {
                     let is_active = active.as_ref() == Some(&row.path);
-                    row_item(index, row, is_active, theme, mono.clone(), menu.clone()).into()
+                    row_item(
+                        index,
+                        row,
+                        &link_names[index],
+                        is_active,
+                        theme,
+                        mono.clone(),
+                        menu.clone(),
+                    )
+                    .into()
                 })
                 .collect();
-            let add = {
+            let open = {
                 let menu = menu.clone();
-                MenuItem::new("Add Folder…", move |_, cx| {
-                    menu.update(cx, |menu, cx| menu.add(cx)).ok();
+                MenuItem::new("Open Folder…", move |_, cx| {
+                    menu.update(cx, |menu, cx| menu.open(cx)).ok();
                 })
                 .shortcut("⌘O")
             };
-            vec![MenuSection::new(folders), MenuSection::new(vec![add.into()])]
+            let mut actions = vec![open.into()];
+            if has_active {
+                let menu = menu.clone();
+                actions.push(
+                    MenuItem::new(format!("Linked Folders for {menu_name}…"), move |window, cx| {
+                        menu.update(cx, |menu, cx| menu.open_linked(window, cx)).ok();
+                    })
+                    .shortcut("⌥⌘L")
+                    .into(),
+                );
+            }
+            vec![MenuSection::new(folders), MenuSection::new(actions)]
         })
         .min_width(MENU_WIDTH)
         .arrow()
@@ -258,6 +422,7 @@ impl Render for FolderMenu {
             .gap(px(8.))
             .items_center()
             .child(popover)
+            .children(linked_pill)
             .when(others > 0, |this| {
                 this.child(
                     h_flex()
@@ -274,5 +439,22 @@ impl Render for FolderMenu {
                         }),
                 )
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::detail_line;
+
+    #[test]
+    fn the_detail_line_joins_the_branch_and_the_linked_folder_names() {
+        let links = ["api".to_string(), "docs".to_string()];
+        assert_eq!(
+            detail_line(Some("main".into()), &links).as_deref(),
+            Some("main · links api, docs")
+        );
+        assert_eq!(detail_line(None, &links[..1]).as_deref(), Some("links api"));
+        assert_eq!(detail_line(Some("main".into()), &[]).as_deref(), Some("main"));
+        assert_eq!(detail_line(None, &[]), None);
     }
 }

@@ -1,21 +1,27 @@
 use crate::bench::{self, Bench, Mark};
-use crate::folder_menu::{FolderMenu, FolderMenuEvent, SHORTCUT_SLOTS};
-use crate::folder_picker::pick_folders;
+use crate::claude_activity::ClaudeActivity;
+use crate::folder_menu::{FolderMenu, FolderMenuEvent, SHORTCUT_SLOTS, folder_name};
 use crate::open_dialog::{OpenEvent, OpenFolderDialog};
 use crate::remote::SyncKind;
 use crate::repo_view::{Nav, RepoView};
 use crate::settings::{self, OpenSettings, PageEvent, Section, SettingsPage};
+use crate::switch_alert::{SwitchAlert, SwitchEvent};
 use crate::tour::{self, Tour};
+use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::DiffMode;
+use diffpilot_core::run::Run;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::{DataScope, Store};
 use diffpilot_core::viewed::ViewedStore;
 use diffpilot_ui_kit::Glyph;
-use diffpilot_ui_kit::components::{Presence, dialog, tour as tour_overlay, tour_card};
+use diffpilot_ui_kit::Theme;
+use diffpilot_ui_kit::components::{
+    Button as GlassButton, Presence, dialog, glass_panel, tag, tour as tour_overlay, tour_card,
+};
 use gpui::prelude::*;
 use gpui::{
     App, ClickEvent, Context, Entity, FocusHandle, IntoElement, KeyDownEvent, Menu, MenuItem, MouseDownEvent,
-    ParentElement, Render, Styled, Subscription, Window, WindowControlArea, actions, div, px,
+    ParentElement, Render, SharedString, Styled, Subscription, Window, WindowControlArea, actions, div, px,
 };
 use gpui_component::button::Button;
 use gpui_component::{ActiveTheme, Icon, Sizable, StyledExt, h_flex, v_flex};
@@ -26,6 +32,7 @@ const MAX_LIVE_VIEWS: usize = 4;
 const SETTINGS_WIDTH: f32 = 780.;
 const SETTINGS_HEIGHT: f32 = 600.;
 const SETTINGS_MARGIN: f32 = 32.;
+const TOAST_SECONDS: u64 = 5;
 
 actions!(
     diffpilot,
@@ -55,13 +62,16 @@ actions!(
         ToggleInspector,
         ToggleClaudeArea,
         ToggleComments,
-        ShowTour
+        ShowTour,
+        EditLinkedFolders,
+        ChangeComparison
     ]
 );
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         gpui::KeyBinding::new("cmd-o", OpenFolder, None),
+        gpui::KeyBinding::new("alt-cmd-l", EditLinkedFolders, None),
         gpui::KeyBinding::new("cmd-q", Quit, None),
         gpui::KeyBinding::new("ctrl-cmd-1", Folder1, None),
         gpui::KeyBinding::new("ctrl-cmd-2", Folder2, None),
@@ -89,6 +99,7 @@ pub fn init(cx: &mut App) {
     crate::diff_pane::bind_keys(cx);
     crate::review::init(cx);
     crate::open_dialog::init(cx);
+    crate::switch_alert::init(cx);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.set_menus(vec![
         Menu {
@@ -101,7 +112,10 @@ pub fn init(cx: &mut App) {
         },
         Menu {
             name: "File".into(),
-            items: vec![MenuItem::action("Open Folder…", OpenFolder)],
+            items: vec![
+                MenuItem::action("Open Folder…", OpenFolder),
+                MenuItem::action("Linked Folders…", EditLinkedFolders),
+            ],
         },
         Menu {
             name: "Branch".into(),
@@ -133,6 +147,11 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
+struct Toast {
+    text: SharedString,
+    back: PathBuf,
+}
+
 pub struct Workspace {
     settings: Arc<Settings>,
     viewed_store: Arc<ViewedStore>,
@@ -143,6 +162,10 @@ pub struct Workspace {
     settings_page: Option<(Entity<SettingsPage>, Subscription)>,
     settings_presence: Presence,
     open_dialog: Option<(Entity<OpenFolderDialog>, Subscription)>,
+    switch_alert: Option<(Entity<SwitchAlert>, Subscription)>,
+    toast: Option<Toast>,
+    toast_generation: u32,
+    pending_comparison: Option<(PathBuf, Comparison)>,
     focus: FocusHandle,
     tour: Tour,
     tour_focus: FocusHandle,
@@ -161,10 +184,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let menu = cx.new(|_| FolderMenu::new(settings.clone()));
+        let menu = cx.new(|cx| FolderMenu::new(settings.clone(), window, cx));
         let menu_events = cx.subscribe_in(&menu, window, |this, _, event, window, cx| match event {
-            FolderMenuEvent::Select(folder) => this.show_folder(folder.clone(), window, cx),
-            FolderMenuEvent::Add => this.open_folder(window, cx),
+            FolderMenuEvent::Select(folder) => this.request_folder(folder.clone(), window, cx),
+            FolderMenuEvent::Open => this.open_folder(window, cx),
         });
         let focus_lost = cx.on_focus_lost(window, |this, window, cx| this.restore_focus(window, cx));
         let mut this = Self {
@@ -177,6 +200,10 @@ impl Workspace {
             settings_page: None,
             settings_presence: Presence::new(false),
             open_dialog: None,
+            switch_alert: None,
+            toast: None,
+            toast_generation: 0,
+            pending_comparison: None,
             focus: cx.focus_handle(),
             tour: Tour::default(),
             tour_focus: cx.focus_handle(),
@@ -185,8 +212,10 @@ impl Workspace {
             _focus_lost: focus_lost,
         };
         window.focus(&this.focus);
-        if let Some(folder) = folder {
-            this.show_folder(folder, window, cx);
+        match folder {
+            Some(folder) => this.show_folder(folder, window, cx),
+            None if !benching => this.open_folder(window, cx),
+            None => {}
         }
         if benching {
             this.watch_bench(window, cx);
@@ -198,6 +227,8 @@ impl Workspace {
         self.settings_page = None;
         self.settings_presence = Presence::new(false);
         self.open_dialog = None;
+        self.switch_alert = None;
+        self.toast = None;
         let folder = folder.canonicalize().unwrap_or(folder);
         self.settings.remember_folder(&folder);
         self.tour_pending = !self.benching && !self.settings.tour_seen();
@@ -212,12 +243,145 @@ impl Workspace {
                 self.evict_extra_views(cx);
             }
         }
+        if let Some((_, comparison)) = self.pending_comparison.take().filter(|(path, _)| *path == folder)
+            && let Some(view) = self.active_view()
+        {
+            view.update(cx, |view, cx| view.select_comparison(comparison, window, cx));
+        }
         if let Some(name) = folder.file_name() {
             window.set_window_title(&name.to_string_lossy());
         }
         let folders = self.settings.folders();
         self.menu.update(cx, |menu, cx| menu.set_folders(folders, &folder, cx));
         cx.notify();
+    }
+
+    fn request_folder(&mut self, folder: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let target = folder.canonicalize().unwrap_or(folder);
+        let current = match self.views.first() {
+            Some((current, _)) if *current != target => current.clone(),
+            _ => return self.show_folder(target, window, cx),
+        };
+        let runs: Vec<Run> = ClaudeActivity::for_repo(&current, cx)
+            .read(cx)
+            .live()
+            .cloned()
+            .collect();
+        if runs.is_empty() {
+            return self.show_folder(target, window, cx);
+        }
+        if self.settings.ask_before_stopping_runs() {
+            self.ask_to_stop(target, runs, window, cx);
+        } else {
+            let stopped = self.stop_and_switch(target, &current, window, cx);
+            self.show_toast(&folder_name(&current), &stopped, current, cx);
+        }
+    }
+
+    fn ask_to_stop(&mut self, target: PathBuf, runs: Vec<Run>, window: &mut Window, cx: &mut Context<Self>) {
+        let name = folder_name(&target);
+        let alert = cx.new(|cx| SwitchAlert::new(name, &runs, window, cx));
+        let events = cx.subscribe_in(
+            &alert,
+            window,
+            move |this, _, event: &SwitchEvent, window, cx| match event {
+                SwitchEvent::StopAndSwitch { ask_again } => {
+                    if !ask_again {
+                        this.settings.set_ask_before_stopping_runs(false);
+                    }
+                    let Some(current) = this.views.first().map(|(current, _)| current.clone()) else {
+                        return;
+                    };
+                    this.stop_and_switch(target.clone(), &current, window, cx);
+                }
+                SwitchEvent::Cancel => {
+                    this.pending_comparison = None;
+                    this.restore_focus(window, cx);
+                }
+            },
+        );
+        self.switch_alert = Some((alert, events));
+        cx.notify();
+    }
+
+    fn stop_and_switch(
+        &mut self,
+        target: PathBuf,
+        current: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<Run> {
+        let activity = ClaudeActivity::for_repo(current, cx);
+        let runs: Vec<Run> = activity.read(cx).live().cloned().collect();
+        activity.update(cx, |activity, cx| {
+            for run in &runs {
+                activity.stop(run.id, cx);
+            }
+        });
+        self.show_folder(target, window, cx);
+        runs
+    }
+
+    fn show_toast(&mut self, left: &str, runs: &[Run], back: PathBuf, cx: &mut Context<Self>) {
+        let text = match runs {
+            [run] => format!("Stopped {} in {left}.", run.kind.activity().title()),
+            _ => format!("Stopped {} Claude runs in {left}.", runs.len()),
+        };
+        self.toast = Some(Toast {
+            text: text.into(),
+            back,
+        });
+        self.toast_generation += 1;
+        let generation = self.toast_generation;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_secs(TOAST_SECONDS))
+                .await;
+            this.update(cx, |this, cx| {
+                if this.toast_generation == generation {
+                    this.toast = None;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn toast_view(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let toast = self.toast.as_ref()?;
+        let tokens = Theme::of(cx);
+        let back = toast.back.clone();
+        Some(
+            div()
+                .absolute()
+                .bottom(px(44.))
+                .w_full()
+                .flex()
+                .justify_center()
+                .child(
+                    tag(
+                        glass_panel(&tokens)
+                            .flex()
+                            .items_center()
+                            .gap(px(12.))
+                            .py(px(6.))
+                            .pl(px(14.))
+                            .pr(px(8.))
+                            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
+                            .child(toast.text.clone()),
+                        || "switch-toast",
+                    )
+                    .child(tag(
+                        GlassButton::new("switch-toast-back").label("Go back").on_click(
+                            cx.listener(move |this, _, window, cx| this.request_folder(back.clone(), window, cx)),
+                        ),
+                        || "switch-toast:back",
+                    )),
+                )
+                .into_any_element(),
+        )
     }
 
     fn new_view(&self, folder: &Path, window: &mut Window, cx: &mut Context<Self>) -> Entity<RepoView> {
@@ -270,31 +434,51 @@ impl Workspace {
             return;
         }
         if let Some(folder) = self.settings.folders().into_iter().nth(index) {
-            self.show_folder(folder, window, cx);
+            self.request_folder(folder, window, cx);
         }
     }
 
-    pub fn open_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let picked = pick_folders(false, cx);
-        cx.spawn_in(window, async move |this, cx| {
-            let Some(folder) = picked.await.and_then(|paths| paths.into_iter().next()) else {
-                return;
-            };
-            this.update_in(cx, |this, window, cx| this.show_open_dialog(folder, window, cx))
-                .ok();
-        })
-        .detach();
+    pub fn sheet_is_loaded(&self, cx: &App) -> bool {
+        self.open_dialog
+            .as_ref()
+            .is_some_and(|(dialog, _)| dialog.read(cx).is_loaded())
     }
 
-    fn show_open_dialog(&mut self, folder: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_sheet(None, window, cx);
+    }
+
+    fn change_comparison(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let start = self.views.first().and_then(|(folder, view)| {
+            let comparison = view.read(cx).comparison()?.clone();
+            Some((folder.clone(), comparison))
+        });
+        self.open_sheet(start, window, cx);
+    }
+
+    fn open_sheet(&mut self, start: Option<(PathBuf, Comparison)>, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((dialog, _)) = self
+            .open_dialog
+            .as_ref()
+            .filter(|(dialog, _)| dialog.read(cx).is_mounted())
+        {
+            dialog.update(cx, |dialog, cx| dialog.focus_search(window, cx));
+            return;
+        }
         let settings = self.settings.clone();
-        let dialog = cx.new(|cx| OpenFolderDialog::new(settings, folder, window, cx));
+        let dialog = cx.new(|cx| OpenFolderDialog::new(settings, start, window, cx));
         let events = cx.subscribe_in(&dialog, window, |this, _, event: &OpenEvent, window, cx| match event {
-            OpenEvent::Open(draft) => {
-                this.settings.set_linked_folders(&draft.folder, draft.linked.clone());
-                this.show_folder(draft.folder.clone(), window, cx);
+            OpenEvent::Open {
+                folder,
+                linked,
+                comparison,
+            } => {
+                this.settings.set_linked_folders(folder, linked.clone());
+                let target = folder.canonicalize().unwrap_or_else(|_| folder.clone());
+                this.pending_comparison = comparison.clone().map(|comparison| (target, comparison));
+                this.request_folder(folder.clone(), window, cx);
             }
-            OpenEvent::Cancel => window.focus(&this.focus),
+            OpenEvent::Cancel => this.restore_focus(window, cx),
         });
         self.open_dialog = Some((dialog, events));
         cx.notify();
@@ -333,9 +517,14 @@ impl Workspace {
             window.focus(&self.tour_focus);
             return;
         }
-        match self.settings_page().cloned() {
-            Some(page) => page.update(cx, |page, cx| page.focus_search(window, cx)),
-            None => window.focus(&self.focus),
+        let sheet = self
+            .open_dialog
+            .as_ref()
+            .filter(|(dialog, _)| dialog.read(cx).is_open());
+        match (self.settings_page().cloned(), sheet) {
+            (Some(page), _) => page.update(cx, |page, cx| page.focus_search(window, cx)),
+            (None, Some((dialog, _))) => dialog.update(cx, |dialog, cx| dialog.focus_search(window, cx)),
+            (None, None) => window.focus(&self.focus),
         }
     }
 
@@ -558,10 +747,20 @@ impl Render for Workspace {
             .as_ref()
             .filter(|(dialog, _)| dialog.read(cx).is_mounted())
             .map(|(dialog, _)| dialog.clone());
+        let alert = self
+            .switch_alert
+            .as_ref()
+            .filter(|(alert, _)| alert.read(cx).is_mounted())
+            .map(|(alert, _)| alert.clone());
+        let toast = self.toast_view(cx);
         let app = div()
             .id("workspace")
             .size_full()
             .on_action(cx.listener(|this, _: &OpenFolder, window, cx| this.open_folder(window, cx)))
+            .on_action(cx.listener(|this, _: &ChangeComparison, window, cx| this.change_comparison(window, cx)))
+            .on_action(cx.listener(|this, _: &EditLinkedFolders, window, cx| {
+                this.menu.update(cx, |menu, cx| menu.open_linked(window, cx))
+            }))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| this.open_settings(None, window, cx)))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &UnifiedDiff, _, cx| this.set_diff_mode(DiffMode::Unified, cx)))
@@ -612,8 +811,9 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &Folder9, window, cx| this.switch_to_index(8, window, cx)))
             .child(div().size_0().track_focus(&self.focus))
             .child(content)
-            .children(dialog)
             .children(open_dialog)
+            .children(dialog)
+            .children(alert)
             .when(self.benching, |this| this.child(bench::probe()));
         div()
             .id("workspace-root")
@@ -621,6 +821,7 @@ impl Render for Workspace {
             .size_full()
             .on_action(cx.listener(|this, _: &ShowTour, window, cx| this.start_tour(window, cx)))
             .child(app)
+            .children(toast)
             .children(tour)
     }
 }

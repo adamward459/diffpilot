@@ -1,14 +1,13 @@
 use crate::format::ago;
 use crate::guide::navigator::now_ms;
 use crate::guide::session::{GuideRun, GuideSession, Step};
-use crate::repo_view::tilde_path;
+use crate::workspace::EditLinkedFolders;
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::guide::reading::ChapterKey;
-use diffpilot_ui_kit::components::menu::{MenuItem, MenuSection, menu_button};
 use diffpilot_ui_kit::components::{Button, Crumb, Look, bar_button, crumbs, jump_bar, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::{
-    AnyElement, App, Corner, Entity, InteractiveElement as _, IntoElement, ParentElement as _, SharedString, Stateful,
+    AnyElement, App, Entity, InteractiveElement as _, IntoElement, ParentElement as _, SharedString, Stateful,
     Styled as _, div, px,
 };
 use gpui_component::h_flex;
@@ -22,54 +21,23 @@ fn guide_crumb(tokens: &Theme, last: bool) -> Crumb {
     }
 }
 
-fn linked_menu(guide: &Entity<GuideSession>, tokens: &Theme, cx: &App) -> AnyElement {
+fn linked_button(guide: &Entity<GuideSession>, cx: &App) -> AnyElement {
     let session = guide.read(cx);
     let count = session.linked(cx).len();
+    let changed = session.linked_changed(cx);
     let label = match count {
         0 => "Link Folder".to_string(),
-        count if session.linked_changed(cx) => format!("{count} linked \u{2022}"),
+        count if changed => format!("{count} linked \u{2022}"),
         count => format!("{count} linked"),
     };
     let mut button = Button::new("guide-linked")
         .icon(Glyph::Folder, 12.)
         .label(label)
-        .caret(true);
-    if session.linked_changed(cx) {
+        .on_click(|_, window, cx| window.dispatch_action(Box::new(EditLinkedFolders), cx));
+    if changed {
         button = button.tooltip("The guide used other folders. Rewrite to use these.");
     }
-    let trigger = tag(button, || "guide-linked");
-    let (guide, muted) = (guide.clone(), tokens.ui.muted);
-    menu_button("guide-linked", trigger, move |_, cx| {
-        let rows = guide
-            .read(cx)
-            .linked(cx)
-            .into_iter()
-            .map(|folder| {
-                let guide = guide.clone();
-                MenuItem::new(tilde_path(&folder), move |_, cx| {
-                    guide.update(cx, |guide, cx| guide.unlink(&folder, cx))
-                })
-                .icon(Glyph::Folder, None)
-                .accessory(move |_| div().text_color(muted).child("Unlink").into_any_element())
-                .into()
-            })
-            .collect::<Vec<_>>();
-        let link = {
-            let guide = guide.clone();
-            MenuItem::new("Link Folder…", move |_, cx| {
-                guide.update(cx, |guide, cx| guide.pick_folder(cx))
-            })
-        };
-        let mut sections = Vec::new();
-        if !rows.is_empty() {
-            sections.push(MenuSection::titled("Linked folders", rows));
-        }
-        sections.push(MenuSection::new(vec![link.into()]));
-        sections
-    })
-    .anchor(Corner::TopRight)
-    .min_width(260.)
-    .into_any_element()
+    tag(button, || "guide-linked").into_any_element()
 }
 
 pub fn overview_bar(guide: &Entity<GuideSession>, tokens: &Theme, cx: &App) -> Stateful<gpui::Div> {
@@ -112,7 +80,7 @@ pub fn overview_bar(guide: &Entity<GuideSession>, tokens: &Theme, cx: &App) -> S
                 .text_color(tokens.ui.muted)
                 .child(SharedString::from(written)),
         )
-        .child(linked_menu(guide, tokens, cx))
+        .child(linked_button(guide, cx))
         .child(tag(
             Button::new("guide-rewrite")
                 .icon(Glyph::Sparkles, 12.)

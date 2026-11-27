@@ -23,9 +23,8 @@ fn start_review(cx: &mut VisualTestContext) {
     click(cx, "review:start");
 }
 
-/// The gap between the two comparison menus, which the toolbar closes to make room for the pill.
-fn comparison_gap(cx: &mut VisualTestContext) -> Pixels {
-    bounds(cx, "comparison-base").left() - bounds(cx, "comparison-branch").right()
+fn comparison_width(cx: &mut VisualTestContext) -> Pixels {
+    bounds(cx, "comparison-label").size.width
 }
 
 #[gpui::test]
@@ -34,20 +33,20 @@ fn the_toolbar_makes_room_while_a_review_runs_and_while_its_result_shows(app: &m
     fake.review_with(&canned_review());
     fake.hold();
     let (_dir, cx) = open(app);
-    let roomy = comparison_gap(cx);
+    let roomy = comparison_width(cx);
 
     start_review(cx);
     fake.wait_for_launches(cx, 1);
     wait_until_shows(cx, "pill:working:Review");
-    assert!(comparison_gap(cx) < roomy, "the working pill gets room");
+    assert!(comparison_width(cx) < roomy, "the working pill gets room");
 
     fake.finish();
     wait_until_shows(cx, "review:done");
-    assert!(comparison_gap(cx) < roomy, "the result gets room");
+    assert!(comparison_width(cx) < roomy, "the result gets room");
 
     advance_clock(cx, RESULT_SECONDS + 1);
     assert_eq!(
-        comparison_gap(cx),
+        comparison_width(cx),
         roomy,
         "the result is gone, so the room is given back"
     );
@@ -59,16 +58,16 @@ fn command_period_stops_a_running_review_and_gives_the_room_back(app: &mut TestA
     fake.review_with(&canned_review());
     fake.hold();
     let (_dir, cx) = open(app);
-    let roomy = comparison_gap(cx);
+    let roomy = comparison_width(cx);
 
     start_review(cx);
     fake.wait_for_launches(cx, 1);
     wait_until_shows(cx, "pill:working:Review");
-    assert!(comparison_gap(cx) < roomy);
+    assert!(comparison_width(cx) < roomy);
 
     press(cx, "cmd-.");
     wait_until_shows(cx, "claude:status:Review stopped");
-    assert_eq!(comparison_gap(cx), roomy);
+    assert_eq!(comparison_width(cx), roomy);
 }
 
 #[gpui::test]

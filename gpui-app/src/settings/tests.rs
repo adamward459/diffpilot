@@ -604,6 +604,11 @@ async fn the_general_and_diff_switches_write_their_settings(cx: &mut TestAppCont
     rig.click(cx, "open-last");
     assert!(!rig.settings.open_last_repository());
 
+    rig.click(cx, "toc:Claude");
+    assert!(rig.settings.ask_before_stopping_runs());
+    rig.click(cx, "ask-before-stopping");
+    assert!(!rig.settings.ask_before_stopping_runs());
+
     rig.click(cx, "toc:Diff");
     assert!(!rig.settings.wrap_lines());
     rig.click(cx, "wrap-lines");

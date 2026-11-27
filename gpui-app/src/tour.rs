@@ -37,7 +37,7 @@ impl Stop {
         match self {
             Stop::Folder => "Pick the Git folder you want to review. Add more folders and switch between them here.",
             Stop::Comparison => {
-                "Choose a branch and what it is compared to. For example, compare your branch to main, or look at staged changes only."
+                "This shows what you compare, like your branch against main. Click it to pick another branch or a pull request."
             }
             Stop::Sidebar => "Every changed file is listed here. Mark a file as viewed when you have read it.",
             Stop::Diff => {

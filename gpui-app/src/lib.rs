@@ -8,6 +8,7 @@ mod comparison_menu;
 pub mod diff_pane;
 mod folder_menu;
 pub mod folder_picker;
+mod folder_prs;
 mod format;
 pub mod guide;
 mod linked_folders;
@@ -20,6 +21,7 @@ pub mod runs;
 pub mod settings;
 mod sidebar;
 mod sidebar_rows;
+mod switch_alert;
 #[cfg(feature = "testing")]
 pub mod testing;
 pub mod tour;
