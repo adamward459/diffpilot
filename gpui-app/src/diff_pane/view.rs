@@ -11,7 +11,7 @@ use crate::diff_pane::preview::{self, ImageMode, PreviewCard, PreviewEvent};
 use crate::diff_pane::rows::{BlockId, BlockSlot, Notice, RowKind};
 use crate::diff_pane::selection::{Extent, Selection, Spot, column_line, word_at};
 use crate::diff_pane::stage_lines;
-use crate::diff_pane::state::{Geometry, PaneState};
+use crate::diff_pane::state::{Geometry, PaneState, ThumbDrag};
 use crate::guide::note::{NoteCard, NoteEvent};
 use crate::guide::text::CodeRef;
 use crate::review::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange};
@@ -29,7 +29,7 @@ use diffpilot_ui_kit::components::{
     status_badge, tag, viewed_toggle,
 };
 use gpui::{
-    AnyView, App, AppContext as _, ClickEvent, Context, Div, Entity, EventEmitter, FontWeight, Hsla,
+    AnyView, App, AppContext as _, ClickEvent, Context, DispatchPhase, Div, Entity, EventEmitter, FontWeight, Hsla,
     InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     ParentElement as _, Pixels, Render, ScrollWheelEvent, SharedString, Stateful, StatefulInteractiveElement as _,
     StyleRefinement, Styled as _, Subscription, Window, canvas, div, font, px,
@@ -43,6 +43,7 @@ use std::time::Instant;
 
 const MAX_RUNNING_HIGHLIGHTS: usize = 3;
 const KEY_CONTEXT: &str = "DiffPane";
+const SCROLL_LANE: f32 = 14.0;
 
 actions!(diff_pane, [CopySelection, ClearSelection]);
 
@@ -178,6 +179,8 @@ pub struct DiffPane {
     first_paint: FirstPaint,
     uncommitted: HashSet<String>,
     last_scroll: Option<Instant>,
+    lane_hovered: bool,
+    thumb_drag: Option<ThumbDrag>,
     line_menu: Option<LineMenu>,
     selection: Option<Selection>,
     confirming: bool,
@@ -244,6 +247,8 @@ impl DiffPane {
             first_paint: FirstPaint::Waiting,
             uncommitted: HashSet::new(),
             last_scroll: None,
+            lane_hovered: false,
+            thumb_drag: None,
             line_menu: None,
             selection: None,
             confirming: false,
@@ -1277,20 +1282,66 @@ impl DiffPane {
     fn thumb(&self, window: &mut Window) -> Option<Thumb> {
         const VISIBLE_SECONDS: f32 = 1.0;
         const FADE_SECONDS: f32 = 0.3;
-        let elapsed = self.last_scroll?.elapsed().as_secs_f32();
-        let max = self.state.max_scroll();
-        if elapsed >= VISIBLE_SECONDS || max <= 0.0 {
-            return None;
-        }
-        window.request_animation_frame();
-        let viewport = self.state.geometry().height;
-        let height = (viewport * viewport / self.state.tops.total()).clamp(32.0, viewport);
-        let faded = (VISIBLE_SECONDS - elapsed) / FADE_SECONDS;
+        let thumb = self.state.thumb()?;
+        let held = self.lane_hovered || self.thumb_drag.is_some();
+        let faded = if held {
+            1.0
+        } else {
+            let elapsed = self.last_scroll?.elapsed().as_secs_f32();
+            if elapsed >= VISIBLE_SECONDS {
+                return None;
+            }
+            window.request_animation_frame();
+            (VISIBLE_SECONDS - elapsed) / FADE_SECONDS
+        };
         Some(Thumb {
-            top: self.state.scroll() / max * (viewport - height),
-            height,
+            top: thumb.top,
+            height: thumb.height,
             opacity: 0.6 * faded.min(1.0),
+            wide: held,
         })
+    }
+
+    fn press_lane(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        self.thumb_drag = self.state.press_thumb(f32::from(event.position.y - self.origin.1));
+        self.sync(cx);
+    }
+
+    fn drag_thumb(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let Some(drag) = self.thumb_drag else { return };
+        self.state.drag_thumb(drag, f32::from(event.position.y - self.origin.1));
+        self.sync(cx);
+    }
+
+    fn release_thumb(&mut self, cx: &mut Context<Self>) {
+        if self.thumb_drag.take().is_some() {
+            self.last_scroll = Some(Instant::now());
+            cx.notify();
+        }
+    }
+
+    fn scroll_lane(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        div()
+            .id("scroll-lane")
+            .absolute()
+            .top_0()
+            .right_0()
+            .h_full()
+            .w(px(SCROLL_LANE))
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                this.lane_hovered = *hovered;
+                if !hovered {
+                    this.last_scroll = Some(Instant::now());
+                }
+                cx.notify();
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    this.press_lane(event, cx);
+                }),
+            )
     }
 
     fn finish_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1804,6 +1855,20 @@ impl Render for DiffPane {
                 move |bounds, window, cx| pane.update(cx, |pane, cx| pane.prepare_lines(bounds, window, cx)),
                 move |bounds, frame, window, cx: &mut App| {
                     lines::paint(&frame, bounds, window, cx);
+                    if painter.read(cx).thumb_drag.is_some() {
+                        let pane = painter.clone();
+                        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                            if phase == DispatchPhase::Bubble {
+                                pane.update(cx, |pane, cx| pane.drag_thumb(event, cx));
+                            }
+                        });
+                        let pane = painter.clone();
+                        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                            if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
+                                pane.update(cx, |pane, cx| pane.release_thumb(cx));
+                            }
+                        });
+                    }
                     painter.update(cx, |pane, cx| pane.finish_frame(window, cx));
                 },
             )
@@ -1881,6 +1946,9 @@ impl Render for DiffPane {
         }
         if let Some(sticky) = self.state.position().and_then(|position| position.sticky) {
             root = root.child(self.sticky(sticky, cx));
+        }
+        if self.state.max_scroll() > 0.0 {
+            root = root.child(self.scroll_lane(cx));
         }
         if let Some(hud) = hud_layer {
             root = root.child(hud);
