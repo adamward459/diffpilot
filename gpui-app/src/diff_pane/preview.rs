@@ -1,4 +1,5 @@
 use crate::diff_pane::markdown::{self, Block, Rich, Style};
+use crate::diff_pane::text_select::{Pieces, TextSelection};
 use diffpilot_core::changes::FileStatus;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::FileDiff;
@@ -9,12 +10,12 @@ use diffpilot_ui_kit::components::{label_switch, tag};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AvailableSpace, Context, Div, FontStyle, FontWeight, Hsla, Image, ImageFormat, IntoElement,
-    ObjectFit, ParentElement as _, Render, Size, StrikethroughStyle, Styled as _, StyledImage as _, StyledText,
-    TextRun, UnderlineStyle, Window, div, font, img, px,
+    ObjectFit, ParentElement as _, Render, Size, StrikethroughStyle, Styled as _, StyledImage as _, TextRun,
+    UnderlineStyle, Window, div, font, img, px,
 };
 use gpui::{
-    AppContext as _, Bounds, CursorStyle, DragMoveEvent, EventEmitter, InteractiveElement as _, MouseButton, Pixels,
-    Point, StatefulInteractiveElement as _, canvas,
+    AppContext as _, Bounds, CursorStyle, DispatchPhase, DragMoveEvent, EventEmitter, InteractiveElement as _,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, StatefulInteractiveElement as _, canvas,
 };
 use gpui_component::ActiveTheme;
 use std::cell::Cell;
@@ -296,6 +297,7 @@ struct Controls {
     track: Rc<Cell<Option<Bounds<Pixels>>>>,
     on_mode: OnMode,
     on_pick: OnPick,
+    text: Pieces,
 }
 
 impl Controls {
@@ -307,6 +309,7 @@ impl Controls {
             track: Rc::default(),
             on_mode: Rc::new(|_, _, _| {}),
             on_pick: Rc::new(|_, _, _| {}),
+            text: Pieces::default(),
         }
     }
 }
@@ -318,6 +321,8 @@ pub struct PreviewCard {
     mode: ImageMode,
     position: f32,
     track: Rc<Cell<Option<Bounds<Pixels>>>>,
+    selection: Option<TextSelection>,
+    text: Pieces,
 }
 
 impl EventEmitter<PreviewEvent> for PreviewCard {}
@@ -331,7 +336,63 @@ impl PreviewCard {
             mode: ImageMode::default(),
             position: 0.5,
             track: Rc::default(),
+            selection: None,
+            text: Pieces::default(),
         }
+    }
+
+    pub fn selected_text(&self) -> Option<String> {
+        let selection = self.selection.filter(|selection| !selection.is_empty())?;
+        Some(self.text.selected_text(selection))
+    }
+
+    pub fn is_selecting(&self) -> bool {
+        self.selection.is_some_and(|selection| selection.dragging)
+    }
+
+    pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
+        if self.selection.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    fn press(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        let Some(at) = self.text.spot_at(event.position) else {
+            return;
+        };
+        self.selection = Some(match (event.click_count, self.selection) {
+            (1, Some(selection)) if event.modifiers.shift => TextSelection {
+                head: at,
+                dragging: true,
+                ..selection
+            },
+            (1, _) => TextSelection::caret(at),
+            (clicks, _) => self.text.expand(at, clicks),
+        });
+        cx.notify();
+    }
+
+    fn drag(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(selection) = self.selection.as_mut().filter(|selection| selection.dragging) else {
+            return;
+        };
+        if let Some(at) = self.text.spot_at(position)
+            && at != selection.head
+        {
+            selection.head = at;
+            cx.notify();
+        }
+    }
+
+    fn release(&mut self, cx: &mut Context<Self>) {
+        let Some(selection) = self.selection.as_mut().filter(|selection| selection.dragging) else {
+            return;
+        };
+        selection.dragging = false;
+        if selection.is_empty() {
+            self.selection = None;
+        }
+        cx.notify();
     }
 
     pub fn loaded(&self) -> Arc<Loaded> {
@@ -370,6 +431,10 @@ impl Render for PreviewCard {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let this = cx.entity();
         let picker = this.clone();
+        let theme = Theme::of(cx);
+        self.text = Pieces::new(self.selection, theme.accent.opacity(0.40));
+        let dragging = self.selection.is_some_and(|selection| selection.dragging);
+        let watcher = this.downgrade();
         let controls = Controls {
             path: self.path.clone(),
             mode: self.mode,
@@ -377,8 +442,38 @@ impl Render for PreviewCard {
             track: self.track.clone(),
             on_mode: Rc::new(move |index, _, cx| this.update(cx, |card, cx| card.set_mode(ImageMode::ALL[index], cx))),
             on_pick: Rc::new(move |at, _, cx| picker.update(cx, |card, cx| card.pick(at, cx))),
+            text: self.text.clone(),
         };
-        card(&self.loaded, &Theme::of(cx), self.width, &controls, cx)
+        let pressed = watcher.clone();
+        card(&self.loaded, &theme, self.width, &controls, cx)
+            .id("preview-card")
+            .relative()
+            .on_mouse_down(MouseButton::Left, move |event, _, cx| {
+                pressed.update(cx, |card, cx| card.press(event, cx)).ok();
+            })
+            .when(dragging, |card| {
+                card.child(
+                    canvas(
+                        |_, _, _| {},
+                        move |_, _, window, _| {
+                            let moved = watcher.clone();
+                            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                                if phase == DispatchPhase::Bubble {
+                                    moved.update(cx, |card, cx| card.drag(event.position, cx)).ok();
+                                }
+                            });
+                            let released = watcher.clone();
+                            window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
+                                if phase == DispatchPhase::Bubble {
+                                    released.update(cx, |card, cx| card.release(cx)).ok();
+                                }
+                            });
+                        },
+                    )
+                    .absolute()
+                    .size_0(),
+                )
+            })
     }
 }
 
@@ -411,7 +506,7 @@ fn pair(loaded: &Loaded) -> Option<(&ImageBody, &ImageBody)> {
 fn card(loaded: &Loaded, theme: &Theme, width: f32, controls: &Controls, cx: &App) -> Div {
     let frame = div().w(px(width)).px(px(PAD_X)).py(px(PAD_Y));
     let Some((old, new)) = pair(loaded) else {
-        return two_up(frame, loaded, theme, width, cx);
+        return two_up(frame, loaded, theme, width, controls, cx);
     };
     let path = controls.path.clone();
     let switch = div().flex().justify_center().pb(px(MODE_GAP)).child(label_switch(
@@ -424,21 +519,21 @@ fn card(loaded: &Loaded, theme: &Theme, width: f32, controls: &Controls, cx: &Ap
     ));
     let frame = frame.flex().flex_col().child(switch);
     match controls.mode {
-        ImageMode::TwoUp => two_up(frame, loaded, theme, width, cx),
+        ImageMode::TwoUp => two_up(frame, loaded, theme, width, controls, cx),
         ImageMode::Swipe => frame.child(stacked(old, new, theme, width, controls, true)),
         ImageMode::Onion => frame.child(stacked(old, new, theme, width, controls, false)),
     }
 }
 
-fn two_up(frame: Div, loaded: &Loaded, theme: &Theme, width: f32, cx: &App) -> Div {
+fn two_up(frame: Div, loaded: &Loaded, theme: &Theme, width: f32, controls: &Controls, cx: &App) -> Div {
     let column = column_width(width, loaded.sides.len());
     frame.child(
-        div()
-            .flex()
-            .flex_row()
-            .items_start()
-            .gap(px(GAP))
-            .children(loaded.sides.iter().map(|side| side_view(side, theme, column, cx))),
+        div().flex().flex_row().items_start().gap(px(GAP)).children(
+            loaded
+                .sides
+                .iter()
+                .map(|side| side_view(side, theme, column, controls, cx)),
+        ),
     )
 }
 
@@ -598,7 +693,7 @@ fn stacked(old: &ImageBody, new: &ImageBody, theme: &Theme, width: f32, controls
         )
 }
 
-fn side_view(side: &LoadedSide, theme: &Theme, column: f32, cx: &App) -> Div {
+fn side_view(side: &LoadedSide, theme: &Theme, column: f32, controls: &Controls, cx: &App) -> Div {
     let tint = match side.tone {
         Tone::Neutral => theme.diff.muted,
         Tone::Added => theme.success,
@@ -618,7 +713,7 @@ fn side_view(side: &LoadedSide, theme: &Theme, column: f32, cx: &App) -> Div {
         Body::Image(image) => shell
             .child(image_box(image, theme, column))
             .child(image_meta(image, theme)),
-        Body::Markdown(blocks) => shell.child(document(blocks, theme, cx)),
+        Body::Markdown(blocks) => shell.child(document(blocks, theme, &controls.text, cx).cursor(CursorStyle::IBeam)),
     }
 }
 
@@ -687,12 +782,14 @@ fn image_meta(image: &ImageBody, theme: &Theme) -> Div {
 struct Fonts {
     base: gpui::Font,
     mono: gpui::Font,
+    text: Pieces,
 }
 
-fn document(blocks: &[(Change, Block)], theme: &Theme, cx: &App) -> Div {
+fn document(blocks: &[(Change, Block)], theme: &Theme, text: &Pieces, cx: &App) -> Div {
     let fonts = Fonts {
         base: font(cx.theme().font_family.clone()),
         mono: font(cx.theme().mono_font_family.clone()),
+        text: text.clone(),
     };
     let marked = blocks.iter().any(|(change, _)| *change != Change::Same);
     div()
@@ -741,23 +838,34 @@ fn block_view(block: &Block, theme: &Theme, fonts: &Fonts) -> AnyElement {
             rich(text, theme, fonts, size, line, color, FontWeight::SEMIBOLD)
         }
         Block::Paragraph(text) => rich(text, theme, fonts, TEXT, LINE, theme.diff.text, FontWeight::NORMAL),
-        Block::Code(code) => div()
-            .w_full()
-            .px(px(10.0))
-            .py(px(8.0))
-            .rounded(px(6.0))
-            .bg(theme.diff.text.opacity(0.06))
-            .overflow_hidden()
-            .font(fonts.mono.clone())
-            .text_size(px(CODE))
-            .text_color(theme.diff.text)
-            .children(code.lines().map(|line| {
-                div()
-                    .h(px(CODE_LINE))
-                    .whitespace_nowrap()
-                    .child(gpui::SharedString::from(line.to_string()))
-            }))
-            .into_any_element(),
+        Block::Code(code) => {
+            let code = code.trim_end_matches('\n').to_string();
+            let runs = vec![TextRun {
+                len: code.len(),
+                font: fonts.mono.clone(),
+                color: theme.diff.text,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            }];
+            fonts
+                .text
+                .text(
+                    div()
+                        .w_full()
+                        .px(px(10.0))
+                        .py(px(8.0))
+                        .rounded(px(6.0))
+                        .bg(theme.diff.text.opacity(0.06))
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_size(px(CODE))
+                        .line_height(px(CODE_LINE)),
+                    code.into(),
+                    runs,
+                )
+                .into_any_element()
+        }
         Block::Quote(blocks) => stack(blocks, theme, fonts)
             .pl(px(12.0))
             .border_l_2()
@@ -858,8 +966,9 @@ fn rich(
         .iter()
         .map(|(range, style)| run(range.len(), *style, theme, fonts, color, weight))
         .collect();
-    frame
-        .child(StyledText::new(text.text.clone()).with_runs(runs))
+    fonts
+        .text
+        .text(frame, text.text.clone().into(), runs)
         .into_any_element()
 }
 

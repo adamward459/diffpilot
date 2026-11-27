@@ -409,6 +409,7 @@ fn bounds_of(cx: &mut VisualTestContext, selector: &str) -> Option<Bounds<Pixels
 
 // gpui never clears debug bounds, so a tag that rendered once stays true in that window.
 // Assert on a state tag that is new to the window.
+/// gpui 0.2.2 never clears a frame's debug bounds, so `!shows` cannot prove that a tag drawn earlier is gone.
 pub fn shows(cx: &mut VisualTestContext, selector: &str) -> bool {
     bounds_of(cx, selector).is_some()
 }
@@ -530,6 +531,18 @@ pub fn window_size(cx: &mut VisualTestContext) -> gpui::Size<Pixels> {
 pub fn drag_below(cx: &mut VisualTestContext, selector: &str, from: (f32, f32), to: (f32, f32)) {
     let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
     let (from, to) = (below(bounds, from), below(bounds, to));
+    cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::default());
+    cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
+    cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    draw(cx);
+}
+
+/// Presses just inside the tagged element's top-left corner and releases just inside its bottom-right corner.
+pub fn drag_across(cx: &mut VisualTestContext, selector: &str) {
+    let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
+    let inset = gpui::point(gpui::px(2.), gpui::px(2.));
+    let (from, to) = (bounds.origin + inset, bounds.bottom_right() - inset);
+    cx.simulate_mouse_move(from, None, Modifiers::default());
     cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::default());
     cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
     cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());

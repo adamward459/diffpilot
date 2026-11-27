@@ -1,4 +1,6 @@
-use diffpilot::testing::{center_x, click, drag_by, open_preview, shows, wait_until_shows};
+use diffpilot::testing::{
+    center_x, click, clipboard, drag_across, drag_by, open_preview, press, shows, wait_until_shows,
+};
 use gpui::TestAppContext;
 
 #[gpui::test]
@@ -61,4 +63,16 @@ fn the_image_sliders_follow_a_drag_that_leaves_them(app: &mut TestAppContext) {
         (center_x(cx, knob) - (start - 8.0)).abs() < 1.5,
         "the swipe knob stays under the pointer after it leaves the image"
     );
+}
+
+#[gpui::test]
+fn dragging_across_a_markdown_preview_copies_its_text(app: &mut TestAppContext) {
+    let (_opened, cx) = open_preview(app);
+    wait_until_shows(cx, "pane:hunk:notes.md:0");
+    click(cx, "pane:preview-switch:notes.md:Preview");
+    wait_until_shows(cx, "pane:preview-card:notes.md");
+
+    drag_across(cx, "pane:preview-card:notes.md");
+    press(cx, "cmd-c");
+    assert_eq!(clipboard(cx).as_deref(), Some("Notes\nSome bold words.\none\ntwo"));
 }

@@ -694,8 +694,18 @@ impl DiffPane {
         let cleared = self.selection.take().is_some();
         self.confirming = false;
         self.stage_error = None;
-        self.selection = self.selection_at(event.click_count, x, y);
-        if self.selection.is_some() {
+        let mut previewing = false;
+        for card in self.preview_cards() {
+            if card.read(cx).is_selecting() {
+                previewing = true;
+            } else {
+                card.update(cx, |card, cx| card.clear_selection(cx));
+            }
+        }
+        if !previewing {
+            self.selection = self.selection_at(event.click_count, x, y);
+        }
+        if previewing || self.selection.is_some() {
             window.focus(&self.focus);
         }
         if cleared || self.selection.is_some() {
@@ -800,7 +810,15 @@ impl DiffPane {
             .filter(|selection| !selection.dragging && !selection.is_caret())
         {
             cx.write_to_clipboard(ClipboardItem::new_string(self.selection_text(selection)));
+            return;
         }
+        if let Some(text) = self.preview_cards().find_map(|card| card.read(cx).selected_text()) {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        }
+    }
+
+    fn preview_cards(&self) -> impl Iterator<Item = Entity<PreviewCard>> + '_ {
+        self.previews.values().filter_map(|entry| entry.card.clone())
     }
 
     fn act_on_selection(&mut self, action: Action, cx: &mut Context<Self>) {
@@ -1809,6 +1827,9 @@ impl Render for DiffPane {
             .child(div().size_0().track_focus(&self.focus))
             .on_action(cx.listener(|this, _: &CopySelection, _, cx| this.copy_selection(cx)))
             .on_action(cx.listener(|this, _: &ClearSelection, _, cx| {
+                for card in this.preview_cards().collect::<Vec<_>>() {
+                    card.update(cx, |card, cx| card.clear_selection(cx));
+                }
                 if this.selection.take().is_some() {
                     this.confirming = false;
                     this.stage_error = None;

@@ -8,6 +8,7 @@ pub mod rows;
 mod selection;
 mod stage_lines;
 pub mod state;
+mod text_select;
 mod view;
 mod word;
 
