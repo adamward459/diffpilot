@@ -27,6 +27,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ~/.cargo/build is the build dir set in .cargo/config.toml. Every release changes Cargo.lock,
+      # so the exact key misses and restore-keys picks the newest cache for the same toolchain.
+      - name: Cache the Cargo downloads and build dir
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.cargo/build
+          key: release-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            release-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}-
+
       - name: Install the toolchain and both macOS targets
         run: |
           rustup toolchain install
