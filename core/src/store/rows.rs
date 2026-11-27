@@ -267,6 +267,18 @@ impl Store {
         Ok(value.map(|value| Written { value, revision }))
     }
 
+    /// Changes the text of a comment that is not streaming.
+    pub fn update_comment(&self, thread: ThreadId, comment: u32, body: &str) -> Result<Option<Written<ReviewThread>>> {
+        self.change(thread, |conn| {
+            conn.execute(
+                "UPDATE comments SET body = ?3 WHERE thread_id = ?1 AND seq = ?2 AND streaming = 0",
+                (thread.0, comment, body),
+            )?;
+            conn.execute("UPDATE threads SET updated_at = ?2 WHERE id = ?1", (thread.0, now_ms()))
+                .map(drop)
+        })
+    }
+
     pub fn delete_thread(&self, thread: ThreadId) -> Result<Option<i64>> {
         let mut conn = self.lock();
         let tx = conn.transaction()?;

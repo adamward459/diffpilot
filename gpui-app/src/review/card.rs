@@ -1,7 +1,7 @@
 use crate::review::markup::{Markup, SpanKind, pending_mention};
 use crate::review::session::{ReviewEvent, ReviewSession, ThreadChange};
 use diffpilot_core::threads::{
-    CLAUDE_NAME, ReviewThread, ThreadAnchor, ThreadComment, ThreadId, ThreadStatus, mentions_claude,
+    CLAUDE_NAME, CommentSource, ReviewThread, ThreadAnchor, ThreadComment, ThreadId, ThreadStatus, mentions_claude,
 };
 use diffpilot_ui_kit::components::{Button, Look, avatar, card_shell, icon_button, severity_badge, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
@@ -105,6 +105,7 @@ pub struct ThreadCard {
     id: ThreadId,
     collapsed: bool,
     replying: bool,
+    editing: Option<u32>,
     composer: Option<Composer>,
     key: String,
     markup: RefCell<HashMap<u32, CachedMarkup>>,
@@ -213,6 +214,7 @@ impl ThreadCard {
             id,
             collapsed: nit,
             replying: false,
+            editing: None,
             composer: None,
             key: String::new(),
             markup: RefCell::default(),
@@ -335,7 +337,11 @@ impl ThreadCard {
 
     fn composer_height(&self, thread: &ReviewThread, _cx: &App) -> f32 {
         let (rows, actions, suggest) = match &self.composer {
-            Some(c) => (c.rows, c.has_text || thread.comments.is_empty(), c.suggest),
+            Some(c) => (
+                c.rows,
+                c.has_text || thread.comments.is_empty() || self.editing.is_some(),
+                c.suggest,
+            ),
             None => (1, thread.comments.is_empty(), false),
         };
         let input = rows as f32 * m::INPUT_ROW + m::INPUT_PAD;
@@ -412,11 +418,45 @@ impl ThreadCard {
             return;
         }
         let id = self.id;
-        self.session.update(cx, |session, cx| session.post(id, &text, cx));
-        composer.input.update(cx, |input, cx| input.set_value("", window, cx));
+        match self.editing.take() {
+            Some(comment) => self
+                .session
+                .update(cx, |session, cx| session.edit_comment(id, comment, &text, cx)),
+            None => self.session.update(cx, |session, cx| session.post(id, &text, cx)),
+        }
+        self.set_composer_text("", window, cx);
+    }
+
+    fn set_composer_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(input) = self.composer.as_ref().map(|composer| composer.input.clone()) else {
+            return;
+        };
+        input.update(cx, |input, cx| input.set_value(text.to_string(), window, cx));
+        self.input_changed(&input, cx);
+        cx.emit(CardEvent::Resized);
+    }
+
+    fn start_edit(&mut self, comment: &ThreadComment, window: &mut Window, cx: &mut Context<Self>) {
+        self.editing = Some(comment.id);
+        self.replying = true;
+        self.ensure_composer(window, cx);
+        self.set_composer_text(&comment.body, window, cx);
+        if let Some(composer) = &self.composer {
+            composer.input.update(cx, |input, cx| input.focus(window, cx));
+        }
+        cx.notify();
+    }
+
+    fn cancel_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.editing = None;
+        self.set_composer_text("", window, cx);
+        cx.notify();
     }
 
     fn send_to_claude(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.editing.is_some() {
+            return self.submit(window, cx);
+        }
         let Some(composer) = &self.composer else { return };
         let text = composer.input.read(cx).value();
         if text.trim().is_empty() {
@@ -479,6 +519,7 @@ impl ThreadCard {
         let input = composer.input.read(cx);
         if !is_draft && !input.focus_handle(cx).is_focused(window) && input.value().is_empty() {
             self.composer = None;
+            self.editing = None;
         }
     }
 
@@ -562,7 +603,7 @@ impl ThreadCard {
         )
     }
 
-    fn comment(&self, comment: &ThreadComment, first: bool, fonts: &Fonts) -> AnyElement {
+    fn comment(&self, comment: &ThreadComment, first: bool, fonts: &Fonts, cx: &Context<Self>) -> AnyElement {
         let theme = fonts.theme;
         tag(h_flex(), || comment_tag(comment))
             .items_start()
@@ -582,20 +623,46 @@ impl ThreadCard {
                     .flex_1()
                     .min_w_0()
                     .child(
-                        div()
+                        h_flex()
                             .h(px(m::NAME_LINE))
+                            .gap_2()
+                            .items_center()
                             .text_size(px(12.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme.ui.text)
-                            .child(comment.author.clone()),
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(theme.ui.text)
+                                    .child(comment.author.clone()),
+                            )
+                            .when(is_editable(comment), |row| {
+                                row.child(self.edit_link(comment, theme, cx))
+                            }),
                     )
                     .child(div().mt(px(m::NAME_GAP)).child(fonts.text(&self.markup_of(comment)))),
             )
             .into_any_element()
     }
 
+    fn edit_link(&self, comment: &ThreadComment, theme: Theme, cx: &Context<Self>) -> AnyElement {
+        let editing = self.editing == Some(comment.id);
+        let target = comment.clone();
+        tag(div().id(("edit", comment.id as usize)), || {
+            format!("comment:edit:{}", comment.body)
+        })
+        .text_size(px(11.))
+        .text_color(if editing { theme.ui.claude } else { theme.ui.muted })
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _, window, cx| this.start_edit(&target, window, cx)),
+        )
+        .child(if editing { "Editing" } else { "Edit" })
+        .into_any_element()
+    }
+
     fn composer_view(&self, thread: &ReviewThread, theme: Theme, window: &Window, cx: &Context<Self>) -> AnyElement {
         let draft = thread.comments.is_empty();
+        let editing = self.editing.is_some();
         let (rows, has_text, mention, suggest) = self
             .composer
             .as_ref()
@@ -661,14 +728,14 @@ impl ThreadCard {
                         .child(div().text_color(theme.ui.muted).child("Ask Claude in this thread")),
                 )
             })
-            .when(has_text || draft, |col| {
+            .when(has_text || draft || editing, |col| {
                 col.child(
                     h_flex()
                         .mt(px(m::ACTIONS_GAP))
                         .h(px(m::ACTIONS))
                         .gap_2()
                         .items_center()
-                        .when(mention, |row| {
+                        .when(mention && !editing, |row| {
                             row.child(
                                 h_flex()
                                     .gap_1()
@@ -690,7 +757,13 @@ impl ThreadCard {
                                     .on_click(cx.listener(|this, _, _, cx| this.delete(cx))),
                             )
                         })
-                        .when(has_text && !mention, |row| {
+                        .when(editing, |row| {
+                            row.child(
+                                self.button("Cancel", "cancel-edit")
+                                    .on_click(cx.listener(|this, _, window, cx| this.cancel_edit(window, cx))),
+                            )
+                        })
+                        .when(has_text && !mention && !editing, |row| {
                             row.child(
                                 self.button("Send to Claude", "send")
                                     .look(Look::Claude)
@@ -701,10 +774,19 @@ impl ThreadCard {
                             )
                         })
                         .child(
-                            self.button(if draft { "Comment" } else { "Reply" }, "post")
-                                .look(Look::Primary)
-                                .hint("⌘↩")
-                                .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
+                            self.button(
+                                if editing {
+                                    "Save"
+                                } else if draft {
+                                    "Comment"
+                                } else {
+                                    "Reply"
+                                },
+                                "post",
+                            )
+                            .look(Look::Primary)
+                            .hint("⌘↩")
+                            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
                         ),
                 )
             })
@@ -812,7 +894,13 @@ impl ThreadCard {
                         )
                         .children(place.map(|place| format!("·  {place}"))),
                 )
-                .children(thread.comments.iter().skip(1).map(|c| self.comment(c, false, fonts)))
+                .children(
+                    thread
+                        .comments
+                        .iter()
+                        .skip(1)
+                        .map(|c| self.comment(c, false, fonts, cx)),
+                )
                 .children(self.status_band(thread, theme, cx))
                 .when(self.replying, |col| {
                     col.child(self.composer_view(thread, theme, window, cx))
@@ -876,7 +964,13 @@ impl ThreadCard {
                         |c| fonts.text(&self.markup_of(c)),
                     )),
             )
-            .children(thread.comments.iter().skip(1).map(|c| self.comment(c, false, fonts)))
+            .children(
+                thread
+                    .comments
+                    .iter()
+                    .skip(1)
+                    .map(|c| self.comment(c, false, fonts, cx)),
+            )
             .children(self.status_band(thread, theme, cx))
             .when(self.replying, |col| {
                 col.child(self.composer_view(thread, theme, window, cx))
@@ -948,12 +1042,16 @@ impl ThreadCard {
                     .comments
                     .iter()
                     .enumerate()
-                    .map(|(index, c)| self.comment(c, index == 0, fonts)),
+                    .map(|(index, c)| self.comment(c, index == 0, fonts, cx)),
             )
             .children(self.status_band(thread, theme, cx))
             .child(self.composer_view(thread, theme, window, cx))
             .into_any_element()
     }
+}
+
+fn is_editable(comment: &ThreadComment) -> bool {
+    comment.source == CommentSource::User && !comment.is_streaming
 }
 
 fn comment_tag(comment: &ThreadComment) -> String {

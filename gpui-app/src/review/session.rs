@@ -556,6 +556,14 @@ impl ReviewSession {
         }
     }
 
+    /// Blank text is ignored, so an edit cannot empty a comment.
+    pub fn edit_comment(&mut self, id: ThreadId, comment: u32, text: &str, cx: &mut Context<Self>) {
+        let text = text.trim();
+        if !text.is_empty() && self.store.edit(id, comment, text).is_some() {
+            self.thread_updated(id, cx);
+        }
+    }
+
     pub fn ask_claude(&mut self, id: ThreadId, cx: &mut Context<Self>) {
         let Some(thread) = self.store.begin_claude_reply(id) else {
             return;

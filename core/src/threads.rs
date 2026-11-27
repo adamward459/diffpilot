@@ -276,6 +276,20 @@ impl ThreadStore {
         self.adopt(written)
     }
 
+    /// Only the reviewer's own comments can be edited.
+    pub fn edit(&mut self, id: ThreadId, comment: u32, text: &str) -> Option<ReviewThread> {
+        let own = self
+            .get(id)?
+            .comments
+            .iter()
+            .any(|c| c.id == comment && c.source == CommentSource::User && !c.is_streaming);
+        if !own {
+            return None;
+        }
+        let written = self.store.update_comment(id, comment, text);
+        self.adopt(written)
+    }
+
     pub fn begin_claude_reply(&mut self, id: ThreadId) -> Option<ReviewThread> {
         if self.get(id)?.comments.iter().any(|comment| comment.is_streaming) {
             return None;
@@ -473,6 +487,18 @@ mod tests {
         assert_eq!(authors, ["You"]);
         assert_eq!(bodies, ["hi"]);
         assert_eq!(store.post(ThreadId(99), "x"), None);
+    }
+
+    #[test]
+    fn edit_changes_the_reviewers_comment_only() {
+        let mut store = ThreadStore::new();
+        let id = store.add_finding(anchor(), None, "Claude found this.").id;
+        store.post(id, "Frist note");
+        let thread = store.edit(id, 2, "First note").unwrap();
+        assert_eq!(thread.comments[1].body, "First note");
+        assert_eq!(store.edit(id, 1, "Not mine"), None);
+        assert_eq!(store.get(id).unwrap().comments[0].body, "Claude found this.");
+        assert_eq!(store.edit(ThreadId(99), 1, "x"), None);
     }
 
     #[test]
