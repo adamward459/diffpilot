@@ -70,13 +70,18 @@ fn generate_fills_the_message_from_claude_and_the_user_commits_it(app: &mut Test
     claude.wait_for_launches(cx, 1);
     assert!(claude.prompt().contains("src/staged.rs"), "the prompt carries the diff");
     claude.finish();
-    wait_until_shows(cx, "commit:generate");
-    press(cx, "cmd-a");
-    press(cx, "cmd-c");
-    assert_eq!(
-        clipboard(cx).as_deref(),
-        Some("Add the fixture files\n\nThey cover edits and new files.")
-    );
+    // `commit:generate` was on screen before the run, so it cannot tell when the message has arrived.
+    let message = "Add the fixture files\n\nThey cover edits and new files.";
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while clipboard(cx).as_deref() != Some(message) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the message never reached the input"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        press(cx, "cmd-a");
+        press(cx, "cmd-c");
+    }
 
     click(cx, "commit:submit");
     wait_until_shows(cx, "bottom-bar:commit:disabled");
