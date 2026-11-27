@@ -202,15 +202,13 @@ fn write_guide_submits_a_guide_run_and_reports_a_run_that_wrote_nothing(app: &mu
 }
 
 #[gpui::test]
-fn the_overview_bar_button_opens_the_linked_folders_popover(app: &mut TestAppContext) {
+fn the_overview_bar_has_no_link_button(app: &mut TestAppContext) {
     let (world, cx) = open(app, false);
     store_guide(&world, cx);
     show_guide(&world, cx);
     testing::draw(cx);
-    assert!(testing::shows(cx, "guide-linked"), "the overview bar has the button");
-
-    click(cx, "guide-linked");
-    assert!(testing::shows(cx, "linked-title"), "it opens the title bar popover");
+    assert!(testing::shows(cx, "guide-rewrite"), "the overview bar is drawn");
+    assert!(!testing::shows(cx, "guide-linked"), "linking lives in the title bar");
 }
 
 #[gpui::test]

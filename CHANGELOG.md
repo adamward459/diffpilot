@@ -22,10 +22,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 ### Changed
 
 - The folder name in the title bar no longer has the path under it. Hover the name to see the path. The linked folders and other changed folders now sit on a small second line, so they never run under the toolbar.
-- Adding a linked folder is simpler: type a path and press Enter, drop a folder on the field, or choose Choose…. Changes save as you edit. The Guide start card lists the linked folders as chips, with Edit….
+- Adding a linked folder is simpler: type a path and press Enter, drop a folder on the field, or choose Choose…. Changes save as you edit. The Guide start card lists the linked folders as chips.
 - The folder menu item Add Folder… is now called Open Folder…. Open Folder… and ⌘O open the sheet, not the system folder picker.
 - The title bar now shows what you compare as one label, like feature → main. Click it to open the Open Folder sheet on this folder and change the branches or pick a pull request.
-- The Linked button in the Guide overview bar now opens the same Linked Folders popover as the title bar.
+- Guide mode no longer has its own Link button. Link folders from the title bar. Rewrite shows a hint when the linked folders changed since the guide was written.
 - Every list and panel that scrolls shows a scrollbar while you scroll, like the diff: the Guide, the inspector, comments, settings, menus, checks, Claude's plan and log, and the Open Folder lists. Drag it to move fast.
 
 ### Fixed

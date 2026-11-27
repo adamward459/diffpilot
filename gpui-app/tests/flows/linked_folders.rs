@@ -125,7 +125,7 @@ fn a_missing_folder_can_be_located_or_removed(app: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn the_guide_card_shows_chips_and_edit_opens_the_popover(app: &mut TestAppContext) {
+fn the_guide_card_lists_linked_folders_without_a_link_button(app: &mut TestAppContext) {
     let (_alpha_dir, alpha) = fixture_named("alpha");
     let (_shared_dir, shared) = shared_folder();
     let alpha = alpha.canonicalize().expect("alpha");
@@ -134,21 +134,14 @@ fn the_guide_card_shows_chips_and_edit_opens_the_popover(app: &mut TestAppContex
     let cx = open_workspace(app, &alpha, settings.clone());
 
     press(cx, "cmd-2");
-    assert!(shows(cx, "guide-linked-none"), "no links says so");
-    click(cx, "guide-linked-edit");
-    assert!(shows(cx, "linked-title"), "Link… opens the popover");
+    assert!(shows(cx, "guide-write"), "the start card is drawn");
+    assert!(!shows(cx, "guide-linked-edit"), "linking lives in the title bar");
 
     settings.set_linked_folders(&alpha, vec![shared.clone(), gone.clone()]);
-    press(cx, "escape");
-    wait_for_motion(cx);
     let name = |path: &PathBuf| path.file_name().expect("name").to_string_lossy().into_owned();
     assert!(shows(cx, &format!("guide-linked-chip:{}", name(&shared))));
     assert!(shows(cx, &format!("guide-linked-missing:{}", name(&gone))));
-    click(cx, "guide-linked-edit");
-    assert!(
-        shows(cx, &format!("linked-folder:{}", shared.display())),
-        "Edit… lists the links"
-    );
+    assert!(!shows(cx, "guide-linked-edit"));
 }
 
 #[gpui::test]

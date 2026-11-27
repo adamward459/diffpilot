@@ -4,7 +4,6 @@ use crate::guide::rich::{self, Body, OnRef};
 use crate::guide::session::{GuideEvent, GuideRun, GuideSession, Step};
 use crate::guide::text::{CodeRef, Inline};
 use crate::linked_folders::folder_chip;
-use crate::workspace::EditLinkedFolders;
 use diffpilot_core::guide::Attention;
 use diffpilot_core::guide::reading::{ChapterKey, ReadingChapter, phase_groups};
 use diffpilot_core::settings::Settings;
@@ -89,7 +88,7 @@ impl GuideStage {
                         .text_color(tokens.ui.text2)
                         .child("Claude explains what this change does, then splits it into chapters in the order to read them, with notes under the lines that matter."),
                 )
-                .child(self.linked_row(&tokens, cx))
+                .children(self.linked_row(&tokens, cx))
                 .when_some(failure.map(str::to_owned), |card, message| {
                     card.child(
                         h_flex()
@@ -123,27 +122,12 @@ impl GuideStage {
             )
     }
 
-    fn linked_row(&self, tokens: &Theme, cx: &Context<Self>) -> AnyElement {
+    fn linked_row(&self, tokens: &Theme, cx: &Context<Self>) -> Option<AnyElement> {
         let folders = self.guide.read(cx).linked(cx);
-        let small = diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL);
-        let edit = |label: &'static str| {
-            tag(
-                Button::new("guide-linked-edit")
-                    .look(Look::Ghost)
-                    .label(label)
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(EditLinkedFolders), cx)),
-                || "guide-linked-edit",
-            )
-        };
         if folders.is_empty() {
-            return h_flex()
-                .gap(px(6.))
-                .text_size(small)
-                .text_color(tokens.ui.muted)
-                .child(tag(div(), || "guide-linked-none").child("No linked folders"))
-                .child(edit("Link…"))
-                .into_any_element();
+            return None;
         }
+        let small = diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL);
         let chips = folders.iter().map(|folder| {
             let name = folder_name(folder);
             if folder.is_dir() {
@@ -168,8 +152,9 @@ impl GuideStage {
                     .text_color(tokens.ui.muted)
                     .child("Claude can also read"),
             )
-            .child(h_flex().flex_wrap().gap(px(6.)).children(chips).child(edit("Edit…")))
+            .child(h_flex().flex_wrap().gap(px(6.)).children(chips))
             .into_any_element()
+            .into()
     }
 
     fn writing_card(&self, chapters: usize, cx: &mut Context<Self>) -> AnyElement {

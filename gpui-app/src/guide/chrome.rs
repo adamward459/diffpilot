@@ -1,15 +1,11 @@
 use crate::format::ago;
 use crate::guide::navigator::now_ms;
 use crate::guide::session::{GuideRun, GuideSession, Step};
-use crate::workspace::EditLinkedFolders;
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::guide::reading::ChapterKey;
 use diffpilot_ui_kit::components::{Button, Crumb, Look, bar_button, crumbs, jump_bar, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
-use gpui::{
-    AnyElement, App, Entity, InteractiveElement as _, IntoElement, ParentElement as _, SharedString, Stateful,
-    Styled as _, div, px,
-};
+use gpui::{App, Entity, InteractiveElement as _, ParentElement as _, SharedString, Stateful, Styled as _, div, px};
 use gpui_component::h_flex;
 
 fn guide_crumb(tokens: &Theme, last: bool) -> Crumb {
@@ -19,25 +15,6 @@ fn guide_crumb(tokens: &Theme, last: bool) -> Crumb {
         label: "Guide".into(),
         last,
     }
-}
-
-fn linked_button(guide: &Entity<GuideSession>, cx: &App) -> AnyElement {
-    let session = guide.read(cx);
-    let count = session.linked(cx).len();
-    let changed = session.linked_changed(cx);
-    let label = match count {
-        0 => "Link Folder".to_string(),
-        count if changed => format!("{count} linked \u{2022}"),
-        count => format!("{count} linked"),
-    };
-    let mut button = Button::new("guide-linked")
-        .icon(Glyph::Folder, 12.)
-        .label(label)
-        .on_click(|_, window, cx| window.dispatch_action(Box::new(EditLinkedFolders), cx));
-    if changed {
-        button = button.tooltip("The guide used other folders. Rewrite to use these.");
-    }
-    tag(button, || "guide-linked").into_any_element()
 }
 
 pub fn overview_bar(guide: &Entity<GuideSession>, tokens: &Theme, cx: &App) -> Stateful<gpui::Div> {
@@ -57,7 +34,12 @@ pub fn overview_bar(guide: &Entity<GuideSession>, tokens: &Theme, cx: &App) -> S
         "Written by Claude \u{b7} {}{model}",
         ago(now_ms(), stored.finished_at_ms.unwrap_or(stored.created_at_ms))
     );
+    let mut rewrite_button = Button::new("guide-rewrite").icon(Glyph::Sparkles, 12.).label("Rewrite");
+    if session.linked_changed(cx) {
+        rewrite_button = rewrite_button.tooltip("The guide used other linked folders. Rewrite to use these.");
+    }
     let (rewrite, start) = (guide.clone(), guide.clone());
+    let rewrite_button = rewrite_button.on_click(move |_, _, cx| rewrite.update(cx, |guide, cx| guide.write(cx)));
     let started = session.has_progress();
     let empty = session.reading().chapters.is_empty();
     bar = bar
@@ -80,14 +62,7 @@ pub fn overview_bar(guide: &Entity<GuideSession>, tokens: &Theme, cx: &App) -> S
                 .text_color(tokens.ui.muted)
                 .child(SharedString::from(written)),
         )
-        .child(linked_button(guide, cx))
-        .child(tag(
-            Button::new("guide-rewrite")
-                .icon(Glyph::Sparkles, 12.)
-                .label("Rewrite")
-                .on_click(move |_, _, cx| rewrite.update(cx, |guide, cx| guide.write(cx))),
-            || "guide-rewrite",
-        ));
+        .child(tag(rewrite_button, || "guide-rewrite"));
     if !empty {
         bar = bar.child(tag(
             Button::new("guide-start-reading")
