@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ### Fixed
 
+- In dark mode, a line no longer crosses the arrow of popovers and menus.
 - On the Open Folder sheet, a long pull request list no longer covers the search field and the buttons, and the folder page starts at the top.
 
 ## [0.1.1] - 2026-11-27

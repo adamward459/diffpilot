@@ -200,7 +200,12 @@ fn paint_arrow(window: &mut Window, bounds: Bounds<Pixels>, trigger: Bounds<Pixe
             .translate(point(center.x * 2., center.y * 2.))
             .compose(TransformationMatrix::unit().rotate(radians(PI)))
     };
-    for (glyph, color) in [(Glyph::PopoverArrowFill, fill), (Glyph::PopoverArrowBorder, border)] {
-        let _ = window.paint_svg(arrow, glyph.path().into(), turn, color, cx);
-    }
+    let _ = window.paint_svg(arrow, Glyph::PopoverArrowFill.path().into(), turn, fill, cx);
+    // The panel's rim runs 1px inside its border, past the arrow's base, so the fill has to cover it too.
+    let rim_y = if below { arrow.bottom() } else { arrow.top() - px(1.) };
+    window.paint_quad(gpui::fill(
+        Bounds::new(point(arrow.left() + px(2.), rim_y), size(px(ARROW_WIDTH - 4.), px(1.))),
+        fill,
+    ));
+    let _ = window.paint_svg(arrow, Glyph::PopoverArrowBorder.path().into(), turn, border, cx);
 }
