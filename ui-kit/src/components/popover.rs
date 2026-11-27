@@ -1,7 +1,8 @@
+use crate::icons::Glyph;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Bounds, Context, Corner, ElementId, Hsla, IntoElement, PathBuilder, Pixels, Point, RenderOnce,
-    SharedString, Window, canvas, div, point, px,
+    AnyElement, App, Bounds, Context, Corner, ElementId, IntoElement, Pixels, RenderOnce, SharedString,
+    TransformationMatrix, Window, canvas, div, point, px, size,
 };
 use gpui_component::popover::{Popover, PopoverState};
 use gpui_component::{ActiveTheme, Selectable, StyledExt, v_flex};
@@ -83,13 +84,11 @@ impl RenderOnce for ArrowPopover {
 }
 
 fn frame(body: AnyElement, below: bool, trigger: Rc<Cell<Option<Bounds<Pixels>>>>, cx: &App) -> AnyElement {
-    let theme = cx.theme();
-    let (fill, border, radius) = (theme.popover, theme.border, f32::from(theme.radius));
     let arrow = canvas(
         |_, _, _| {},
-        move |bounds, _, window, _| {
+        move |bounds, _, window, cx| {
             if let Some(trigger) = trigger.get() {
-                paint_arrow(window, bounds, trigger, below, radius, fill, border);
+                paint_arrow(window, bounds, trigger, below, cx);
             }
         },
     )
@@ -112,16 +111,9 @@ fn frame(body: AnyElement, below: bool, trigger: Rc<Cell<Option<Bounds<Pixels>>>
         .into_any_element()
 }
 
-// The fill reaches one pixel past the arrow's base to hide the body's border under it.
-fn paint_arrow(
-    window: &mut Window,
-    bounds: Bounds<Pixels>,
-    trigger: Bounds<Pixels>,
-    below: bool,
-    radius: f32,
-    fill: Hsla,
-    border: Hsla,
-) {
+fn paint_arrow(window: &mut Window, bounds: Bounds<Pixels>, trigger: Bounds<Pixels>, below: bool, cx: &App) {
+    let theme = cx.theme();
+    let (fill, border, radius) = (theme.popover, theme.border, f32::from(theme.radius));
     let half = ARROW_WIDTH / 2.;
     let inset = half + radius;
     let (left, right) = (f32::from(bounds.left()) + inset, f32::from(bounds.right()) - inset);
@@ -129,32 +121,16 @@ fn paint_arrow(
         return;
     }
     let x = f32::from(trigger.center().x).clamp(left, right);
-    let tip = if below {
-        f32::from(bounds.top()) + 0.5
+    let arrow = Bounds::new(
+        point(px(x - half), bounds.top()),
+        size(px(ARROW_WIDTH), px(ARROW_HEIGHT + 1.)),
+    );
+    let (fill_glyph, border_glyph) = if below {
+        (Glyph::PopoverArrowUpFill, Glyph::PopoverArrowUpBorder)
     } else {
-        f32::from(bounds.bottom()) - 0.5
+        (Glyph::PopoverArrowDownFill, Glyph::PopoverArrowDownBorder)
     };
-    let at = |dx: f32, dy: f32| -> Point<Pixels> { point(px(x + dx), px(if below { tip + dy } else { tip - dy })) };
-    let edge = ARROW_HEIGHT;
-    let outline = |builder: &mut PathBuilder| {
-        builder.move_to(at(-half, edge));
-        builder.curve_to(at(-2.2, 1.4), at(-half * 0.45, edge));
-        builder.curve_to(at(2.2, 1.4), at(0., -0.6));
-        builder.curve_to(at(half, edge), at(half * 0.45, edge));
-    };
-
-    let mut shape = PathBuilder::fill();
-    outline(&mut shape);
-    shape.line_to(at(half, edge + 0.5));
-    shape.line_to(at(-half, edge + 0.5));
-    shape.close();
-    if let Ok(path) = shape.build() {
-        window.paint_path(path, fill);
-    }
-
-    let mut line = PathBuilder::stroke(px(1.));
-    outline(&mut line);
-    if let Ok(path) = line.build() {
-        window.paint_path(path, border);
+    for (glyph, color) in [(fill_glyph, fill), (border_glyph, border)] {
+        let _ = window.paint_svg(arrow, glyph.path().into(), TransformationMatrix::unit(), color, cx);
     }
 }
