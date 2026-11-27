@@ -126,6 +126,7 @@ pub struct Workspace {
     settings_page: Option<(Entity<SettingsPage>, Subscription)>,
     focus: FocusHandle,
     _menu_events: Subscription,
+    _focus_lost: Subscription,
 }
 
 impl Workspace {
@@ -143,6 +144,7 @@ impl Workspace {
             FolderMenuEvent::Select(folder) => this.show_folder(folder.clone(), window, cx),
             FolderMenuEvent::Add => this.open_folder(window, cx),
         });
+        let focus_lost = cx.on_focus_lost(window, |this, window, cx| this.restore_focus(window, cx));
         let mut this = Self {
             settings,
             viewed_store,
@@ -153,6 +155,7 @@ impl Workspace {
             settings_page: None,
             focus: cx.focus_handle(),
             _menu_events: menu_events,
+            _focus_lost: focus_lost,
         };
         window.focus(&this.focus);
         if let Some(folder) = folder {
@@ -253,6 +256,15 @@ impl Workspace {
         });
         self.settings_page = Some((page, closing));
         cx.notify();
+    }
+
+    // The menu bar and every shortcut reach this view through the focused element, so focus must never rest on
+    // an element that left the window.
+    fn restore_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match &self.settings_page {
+            Some((page, _)) => page.update(cx, |page, cx| page.focus_search(window, cx)),
+            None => window.focus(&self.focus),
+        }
     }
 
     fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
