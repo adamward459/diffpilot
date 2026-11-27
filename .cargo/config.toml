@@ -1,7 +1,6 @@
 [build]
-# One build dir for every worktree of this repo, so dependencies compile once.
-build-dir = "{cargo-cache-home}/build/diffpilot"
-
+# One build dir per worktree: a shared dir makes worktrees overwrite each other's workspace crates.
+build-dir = "{cargo-cache-home}/build/diffpilot-{workspace-path-hash}"
 [unstable]
 # A file with the same content in another worktree stays fresh, even though its mtime is newer.
 checksum-freshness = true
