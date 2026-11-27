@@ -1731,8 +1731,7 @@ impl Render for DiffPane {
         self.theme = current;
         let theme = self.theme;
         let scroll = self.state.scroll();
-        let mut root = div()
-            .id("diff-pane")
+        let mut root = tag(div().id("diff-pane"), || "pane")
             .key_context(KEY_CONTEXT)
             // On the root, gpui would focus the pane on every click inside it and take focus from a comment box.
             .child(div().size_0().track_focus(&self.focus))

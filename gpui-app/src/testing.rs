@@ -404,6 +404,26 @@ pub fn drag_below(cx: &mut VisualTestContext, selector: &str, from: (f32, f32), 
     draw(cx);
 }
 
+fn right_edge(bounds: Bounds<Pixels>, inset: f32, y: f32) -> gpui::Point<Pixels> {
+    gpui::point(bounds.right() - gpui::px(inset), bounds.top() + gpui::px(y))
+}
+
+/// Presses `inset` left of the tagged element's right edge at `from` below its top, drags down to `to`, and releases.
+pub fn drag_right_edge(cx: &mut VisualTestContext, selector: &str, inset: f32, from: f32, to: f32) {
+    let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
+    cx.simulate_mouse_move(right_edge(bounds, inset, from), None, Modifiers::default());
+    draw(cx);
+    cx.simulate_mouse_down(right_edge(bounds, inset, from), MouseButton::Left, Modifiers::default());
+    draw(cx);
+    for step in 1..=4 {
+        let y = from + (to - from) * step as f32 / 4.0;
+        cx.simulate_mouse_move(right_edge(bounds, inset, y), MouseButton::Left, Modifiers::default());
+        draw(cx);
+    }
+    cx.simulate_mouse_up(right_edge(bounds, inset, to), MouseButton::Left, Modifiers::default());
+    draw(cx);
+}
+
 pub fn git_output(dir: &Path, args: &[&str]) -> String {
     let binary = diffpilot_core::git::binary().expect("git");
     let output = Command::new(binary)

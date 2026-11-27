@@ -15,6 +15,7 @@ mod flows {
     mod preview;
     mod remote;
     mod review;
+    mod scrollbar;
     mod selection;
     mod settings;
     mod sidebar_keys;
