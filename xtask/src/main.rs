@@ -125,6 +125,7 @@ fn precommit() -> Result {
     }
     check_bin_paths()?;
     check_paint_paths()?;
+    check_scrollbars()?;
     flow_input::check()?;
     changelog::check()
 }
@@ -143,6 +144,37 @@ fn check_bin_paths() -> Result {
     Err(format!(
         "{}: read std::env::var(\"CARGO_BIN_EXE_<name>\") at run time instead of {pattern}<name>\")",
         hits.split_whitespace().collect::<Vec<_>>().join(", ")
+    )
+    .into())
+}
+
+const SCROLLBAR_HELPER: &str = "ui-kit/src/components/scroll.rs";
+
+fn check_scrollbars() -> Result {
+    let out = Command::new("git")
+        .args([
+            "grep",
+            "-l",
+            "-E",
+            r"overflow_(y_|x_)?scroll\(\)",
+            "--",
+            "*.rs",
+            ":!xtask",
+        ])
+        .current_dir(root())
+        .output()?;
+    let hits: Vec<_> = String::from_utf8(out.stdout)?
+        .lines()
+        .filter(|file| *file != SCROLLBAR_HELPER)
+        .map(str::to_owned)
+        .collect();
+    if hits.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "{}: a bare overflow scroll has no scrollbar. Wrap the content in \
+         diffpilot_ui_kit::components::scroll_y(&handle, content) and put the outer size on the wrapper.",
+        hits.join(", ")
     )
     .into())
 }

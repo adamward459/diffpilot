@@ -5,14 +5,17 @@ use crate::runs::now_ms;
 use diffpilot_core::run::{LogEntry, LogKind, Run, RunId, RunState, StepState, first_line};
 use diffpilot_ui_kit::components::menu::{MenuItem, MenuSection, menu_button};
 use diffpilot_ui_kit::components::popover;
+use diffpilot_ui_kit::components::scroll_y;
 use diffpilot_ui_kit::components::{Button, Look, glyph_icon, spinner, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
+use gpui::ScrollHandle;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, Context, Corner, Entity, EventEmitter, FontWeight, Hsla, InteractiveElement, IntoElement,
-    ParentElement, Render, ScrollStrategy, SharedString, StatefulInteractiveElement, Styled, Subscription, Task,
-    UniformListScrollHandle, Window, div, px, uniform_list,
+    ParentElement, Render, ScrollStrategy, SharedString, Styled, Subscription, Task, UniformListScrollHandle, Window,
+    div, px, uniform_list,
 };
+use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme, h_flex, v_flex};
 use std::ops::Range;
 use std::time::Duration;
@@ -30,6 +33,7 @@ pub enum ClaudeAreaEvent {
 }
 
 pub struct ClaudeArea {
+    plan_scroll: ScrollHandle,
     session: Entity<ReviewSession>,
     activity: Entity<ClaudeActivity>,
     popover: Entity<ReviewPopover>,
@@ -82,6 +86,7 @@ impl ClaudeArea {
             }),
         ];
         let mut this = Self {
+            plan_scroll: ScrollHandle::new(),
             session,
             activity,
             popover,
@@ -283,17 +288,11 @@ impl ClaudeArea {
         let comments = run.map(Run::comments).unwrap_or_default();
         let writes_comments = run.is_none_or(|run| !run.kind.activity().writes_guide());
         let running = run.is_some_and(|run| !run.state.is_finished());
-        v_flex()
+        let plan = v_flex()
             .id("claude-area-plan")
-            .w(px(LEFT_WIDTH))
-            .flex_none()
-            .h_full()
             .px(px(14.))
             .py(px(10.))
             .gap(px(6.))
-            .overflow_y_scroll()
-            .border_r_1()
-            .border_color(theme.ui.line)
             .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
             .text_color(theme.ui.text)
             .child(heading("Plan".into()).mt(px(0.)))
@@ -354,7 +353,13 @@ impl ClaudeArea {
                         .text_color(theme.ui.muted)
                         .child(mmss(at))
                 }))
-            }))
+            }));
+        scroll_y(&self.plan_scroll, plan)
+            .w(px(LEFT_WIDTH))
+            .flex_none()
+            .h_full()
+            .border_r_1()
+            .border_color(theme.ui.line)
             .into_any_element()
     }
 
@@ -377,14 +382,20 @@ impl ClaudeArea {
             cx.processor(move |this: &mut Self, range: Range<usize>, _, cx| this.log_rows(range, cx)),
         )
         .track_scroll(self.log_scroll.clone())
-        .flex_1()
-        .min_h_0()
+        .size_full()
         .py(px(4.));
         v_flex()
             .flex_1()
             .min_w_0()
             .h_full()
-            .child(list)
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(list)
+                    .child(div().absolute().inset_0().child(Scrollbar::vertical(&self.log_scroll))),
+            )
             .child(
                 h_flex()
                     .h(px(FOOTER_HEIGHT))

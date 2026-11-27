@@ -3,8 +3,10 @@ use crate::guide::session::{GuideEvent, GuideRun, GuideSession, Step};
 use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::guide::Attention;
 use diffpilot_core::guide::reading::{ChapterKey, phase_groups};
+use diffpilot_ui_kit::components::scroll_y;
 use diffpilot_ui_kit::components::tag;
 use diffpilot_ui_kit::{Glyph, Theme};
+use gpui::ScrollHandle;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, ClickEvent, Context, Entity, EventEmitter, FontWeight, InteractiveElement as _, IntoElement,
@@ -22,6 +24,7 @@ pub enum NavigatorEvent {
 }
 
 pub struct GuideNavigator {
+    scroll: ScrollHandle,
     guide: Entity<GuideSession>,
     _guide: Subscription,
 }
@@ -38,6 +41,7 @@ impl GuideNavigator {
     pub fn new(guide: Entity<GuideSession>, cx: &mut Context<Self>) -> Self {
         let subscription = cx.subscribe(&guide, |_, _, _: &GuideEvent, cx| cx.notify());
         Self {
+            scroll: ScrollHandle::new(),
             guide,
             _guide: subscription,
         }
@@ -95,13 +99,7 @@ impl Render for GuideNavigator {
         let header = self.header(cx);
         let guide = self.guide.read(cx);
         let step = guide.step();
-        let mut list = v_flex()
-            .id("guide-rows")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .px(px(6.))
-            .pb(px(8.));
+        let mut list = v_flex().id("guide-rows").px(px(6.)).pb(px(8.));
         if guide.stored().is_none() {
             return v_flex()
                 .size_full()
@@ -280,6 +278,10 @@ impl Render for GuideNavigator {
                 }
             }
         }
-        v_flex().size_full().child(header).child(list).into_any_element()
+        v_flex()
+            .size_full()
+            .child(header)
+            .child(scroll_y(&self.scroll, list).flex_1())
+            .into_any_element()
     }
 }

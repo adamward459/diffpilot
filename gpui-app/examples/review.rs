@@ -17,10 +17,10 @@ use diffpilot_core::run::{RunKind, RunState};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::Store;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
+use diffpilot_ui_kit::components::scroll_y;
 use gpui::{
     App, AppContext, Application, AsyncApp, Bounds, Context, Entity, InteractiveElement, IntoElement, ParentElement,
-    Pixels, Render, StatefulInteractiveElement, Styled, Subscription, Window, WindowBounds, WindowOptions, canvas, div,
-    point, px, size,
+    Pixels, Render, Styled, Subscription, Window, WindowBounds, WindowOptions, canvas, div, point, px, size,
 };
 use gpui_component::{ActiveTheme, Root, h_flex, v_flex};
 use std::cell::RefCell;
@@ -55,6 +55,7 @@ fn archive_file() -> FileDiff {
 }
 
 struct Gallery {
+    scroll: gpui::ScrollHandle,
     pill: Entity<ReviewPill>,
     cards: Vec<Entity<ThreadCard>>,
     heights: Heights,
@@ -88,6 +89,7 @@ impl Gallery {
             }),
         ];
         Self {
+            scroll: gpui::ScrollHandle::new(),
             pill,
             cards: Vec::new(),
             heights: Heights::default(),
@@ -124,28 +126,30 @@ impl Render for Gallery {
                     ),
             )
             .child(
-                v_flex()
-                    .id("cards")
-                    .flex_1()
-                    .overflow_y_scroll()
-                    .p_4()
-                    .gap_3()
-                    .when_cards(self.show_cards, |column| {
-                        column.children(self.cards.iter().map(|card| {
-                            let id = card.read(cx).thread_id();
-                            let heights = self.heights.clone();
-                            div().relative().w(px(CARD_WIDTH)).child(card.clone()).child(
-                                canvas(
-                                    move |bounds: Bounds<Pixels>, _, _| {
-                                        heights.borrow_mut().insert(id, bounds.size.height);
-                                    },
-                                    |_, _, _, _| {},
+                scroll_y(
+                    &self.scroll,
+                    v_flex()
+                        .id("cards")
+                        .p_4()
+                        .gap_3()
+                        .when_cards(self.show_cards, |column| {
+                            column.children(self.cards.iter().map(|card| {
+                                let id = card.read(cx).thread_id();
+                                let heights = self.heights.clone();
+                                div().relative().w(px(CARD_WIDTH)).child(card.clone()).child(
+                                    canvas(
+                                        move |bounds: Bounds<Pixels>, _, _| {
+                                            heights.borrow_mut().insert(id, bounds.size.height);
+                                        },
+                                        |_, _, _, _| {},
+                                    )
+                                    .absolute()
+                                    .size_full(),
                                 )
-                                .absolute()
-                                .size_full(),
-                            )
-                        }))
-                    }),
+                            }))
+                        }),
+                )
+                .flex_1(),
             )
     }
 }

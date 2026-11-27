@@ -1,8 +1,10 @@
 use crate::review::card::card_key;
 use crate::review::session::ReviewSession;
 use diffpilot_core::threads::{ReviewThread, ThreadAnchor, ThreadId};
+use diffpilot_ui_kit::components::scroll_y;
 use diffpilot_ui_kit::components::{Button, Look, OVERLAY_DETAIL_TEXT, OVERLAY_ROW_RADIUS, OVERLAY_TEXT, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
+use gpui::ScrollHandle;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, FontWeight, InteractiveElement, IntoElement, ParentElement, Render,
@@ -19,6 +21,7 @@ pub enum PickerEvent {
 }
 
 pub struct FixPicker {
+    scroll: ScrollHandle,
     session: Entity<ReviewSession>,
     excluded: HashSet<ThreadId>,
     _session: Subscription,
@@ -30,6 +33,7 @@ impl FixPicker {
     pub fn new(session: Entity<ReviewSession>, cx: &mut Context<Self>) -> Self {
         let subscription = cx.observe(&session, |_, _, cx| cx.notify());
         Self {
+            scroll: ScrollHandle::new(),
             session,
             excluded: HashSet::new(),
             _session: subscription,
@@ -198,13 +202,7 @@ impl Render for FixPicker {
                         })),
                     ),
             )
-            .child(
-                v_flex()
-                    .id("fix-rows")
-                    .max_h(px(320.))
-                    .overflow_y_scroll()
-                    .children(groups),
-            )
+            .child(scroll_y(&self.scroll, v_flex().id("fix-rows").children(groups)).max_h(px(320.)))
             .child(div().h(px(1.)).bg(theme.ui.line).my(px(10.)))
             .when_some(blocker.clone(), |col, message| {
                 col.child(

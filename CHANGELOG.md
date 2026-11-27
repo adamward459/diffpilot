@@ -26,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - The folder menu item Add Folder… is now called Open Folder…. Open Folder… and ⌘O open the sheet, not the system folder picker.
 - The title bar now shows what you compare as one label, like feature → main. Click it to open the Open Folder sheet on this folder and change the branches or pick a pull request.
 - The Linked button in the Guide overview bar now opens the same Linked Folders popover as the title bar.
+- Every list and panel that scrolls shows a scrollbar while you scroll, like the diff: the Guide, the inspector, comments, settings, menus, checks, Claude's plan and log, and the Open Folder lists. Drag it to move fast.
 
 ### Fixed
 

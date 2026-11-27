@@ -9,6 +9,7 @@ use diffpilot_core::github::http::{Http, UreqHttp};
 use diffpilot_core::github::{Github, GithubError};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::{DataScope, Store};
+use diffpilot_ui_kit::components::scroll_y;
 use diffpilot_ui_kit::components::{filter_field, glyph_icon, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
@@ -605,21 +606,25 @@ impl Render for SettingsPage {
                                 || format!("settings:version:{}", env!("CARGO_PKG_VERSION")),
                             )),
                     )
-                    .child(tag(
-                        div()
-                            .id("settings-body")
-                            .flex_1()
-                            .min_w_0()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.scroll)
-                            .pr(px(20.))
-                            .pt(px(4.))
-                            .children(body)
-                            .when(sections.is_empty(), |this| {
-                                this.child(div().text_color(t.ui.muted).child("No settings found"))
-                            }),
-                        || "settings:body",
-                    )),
+                    .child(
+                        scroll_y(
+                            &self.scroll,
+                            tag(
+                                div()
+                                    .id("settings-body")
+                                    .pr(px(20.))
+                                    .pt(px(4.))
+                                    .children(body)
+                                    .when(sections.is_empty(), |this| {
+                                        this.child(div().text_color(t.ui.muted).child("No settings found"))
+                                    }),
+                                || "settings:body",
+                            ),
+                        )
+                        .flex_1()
+                        .min_w_0()
+                        .h_full(),
+                    ),
             )
     }
 }

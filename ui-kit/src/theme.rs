@@ -489,8 +489,10 @@ fn apply_to_components(theme: &Theme, cx: &mut App) {
     target.sidebar_foreground = theme.ui.text;
     target.title_bar = theme.background;
     target.title_bar_border = pick(0xe3e3e6, 0x38383a);
-    target.scrollbar_thumb = pick(0xb0b0b6, 0x6a6a6e);
-    target.scrollbar_thumb_hover = pick(0x8e8e93, 0x8a8a8e);
+    target.scrollbar = gpui::transparent_black();
+    target.scrollbar_thumb = theme.diff.muted.opacity(0.6);
+    target.scrollbar_thumb_hover = theme.diff.muted.opacity(0.8);
+    target.scrollbar_show = gpui_component::scroll::ScrollbarShow::Scrolling;
     target.success = pick(0x28a745, 0x32d74b);
     target.danger = pick(0xe5483f, 0xff6961);
 }

@@ -10,6 +10,7 @@ pub mod menu;
 mod motion;
 mod overlay;
 mod popover;
+mod scroll;
 mod tour;
 
 pub use badge::{BadgeTone, avatar, filled_check, severity_badge, status_badge};
@@ -33,4 +34,5 @@ pub use interaction::{DISABLED_OPACITY, Fills, State, interactive};
 pub use motion::{OVERLAY_DURATION, PANEL_DURATION, Presence, STATE_DURATION, Transition, closing_motions};
 pub use overlay::{Dialog, Edge, SideSheet, dialog, side_sheet};
 pub use popover::{ArrowPopover, popover};
+pub use scroll::scroll_y;
 pub use tour::{Tour, TourCard, tour, tour_card};

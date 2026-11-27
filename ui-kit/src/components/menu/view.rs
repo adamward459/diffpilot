@@ -443,15 +443,13 @@ impl Render for Menu {
             });
         let bounds = self.bounds.clone();
         let panel = glass_panel(&theme).child(
-            div()
-                .id(ElementId::Name(self.id.clone()))
-                .min_w(self.min_width)
-                .max_w(px(520.))
-                .max_h(self.max_height)
-                .overflow_y_scroll()
-                .track_scroll(&self.scroll)
-                .p(px(PADDING))
-                .children(rows),
+            crate::components::scroll_y(
+                &self.scroll,
+                div().id(ElementId::Name(self.id.clone())).p(px(PADDING)).children(rows),
+            )
+            .min_w(self.min_width)
+            .max_w(px(520.))
+            .max_h(self.max_height),
         );
         div()
             .relative()

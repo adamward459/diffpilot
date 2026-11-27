@@ -5,8 +5,10 @@ use crate::guide::text::{CodeRef, Inline};
 use crate::repo_view::tilde_path;
 use diffpilot_core::guide::Attention;
 use diffpilot_core::guide::reading::ChapterKey;
+use diffpilot_ui_kit::components::scroll_y;
 use diffpilot_ui_kit::components::{Button, ChipTone, Look, chip_label, glyph_icon, icon_button, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
+use gpui::ScrollHandle;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, FontWeight, InteractiveElement as _, IntoElement,
@@ -25,6 +27,7 @@ pub enum InspectorEvent {
 }
 
 pub struct GuideInspector {
+    scroll: ScrollHandle,
     guide: Entity<GuideSession>,
     _guide: Subscription,
 }
@@ -35,6 +38,7 @@ impl GuideInspector {
     pub fn new(guide: Entity<GuideSession>, cx: &mut Context<Self>) -> Self {
         let subscription = cx.subscribe(&guide, |_, _, _: &GuideEvent, cx| cx.notify());
         Self {
+            scroll: ScrollHandle::new(),
             guide,
             _guide: subscription,
         }
@@ -287,14 +291,15 @@ impl Render for GuideInspector {
             || "guide-mark-continue",
         ));
         column = column.child(actions);
-        tag(div().id("guide-inspector"), || "guide-inspector")
-            .w(px(INSPECTOR_WIDTH))
-            .h_full()
-            .flex_none()
-            .overflow_y_scroll()
-            .border_l_1()
-            .border_color(tokens.ui.line)
-            .child(column.w_full().min_w_0())
-            .into_any_element()
+        scroll_y(
+            &self.scroll,
+            tag(div().id("guide-inspector"), || "guide-inspector").child(column.w_full().min_w_0()),
+        )
+        .w(px(INSPECTOR_WIDTH))
+        .h_full()
+        .flex_none()
+        .border_l_1()
+        .border_color(tokens.ui.line)
+        .into_any_element()
     }
 }

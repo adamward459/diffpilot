@@ -2,10 +2,12 @@ use crate::review::session::ReviewSession;
 use diffpilot_core::store::{SessionId, SessionThreads, Store};
 use diffpilot_core::thread_groups::{FileGroup, Grouped, Row, StatusFilter, ViewGroup, group_threads, line_label};
 use diffpilot_core::threads::{CommentSource, ReviewThread, ThreadId, ThreadStatus};
+use diffpilot_ui_kit::components::scroll_y;
 use diffpilot_ui_kit::components::{
     Button, Look, Presence, avatar, bar_button, glyph_icon, label_switch, side_sheet, tag,
 };
 use diffpilot_ui_kit::{Glyph, Theme};
+use gpui::ScrollHandle;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement,
@@ -33,6 +35,7 @@ enum Scope {
 }
 
 pub struct CommentsPanel {
+    scroll: ScrollHandle,
     review: Entity<ReviewSession>,
     store: Arc<Store>,
     scope: Scope,
@@ -88,6 +91,7 @@ impl CommentsPanel {
             cx.notify();
         });
         Self {
+            scroll: ScrollHandle::new(),
             review,
             store,
             scope: Scope::View,
@@ -562,14 +566,7 @@ impl Render for CommentsPanel {
             .on_backdrop_click(cx.listener(|_, _, _, cx| cx.emit(CommentsEvent::Close)))
             .child(self.header(&theme, cx))
             .child(self.status_row(&theme, &grouped, cx))
-            .child(
-                div()
-                    .id("comments-list")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .child(list),
-            )
+            .child(scroll_y(&self.scroll, div().id("comments-list").child(list)).flex_1())
             .into_any_element()
     }
 }

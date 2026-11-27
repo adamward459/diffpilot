@@ -8,8 +8,10 @@ use crate::workspace::EditLinkedFolders;
 use diffpilot_core::guide::Attention;
 use diffpilot_core::guide::reading::{ChapterKey, ReadingChapter, phase_groups};
 use diffpilot_core::settings::Settings;
+use diffpilot_ui_kit::components::scroll_y;
 use diffpilot_ui_kit::components::{Button, ChipTone, Look, card_shell, chip_label, glyph_icon, spinner, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
+use gpui::ScrollHandle;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, ClickEvent, Context, Entity, EventEmitter, FontWeight, InteractiveElement as _, IntoElement,
@@ -28,6 +30,7 @@ pub enum StageEvent {
 }
 
 pub struct GuideStage {
+    scroll: ScrollHandle,
     guide: Entity<GuideSession>,
     settings: Arc<Settings>,
     _guide: Subscription,
@@ -39,6 +42,7 @@ impl GuideStage {
     pub fn new(guide: Entity<GuideSession>, settings: Arc<Settings>, cx: &mut Context<Self>) -> Self {
         let subscription = cx.subscribe(&guide, |_, _, _: &GuideEvent, cx| cx.notify());
         Self {
+            scroll: ScrollHandle::new(),
             guide,
             settings,
             _guide: subscription,
@@ -457,10 +461,8 @@ impl GuideStage {
             GuideRun::Failed(message) => Some(message.clone()),
             _ => None,
         };
-        div()
+        let content = div()
             .id("guide-stage")
-            .size_full()
-            .overflow_y_scroll()
             .flex()
             .flex_col()
             .items_center()
@@ -485,8 +487,8 @@ impl GuideStage {
                     .child(glyph_icon(Glyph::TriangleAlert, 14., tokens.amber))
                     .child(SharedString::from(message))
             }))
-            .child(article)
-            .into_any_element()
+            .child(article);
+        scroll_y(&self.scroll, content).size_full().into_any_element()
     }
 }
 

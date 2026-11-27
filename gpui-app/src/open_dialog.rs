@@ -13,6 +13,7 @@ use diffpilot_core::forge::{self, ChangeRequest, Outcome, Review};
 use diffpilot_core::guide::linked;
 use diffpilot_core::settings::Settings;
 use diffpilot_ui_kit::components::menu::menu_button;
+use diffpilot_ui_kit::components::scroll_y;
 use diffpilot_ui_kit::components::{Button, Look, Presence, dialog, filter_field, glyph_icon, spinner, tag};
 use diffpilot_ui_kit::{Glyph, Theme, text_px, text_size};
 use gpui::prelude::*;
@@ -81,6 +82,7 @@ pub struct OpenFolderDialog {
     search: Entity<InputState>,
     hints: Entity<PathHints>,
     list_scroll: ScrollHandle,
+    requests_scroll: ScrollHandle,
     editor: Entity<LinkedFolders>,
     editing_links: bool,
     error: Option<SharedString>,
@@ -148,6 +150,7 @@ impl OpenFolderDialog {
             search,
             hints,
             list_scroll: ScrollHandle::new(),
+            requests_scroll: ScrollHandle::new(),
             editor,
             editing_links: false,
             error: None,
@@ -857,20 +860,20 @@ impl OpenFolderDialog {
             Some(PrList::Loaded(_) | PrList::Loading(Some(_))) if visible.is_empty() => {
                 note("No open pull requests.".into(), "open:prs-empty")
             }
-            Some(_) => v_flex()
-                .id("open-requests")
+            Some(_) => {
+                let rows = visible
+                    .iter()
+                    .enumerate()
+                    .map(|(index, change)| self.request_row(index, change, tokens, cx))
+                    .collect::<Vec<_>>();
+                scroll_y(
+                    &self.requests_scroll,
+                    v_flex().id("open-requests").gap(px(2.)).children(rows),
+                )
                 .w_full()
                 .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .gap(px(2.))
-                .children(
-                    visible
-                        .iter()
-                        .enumerate()
-                        .map(|(index, change)| self.request_row(index, change, tokens, cx)),
-                )
-                .into_any_element(),
+                .into_any_element()
+            }
         };
         let count = visible.len();
         v_flex()
@@ -1056,14 +1059,11 @@ impl Render for OpenFolderDialog {
                             .gap(px(6.))
                             .child(heading("RECENT", &tokens))
                             .child(
-                                v_flex()
-                                    .id("open-recent-list")
-                                    .track_scroll(&self.list_scroll)
-                                    .flex_1()
-                                    .min_h_0()
-                                    .overflow_y_scroll()
-                                    .gap(px(2.))
-                                    .children(rows),
+                                scroll_y(
+                                    &self.list_scroll,
+                                    v_flex().id("open-recent-list").gap(px(2.)).children(rows),
+                                )
+                                .flex_1(),
                             ),
                     )
                     .child(div().w(px(1.)).h_full().flex_none().bg(tokens.ui.line))

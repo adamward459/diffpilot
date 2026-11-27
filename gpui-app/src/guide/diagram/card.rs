@@ -2,12 +2,14 @@ use super::focus::{flow_focus, next_step, previous_step};
 use super::paint::{Drawing, Palette, TextMeasure};
 use diffpilot_core::guide::layout::{Layout, layout};
 use diffpilot_core::guide::{Diagram, DiagramKind};
+use diffpilot_ui_kit::components::scroll_y;
 use diffpilot_ui_kit::components::{ChipTone, chip_label, icon_button, segmented_control, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
+use gpui::ScrollHandle;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, canvas, div, font, px,
+    AnyElement, App, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString, Styled as _,
+    Window, canvas, div, font, px,
 };
 use gpui_component::{ActiveTheme, h_flex, v_flex};
 use std::rc::Rc;
@@ -35,6 +37,7 @@ struct Key {
 }
 
 struct CardState {
+    scroll: ScrollHandle,
     view: View,
     step: Option<usize>,
     key: Option<Key>,
@@ -44,6 +47,7 @@ struct CardState {
 impl CardState {
     fn new() -> Self {
         Self {
+            scroll: ScrollHandle::new(),
             view: View::Diagram,
             step: None,
             key: None,
@@ -208,12 +212,14 @@ pub fn diagram_card(id: &str, diagram: &Diagram, window: &mut Window, cx: &mut A
                 surface.style().aspect_ratio = Some(width / height);
             }
             card = card.child(
-                div()
-                    .id(SharedString::from(format!("{id}-scroll")))
-                    .w_full()
-                    .max_h(px(MAX_HEIGHT))
-                    .overflow_y_scroll()
-                    .child(tag(surface, || "guide-diagram-canvas")),
+                scroll_y(
+                    &state.read(cx).scroll,
+                    div()
+                        .id(SharedString::from(format!("{id}-scroll")))
+                        .child(tag(surface, || "guide-diagram-canvas")),
+                )
+                .w_full()
+                .max_h(px(MAX_HEIGHT)),
             );
             if matches!(diagram.kind, DiagramKind::Flowchart) && !steps.is_empty() {
                 card = card.child(stepper(id, &theme, diagram, step, &state));

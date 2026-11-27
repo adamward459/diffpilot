@@ -1,8 +1,10 @@
 use super::rows::{duration_text, outcome_tone};
 use super::{RemoteStatus, RerunState, open_in_browser};
 use diffpilot_core::forge::{Checks, Job, Stage};
+use diffpilot_ui_kit::components::scroll_y;
 use diffpilot_ui_kit::components::{Button, Look, glyph_icon, status_dot, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
+use gpui::ScrollHandle;
 use gpui::prelude::*;
 use gpui::{Context, Entity, FontWeight, IntoElement, Render, Subscription, Window, div, px};
 use gpui_component::{h_flex, v_flex};
@@ -10,6 +12,7 @@ use gpui_component::{h_flex, v_flex};
 pub const WIDTH: f32 = 440.0;
 
 pub struct ChecksPopover {
+    scroll: ScrollHandle,
     status: Entity<RemoteStatus>,
     _observe: Subscription,
 }
@@ -18,6 +21,7 @@ impl ChecksPopover {
     pub fn new(status: Entity<RemoteStatus>, cx: &mut Context<Self>) -> Self {
         let observe = cx.observe(&status, |_, _, cx| cx.notify());
         Self {
+            scroll: ScrollHandle::new(),
             status,
             _observe: observe,
         }
@@ -176,12 +180,14 @@ impl Render for ChecksPopover {
             })
             .child(match stages {
                 Some(stages) if stages.is_empty() => note(&theme, "No checks ran for this commit."),
-                Some(stages) => v_flex()
-                    .id("checks-list")
-                    .max_h(px(380.))
-                    .overflow_y_scroll()
-                    .children(stages.into_iter().map(|stage| self.stage(&theme, stage, busy)))
-                    .into_any_element(),
+                Some(stages) => scroll_y(
+                    &self.scroll,
+                    v_flex()
+                        .id("checks-list")
+                        .children(stages.into_iter().map(|stage| self.stage(&theme, stage, busy))),
+                )
+                .max_h(px(380.))
+                .into_any_element(),
                 None => note(&theme, "Loading checks…"),
             })
     }
