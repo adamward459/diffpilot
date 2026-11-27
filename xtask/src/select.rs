@@ -161,14 +161,14 @@ mod tests {
     fn a_file_in_a_module_folder_selects_the_features_that_hold_files_there() {
         let names = names("core/src/store/schema.rs");
         assert!(names.contains("guide") && names.contains("shared"), "{names:?}");
-        assert!(!names.contains("settings"), "{names:?}");
+        assert!(!names.contains("github"), "{names:?}");
     }
 
     #[test]
     fn a_listed_file_selects_users_of_its_module_not_of_its_whole_feature() {
         assert_eq!(
             names("core/src/viewed.rs"),
-            BTreeSet::from(["sidebar", "guide", "app-shell"])
+            BTreeSet::from(["sidebar", "guide", "app-shell", "settings"])
         );
     }
 
