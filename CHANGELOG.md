@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - The Comments panel now slides out when you close it, and the sidebar, inspector, and Claude area close with motion too.
 - The Settings dialog now fades in and out.
 - Menus and popovers now fade out when they close, as they already did when they open.
+- The Previous thread and Next thread arrows are now dimmed when there is no thread in that direction.
 - Switches slide their thumb, segmented controls fade the highlight to the new segment, and the Viewed check mark fades in.
 
 ### Fixed
@@ -19,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - The app no longer crashes when you open the model and effort menu in the Ask Claude popover. The menu now opens above the button.
 - Long paths and commands in Settings now wrap inside their row. Before, the Claude path ran past the dialog and under the buttons.
 - The diff scroll bar can be dragged. Point at the right edge of the diff to show a wider thumb, drag it, or click the edge to jump there.
+- Comment cards in the Comments panel no longer grow a few pixels when you point at them.
 - Previous thread now stops on the review summary at the top of the diff, so you can step back to it from any comment.
 
 ## [0.1.0] - 2026-11-27

@@ -1,11 +1,26 @@
 use crate::common::{comment_on_file, open_on as open};
 use diffpilot::testing::{
-    click, fake_claude, fixture, hover, open_workspace, press, shows, type_text, wait_for_motion,
+    bounds, click, fake_claude, fixture, hover, open_workspace, press, shows, type_text, wait_for_motion,
 };
 use diffpilot_core::settings::Settings;
 use diffpilot_core::threads::USER_NAME;
 use gpui::TestAppContext;
 use std::sync::Arc;
+
+#[gpui::test]
+fn pointing_at_a_comment_row_shows_its_actions_without_resizing_the_row(app: &mut TestAppContext) {
+    let fake = fake_claude(app);
+    let dir = fixture();
+    let cx = open(app, dir.path(), fake.store());
+    comment_on_file(cx, "docs/committed.md", "Fix this.");
+    click(cx, "toolbar:comments");
+    wait_for_motion(cx);
+    let at_rest = bounds(cx, "comments:row:Fix this.");
+
+    hover(cx, "comments:row:Fix this.");
+    assert!(shows(cx, "comments:resolve:Fix this."));
+    assert_eq!(bounds(cx, "comments:row:Fix this."), at_rest);
+}
 
 #[gpui::test]
 fn a_resolved_comment_is_listed_under_resolved_and_reopening_it_puts_it_back_in_the_diff(app: &mut TestAppContext) {

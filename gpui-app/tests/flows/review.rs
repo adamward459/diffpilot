@@ -233,8 +233,16 @@ fn the_previous_thread_arrow_reaches_the_review_summary(app: &mut TestAppContext
     wait_until_shows(cx, "review:done");
     wait_until_shows(cx, "jump-bar:threads:2");
 
+    assert!(
+        shows(cx, "jump-bar:thread-steps:false:true"),
+        "at the top, only Next works"
+    );
     click(cx, "jump-bar:thread-next");
     assert!(shows(cx, "finding:Late"));
+    assert!(
+        shows(cx, "jump-bar:thread-steps:true:false"),
+        "on the last thread, only Previous works"
+    );
     let summary = format!("comment:{CLAUDE_NAME}:Fine overall.");
     assert!(!shows(cx, &summary), "the summary is out of view");
     click(cx, "jump-bar:thread-previous");

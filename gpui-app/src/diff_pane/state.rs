@@ -68,6 +68,7 @@ pub struct PaneState {
     widest: Option<usize>,
     reported: Option<String>,
     reported_mode: DiffMode,
+    reported_steps: ThreadSteps,
     index: HashMap<String, usize>,
 }
 
@@ -96,6 +97,7 @@ impl PaneState {
             widest: None,
             reported: None,
             reported_mode: DiffMode::Unified,
+            reported_steps: ThreadSteps::default(),
             index: HashMap::new(),
         }
     }
@@ -649,8 +651,28 @@ impl PaneState {
     }
 
     pub fn step_thread(&mut self, forward: bool, inset: f32) -> bool {
+        let Some(stop) = self.thread_stop(forward, inset) else {
+            return false;
+        };
+        self.scroll_to(stop);
+        true
+    }
+
+    pub fn thread_steps(&self, inset: f32) -> ThreadSteps {
+        ThreadSteps {
+            previous: self.thread_stop(false, inset).is_some(),
+            next: self.thread_stop(true, inset).is_some(),
+        }
+    }
+
+    pub fn take_thread_steps_change(&mut self, inset: f32) -> Option<ThreadSteps> {
+        let current = self.thread_steps(inset);
+        (current != std::mem::replace(&mut self.reported_steps, current)).then_some(current)
+    }
+
+    fn thread_stop(&self, forward: bool, inset: f32) -> Option<f32> {
         let max = self.max_scroll();
-        let targets = self.blocks.iter().enumerate().filter_map(|(slot, block)| {
+        let stops = self.blocks.iter().enumerate().filter_map(|(slot, block)| {
             if !matches!(block.id, BlockId::Thread(_)) {
                 return None;
             }
@@ -662,15 +684,18 @@ impl PaneState {
             let header = self.tops.top(self.rows.header_index(file)?);
             Some((top - inset).max(header).clamp(0.0, max))
         });
-        let target = if forward {
-            targets.filter(|y| *y > self.scroll + 0.5).min_by(f32::total_cmp)
+        if forward {
+            stops.filter(|y| *y > self.scroll + 0.5).min_by(f32::total_cmp)
         } else {
-            targets.filter(|y| *y < self.scroll - 0.5).max_by(f32::total_cmp)
-        };
-        let Some(target) = target else { return false };
-        self.scroll_to(target);
-        true
+            stops.filter(|y| *y < self.scroll - 0.5).max_by(f32::total_cmp)
+        }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ThreadSteps {
+    pub previous: bool,
+    pub next: bool,
 }
 
 #[cfg(test)]
@@ -1081,6 +1106,24 @@ mod tests {
         assert!(state.step_thread(false, 10.0));
         assert_eq!(state.scroll(), first);
         assert!(!state.step_thread(false, 10.0));
+    }
+
+    #[test]
+    fn a_thread_step_is_offered_only_while_a_thread_lies_in_that_direction() {
+        let mut state = state(three_files());
+        let steps = |previous, next| ThreadSteps { previous, next };
+        assert_eq!(state.take_thread_steps_change(10.0), None);
+
+        state.set_blocks(vec![line_thread(2, "f1.ts", 5), line_thread(1, "f0.ts", 5)]);
+        assert_eq!(state.take_thread_steps_change(10.0), Some(steps(false, true)));
+        state.step_thread(true, 10.0);
+        assert_eq!(state.take_thread_steps_change(10.0), Some(steps(true, true)));
+        state.step_thread(true, 10.0);
+        assert_eq!(state.take_thread_steps_change(10.0), Some(steps(true, false)));
+        assert_eq!(state.take_thread_steps_change(10.0), None);
+
+        state.scroll_to(0.0);
+        assert_eq!(state.take_thread_steps_change(10.0), Some(steps(false, true)));
     }
 
     #[test]

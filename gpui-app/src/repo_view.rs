@@ -576,7 +576,7 @@ impl RepoView {
                     }
                     DiffPaneEvent::OpenInEditor { path, line } => this.open_in_editor(path, *line, cx),
                     DiffPaneEvent::FirstPaint => Bench::mark_now(cx, Mark::FirstDiffPaint),
-                    DiffPaneEvent::ShownMode(_) => cx.notify(),
+                    DiffPaneEvent::ShownMode(_) | DiffPaneEvent::ThreadSteps => cx.notify(),
                     DiffPaneEvent::OpenRef(code) => this.open_ref(code, window, cx),
                     DiffPaneEvent::RevealInFinder(path) => cx.reveal_path(&this.repo.join(path)),
                     DiffPaneEvent::Changed => this.start_load(window, cx),
@@ -1181,6 +1181,11 @@ impl RepoView {
             .as_ref()
             .and_then(|session| session.pane.read(cx).review().cloned())
             .map_or(0, |review| review.read(cx).thread_count());
+        let steps = self
+            .session
+            .as_ref()
+            .map(|session| session.pane.read(cx).thread_steps())
+            .unwrap_or_default();
         let nothing = |_: &gpui::ClickEvent, _: &mut Window, _: &mut gpui::App| {};
         jump_bar(&tokens)
             .id("jump-bar")
@@ -1229,7 +1234,7 @@ impl RepoView {
                     "thread-previous",
                     Glyph::ChevronUp,
                     "Previous thread",
-                    threads > 0,
+                    steps.previous,
                     false,
                     cx.listener(|this, _, _, cx| this.step_thread(false, cx)),
                 ),
@@ -1241,13 +1246,15 @@ impl RepoView {
                     "thread-next",
                     Glyph::ChevronDown,
                     "Next thread",
-                    threads > 0,
+                    steps.next,
                     false,
                     cx.listener(|this, _, _, cx| this.step_thread(true, cx)),
                 ),
                 || "jump-bar:thread-next".to_string(),
             ))
-            .child(div().w(px(4.)))
+            .child(tag(div().w(px(4.)), || {
+                format!("jump-bar:thread-steps:{}:{}", steps.previous, steps.next)
+            }))
             .child(self.diff_mode_switch(cx))
             .child(self.wrap_button(cx))
             .into_any_element()

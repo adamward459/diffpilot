@@ -323,7 +323,7 @@ impl CommentsPanel {
         let hover = theme.hover;
         let header = h_flex()
             .gap(px(6.))
-            .min_h(px(22.))
+            .h(px(22.))
             .children(line_label(thread).map(|label| {
                 div()
                     .flex_none()

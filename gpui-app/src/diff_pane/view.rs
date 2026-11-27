@@ -11,7 +11,7 @@ use crate::diff_pane::preview::{self, ImageMode, PreviewCard, PreviewEvent};
 use crate::diff_pane::rows::{BlockId, BlockSlot, Notice, RowKind};
 use crate::diff_pane::selection::{Extent, Selection, Spot, column_line, word_at};
 use crate::diff_pane::stage_lines;
-use crate::diff_pane::state::{Geometry, PaneState, ThumbDrag};
+use crate::diff_pane::state::{Geometry, PaneState, ThreadSteps, ThumbDrag};
 use crate::guide::note::{NoteCard, NoteEvent};
 use crate::guide::text::CodeRef;
 use crate::review::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange, card_key};
@@ -66,6 +66,7 @@ pub enum DiffPaneEvent {
     },
     /// The mode the rows are drawn in changed. A split pane that is too narrow draws unified rows.
     ShownMode(DiffMode),
+    ThreadSteps,
     OpenRef(CodeRef),
     RevealInFinder(String),
     /// A stage, unstage or discard changed the repository, so the diff is stale.
@@ -413,6 +414,10 @@ impl DiffPane {
             self.last_scroll = Some(Instant::now());
             self.sync(cx);
         }
+    }
+
+    pub fn thread_steps(&self) -> ThreadSteps {
+        self.state.thread_steps(FILE_HEADER + HUNK)
     }
 
     pub fn scroll_to(&mut self, y: f32, cx: &mut Context<Self>) {
@@ -1066,6 +1071,9 @@ impl DiffPane {
         }
         if let Some(mode) = self.state.take_shown_change() {
             cx.emit(DiffPaneEvent::ShownMode(mode));
+        }
+        if self.state.take_thread_steps_change(FILE_HEADER + HUNK).is_some() {
+            cx.emit(DiffPaneEvent::ThreadSteps);
         }
         self.pump_highlights(cx);
         self.pump_previews(cx);
