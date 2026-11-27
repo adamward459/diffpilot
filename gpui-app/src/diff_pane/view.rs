@@ -1734,7 +1734,8 @@ impl Render for DiffPane {
         let mut root = div()
             .id("diff-pane")
             .key_context(KEY_CONTEXT)
-            .track_focus(&self.focus)
+            // On the root, gpui would focus the pane on every click inside it and take focus from a comment box.
+            .child(div().size_0().track_focus(&self.focus))
             .on_action(cx.listener(|this, _: &CopySelection, _, cx| this.copy_selection(cx)))
             .on_action(cx.listener(|this, _: &ClearSelection, _, cx| {
                 if this.selection.take().is_some() {
