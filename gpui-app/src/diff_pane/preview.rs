@@ -13,7 +13,8 @@ use gpui::{
     TextRun, UnderlineStyle, Window, div, font, img, px,
 };
 use gpui::{
-    Bounds, CursorStyle, EventEmitter, InteractiveElement as _, MouseButton, MouseMoveEvent, Pixels, Point, canvas,
+    AppContext as _, Bounds, CursorStyle, DragMoveEvent, EventEmitter, InteractiveElement as _, MouseButton, Pixels,
+    Point, StatefulInteractiveElement as _, canvas,
 };
 use gpui_component::ActiveTheme;
 use std::cell::Cell;
@@ -280,6 +281,14 @@ pub enum PreviewEvent {
 type OnMode = Rc<dyn Fn(usize, &mut Window, &mut App)>;
 type OnPick = Rc<dyn Fn(Point<Pixels>, &mut Window, &mut App)>;
 
+struct SliderDrag;
+
+impl Render for SliderDrag {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        gpui::Empty
+    }
+}
+
 struct Controls {
     path: String,
     mode: ImageMode,
@@ -464,19 +473,20 @@ fn stacked(old: &ImageBody, new: &ImageBody, theme: &Theme, width: f32, controls
         .size_full();
     let on_down = controls.on_pick.clone();
     let on_move = controls.on_pick.clone();
-    let draggable = |element: Div| {
+    let draggable = |element: Div, id: &'static str| {
         element
+            .id(id)
             .cursor(CursorStyle::ResizeLeftRight)
             .on_mouse_down(MouseButton::Left, move |event, window, cx| {
                 on_down(event.position, window, cx)
             })
-            .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
-                if event.pressed_button == Some(MouseButton::Left) {
-                    on_move(event.position, window, cx)
-                }
+            .on_drag(SliderDrag, |_, _, _, cx| cx.new(|_| SliderDrag))
+            .on_drag_move(move |event: &DragMoveEvent<SliderDrag>, window, cx| {
+                on_move(event.event.position, window, cx)
             })
+            .into_any_element()
     };
-    let mut stage = tag(div(), || format!("pane:image-stage:{}", controls.path))
+    let stage = tag(div(), || format!("pane:image-stage:{}", controls.path))
         .relative()
         .flex_none()
         .w(px(stage_w))
@@ -487,9 +497,9 @@ fn stacked(old: &ImageBody, new: &ImageBody, theme: &Theme, width: f32, controls
         .rounded(px(6.0))
         .bg(theme.diff.cap)
         .child(layer(old, old_size));
-    let slider = if swipe {
+    let (stage, slider) = if swipe {
         let split = position * stage_w;
-        stage = draggable(
+        let stage = draggable(
             stage
                 .child(
                     div()
@@ -511,7 +521,7 @@ fn stacked(old: &ImageBody, new: &ImageBody, theme: &Theme, width: f32, controls
                         .bg(theme.accent),
                 )
                 .child(
-                    div()
+                    tag(div(), || format!("pane:swipe-knob:{}", controls.path))
                         .absolute()
                         .top(px(stage_h / 2.0 - KNOB / 2.0))
                         .left(px(split - KNOB / 2.0))
@@ -520,10 +530,11 @@ fn stacked(old: &ImageBody, new: &ImageBody, theme: &Theme, width: f32, controls
                         .bg(theme.accent),
                 )
                 .child(measure),
+            "image-swipe",
         );
-        None
+        (stage, None)
     } else {
-        stage = stage.child(layer(new, new_size).opacity(position));
+        let stage = stage.child(layer(new, new_size).opacity(position)).into_any_element();
         let track = draggable(
             tag(div(), || format!("pane:onion-track:{}", controls.path))
                 .relative()
@@ -533,7 +544,7 @@ fn stacked(old: &ImageBody, new: &ImageBody, theme: &Theme, width: f32, controls
                 .items_center()
                 .child(div().w_full().h(px(4.0)).rounded_full().bg(theme.diff.line))
                 .child(
-                    div()
+                    tag(div(), || format!("pane:onion-knob:{}", controls.path))
                         .absolute()
                         .top_0()
                         .left(px(position * ONION_TRACK - KNOB / 2.0))
@@ -542,8 +553,9 @@ fn stacked(old: &ImageBody, new: &ImageBody, theme: &Theme, width: f32, controls
                         .bg(theme.accent),
                 )
                 .child(measure),
+            "onion-track",
         );
-        Some(
+        let slider = Some(
             div()
                 .flex()
                 .items_center()
@@ -555,7 +567,8 @@ fn stacked(old: &ImageBody, new: &ImageBody, theme: &Theme, width: f32, controls
                 .child("Before")
                 .child(track)
                 .child("After"),
-        )
+        );
+        (stage, slider)
     };
     let caption = |label: &'static str, image: &ImageBody| {
         div()

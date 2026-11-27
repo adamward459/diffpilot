@@ -348,6 +348,23 @@ pub fn drag_below(cx: &mut VisualTestContext, selector: &str, from: f32, to: f32
     draw(cx);
 }
 
+pub fn center_x(cx: &mut VisualTestContext, selector: &str) -> f32 {
+    let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
+    f32::from(bounds.center().x)
+}
+
+pub fn drag_by(cx: &mut VisualTestContext, selector: &str, dx: f32, dy: f32) {
+    let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
+    let start = bounds.center();
+    let at = |step: f32| start + gpui::point(gpui::px(dx * step), gpui::px(dy * step));
+    cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+    for step in 1..=4 {
+        cx.simulate_mouse_move(at(step as f32 / 4.0), MouseButton::Left, Modifiers::default());
+    }
+    cx.simulate_mouse_up(at(1.0), MouseButton::Left, Modifiers::default());
+    draw(cx);
+}
+
 pub fn press(cx: &mut VisualTestContext, keys: &str) {
     cx.simulate_keystrokes(keys);
     draw(cx);

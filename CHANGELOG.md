@@ -35,6 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 - The Previous and Next thread arrows in the top bar now jump to the thread above or below. Before, they were always disabled.
 - Comment on file in a file header now opens a comment on that file.
+- The Swipe and Onion Skin sliders on a changed image now follow the mouse until you let go, even when the pointer leaves the slider.
 
 ### Added
 

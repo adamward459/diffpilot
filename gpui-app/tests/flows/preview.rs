@@ -1,4 +1,4 @@
-use diffpilot::testing::{click, open_preview, shows, wait_until_shows};
+use diffpilot::testing::{center_x, click, drag_by, open_preview, shows, wait_until_shows};
 use gpui::TestAppContext;
 
 #[gpui::test]
@@ -37,4 +37,28 @@ fn an_added_image_has_no_compare_modes(app: &mut TestAppContext) {
     wait_until_shows(cx, "pane:image-mode:assets/logo.png:2-up");
     assert!(shows(cx, "pane:preview-card:assets/icon.png"));
     assert!(!shows(cx, "pane:image-mode:assets/icon.png:2-up"));
+}
+
+#[gpui::test]
+fn the_image_sliders_follow_a_drag_that_leaves_them(app: &mut TestAppContext) {
+    let (_opened, cx) = open_preview(app);
+    wait_until_shows(cx, "pane:image-mode:assets/logo.png:Onion Skin");
+    click(cx, "pane:image-mode:assets/logo.png:Onion Skin");
+    let knob = "pane:onion-knob:assets/logo.png";
+    let track = "pane:onion-track:assets/logo.png";
+    let middle = center_x(cx, track);
+    drag_by(cx, knob, -60.0, 120.0);
+    assert!(
+        (center_x(cx, knob) - (middle - 60.0)).abs() < 1.5,
+        "the onion knob stays under the pointer after it leaves the track"
+    );
+
+    click(cx, "pane:image-mode:assets/logo.png:Swipe");
+    let knob = "pane:swipe-knob:assets/logo.png";
+    let start = center_x(cx, knob);
+    drag_by(cx, knob, -8.0, 400.0);
+    assert!(
+        (center_x(cx, knob) - (start - 8.0)).abs() < 1.5,
+        "the swipe knob stays under the pointer after it leaves the image"
+    );
 }
