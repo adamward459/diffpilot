@@ -39,6 +39,11 @@ fn model_of(text: &str) -> Option<ReviewModel> {
 
 const COLUMNS: &str = "id, session_id, run_id, model, created_at, finished_at, data";
 
+// A guide describes the branch, so every comparison of that branch reads the same one. `stale::check` then
+// tells the reader when the diff on screen is not the one the guide was written for.
+const BRANCH_SESSIONS: &str = "SELECT other.id FROM sessions own JOIN sessions other
+     ON other.repo = own.repo AND other.branch = own.branch WHERE own.id = ?1";
+
 fn stored(row: &Row) -> rusqlite::Result<StoredGuide> {
     let data: String = row.get(6)?;
     Ok(StoredGuide {
@@ -126,7 +131,8 @@ impl Store {
         Ok(conn
             .query_row(
                 &format!(
-                    "SELECT {COLUMNS} FROM guides WHERE session_id = ?1 AND state = 'done' ORDER BY id DESC LIMIT 1"
+                    "SELECT {COLUMNS} FROM guides WHERE session_id IN ({BRANCH_SESSIONS}) AND state = 'done'
+                     ORDER BY id DESC LIMIT 1"
                 ),
                 [session.0],
                 stored,
@@ -148,11 +154,11 @@ impl Store {
     /// Finished guides of the review, newest first. The first is the current one; the rest are Past Guides.
     pub fn guides(&self, session: SessionId, limit: usize) -> Result<Vec<GuideSummary>> {
         let conn = self.lock();
-        let mut statement = conn.prepare(
+        let mut statement = conn.prepare(&format!(
             "SELECT id, run_id, json_extract(data, '$.overview.title'), json_array_length(data, '$.chapters'),
                     model, created_at, finished_at
-             FROM guides WHERE session_id = ?1 AND state = 'done' ORDER BY id DESC LIMIT ?2",
-        )?;
+             FROM guides WHERE session_id IN ({BRANCH_SESSIONS}) AND state = 'done' ORDER BY id DESC LIMIT ?2"
+        ))?;
         let rows = statement.query_map((session.0, i64::try_from(limit).unwrap_or(i64::MAX)), |row| {
             Ok(GuideSummary {
                 id: GuideId(row.get(0)?),
@@ -313,13 +319,19 @@ mod tests {
     }
 
     #[test]
-    fn each_review_has_its_own_guide() {
+    fn a_guide_belongs_to_the_branch_whatever_it_is_compared_to() {
         let (store, session) = setup();
-        let other = store.session(&SessionKey::new("/r", "topic", "develop")).unwrap();
+        let other_base = store.session(&SessionKey::new("/r", "topic", "develop")).unwrap();
+        let other_branch = store.session(&SessionKey::new("/r", "feature", "main")).unwrap();
+        let other_repo = store.session(&SessionKey::new("/s", "topic", "main")).unwrap();
         store.save_draft(session, RunId(1), MODEL, &sample()).unwrap();
         store.complete_draft(RunId(1), &sample()).unwrap();
-        assert!(store.current_guide(session).unwrap().is_some());
-        assert_eq!(store.current_guide(other).unwrap(), None);
+        let written = store.current_guide(session).unwrap();
+        assert!(written.is_some());
+        assert_eq!(store.current_guide(other_base).unwrap(), written);
+        assert_eq!(store.guides(other_base, 10).unwrap().len(), 1);
+        assert_eq!(store.current_guide(other_branch).unwrap(), None);
+        assert_eq!(store.current_guide(other_repo).unwrap(), None);
     }
 
     #[test]

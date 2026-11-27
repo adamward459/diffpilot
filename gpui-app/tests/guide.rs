@@ -285,6 +285,34 @@ fn mark_viewed_and_continue_marks_the_chapter_and_opens_the_next(app: &mut TestA
 }
 
 #[gpui::test]
+fn the_guide_follows_the_branch_to_another_comparison_and_shows_as_out_of_date(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    store_guide(&world, cx);
+    show_guide(&world, cx);
+    assert!(cx.debug_bounds("guide-out-of-date").is_none());
+
+    world
+        .view
+        .update_in(cx, |view, window, cx| view.show_nav(Nav::Files, window, cx));
+    cx.run_until_parked();
+    click(cx, "comparison-base");
+    click(cx, "comparison-base:Working Tree Changes Only");
+    testing::draw(cx);
+    show_guide(&world, cx);
+    testing::draw(cx);
+
+    let guide = world.view.read_with(cx, |view, _| view.guide());
+    assert!(
+        guide.read_with(cx, |guide, _| guide.stored().is_some()),
+        "the guide written against the branch base is still the guide of this branch"
+    );
+    assert!(
+        cx.debug_bounds("guide-out-of-date").is_some(),
+        "it describes another diff, so it shows as out of date"
+    );
+}
+
+#[gpui::test]
 fn a_changed_diff_shows_the_out_of_date_banner_until_the_reader_keeps_reading(app: &mut TestAppContext) {
     let (world, cx) = open(app, false);
     store_guide(&world, cx);
