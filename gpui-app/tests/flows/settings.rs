@@ -1,6 +1,7 @@
 use diffpilot::settings::Section;
 use diffpilot::testing::{
     bounds, click, click_corner, fixture, fixture_named, open_settings, open_workspace, press, shows, type_text,
+    wait_for_motion,
 };
 use diffpilot_core::settings::Settings;
 use gpui::{TestAppContext, VisualTestContext};
@@ -52,6 +53,40 @@ fn settings_open_as_a_dialog_over_the_app_and_a_click_outside_closes_it(app: &mu
     assert!(
         shows(cx, "comparison-base:Staged Changes Only"),
         "a click on the backdrop closes the dialog and the app works again"
+    );
+}
+
+#[gpui::test]
+fn the_dialog_is_still_on_screen_while_it_closes_and_gone_after(app: &mut TestAppContext) {
+    let dir = fixture();
+    let cx = open_settings(app, Some(dir.path()), Arc::new(Settings::in_memory()), Section::General);
+
+    press(cx, "escape");
+    assert!(
+        shows(cx, "settings:backdrop:closing"),
+        "the dialog is still drawn right after Escape"
+    );
+
+    wait_for_motion(cx);
+    click(cx, "comparison-base");
+    assert!(
+        shows(cx, "comparison-base:Staged Changes Only"),
+        "after the close time the app answers clicks"
+    );
+}
+
+#[gpui::test]
+fn opening_settings_again_during_the_close_keeps_the_dialog_open(app: &mut TestAppContext) {
+    let dir = fixture();
+    let cx = open_settings(app, Some(dir.path()), Arc::new(Settings::in_memory()), Section::General);
+
+    press(cx, "escape");
+    press(cx, "cmd-,");
+    wait_for_motion(cx);
+    click(cx, "comparison-base");
+    assert!(
+        !shows(cx, "comparison-base:Staged Changes Only"),
+        "the dialog stayed open, so the click landed on its backdrop"
     );
 }
 

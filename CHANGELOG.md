@@ -6,8 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Text across the app is smaller and uses four sizes, like VS Code on macOS: 13 px body, 12 px captions, 11 px badges, and 14 px bold titles. Diff lines are 18 px tall.
+- The Comments panel now slides out when you close it, and the sidebar, inspector, and Claude area close with motion too.
+- The Settings dialog now fades in and out.
+- Menus and popovers now fade out when they close, as they already did when they open.
+- Switches slide their thumb, segmented controls fade the highlight to the new segment, and the Viewed check mark fades in.
+
 ### Fixed
 
+- The app no longer crashes when you open the model and effort menu in the Ask Claude popover. The menu now opens above the button.
+- Long paths and commands in Settings now wrap inside their row. Before, the Claude path ran past the dialog and under the buttons.
 - The diff scroll bar can be dragged. Point at the right edge of the diff to show a wider thumb, drag it, or click the edge to jump there.
 - Previous thread now stops on the review summary at the top of the diff, so you can step back to it from any comment.
 

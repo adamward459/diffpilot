@@ -141,6 +141,12 @@ fn rig_with(cx: &mut TestAppContext, arrow: bool) -> (Rig, &mut VisualTestContex
 
 impl Rig {
     fn settle(&self, cx: &mut VisualTestContext) {
+        cx.executor()
+            .advance_clock(crate::components::OVERLAY_DURATION + std::time::Duration::from_millis(10));
+        self.draw(cx);
+    }
+
+    fn draw(&self, cx: &mut VisualTestContext) {
         let root = self.root.clone();
         cx.run_until_parked();
         cx.draw(point(px(0.), px(0.)), size(px(800.), px(700.)), move |_, _| root);
@@ -188,6 +194,29 @@ async fn a_submenu_of_a_scrolling_menu_can_be_clicked(cx: &mut TestAppContext) {
     assert_eq!(rig.picked(), vec!["b2"]);
     rig.click(cx, "m:Item 0");
     assert_eq!(rig.picked(), vec!["b2"], "picking a row closes the whole menu");
+}
+
+#[gpui::test]
+async fn a_closing_menu_takes_no_clicks_and_is_gone_after_the_close_time(cx: &mut TestAppContext) {
+    let (rig, cx) = rig(cx);
+    rig.click(cx, "open");
+    let at = rig.center(cx, "m:Item 0");
+    cx.simulate_click(at, Modifiers::default());
+    rig.draw(cx);
+    assert_eq!(rig.picked(), vec!["Item 0"]);
+
+    cx.simulate_click(at, Modifiers::default());
+    rig.draw(cx);
+    assert_eq!(rig.picked(), vec!["Item 0"], "the closing menu does not pick again");
+
+    rig.settle(cx);
+    rig.click(cx, "open");
+    rig.click(cx, "m:Item 1");
+    assert_eq!(
+        rig.picked(),
+        vec!["Item 0", "Item 1"],
+        "the menu opens again once it is gone"
+    );
 }
 
 #[gpui::test]

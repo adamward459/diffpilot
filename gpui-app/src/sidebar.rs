@@ -258,7 +258,7 @@ impl Sidebar {
                     h_flex()
                         .gap_1()
                         .font_family(theme.mono_font_family.clone())
-                        .text_size(diffpilot_ui_kit::text_px(11.5))
+                        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
                         .child(
                             div()
                                 .text_color(tokens.success)
@@ -288,7 +288,7 @@ impl Sidebar {
                 tag(div(), || {
                     format!("sidebar:summary:{}/{} viewed", summary.viewed, summary.file_count)
                 })
-                .text_size(diffpilot_ui_kit::text_px(12.))
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                 .text_color(muted)
                 .whitespace_nowrap()
                 .overflow_hidden()
@@ -383,7 +383,7 @@ impl Render for Sidebar {
         v_flex()
             .id("sidebar")
             .size_full()
-            .text_size(diffpilot_ui_kit::text_px(12.))
+            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
             .child(header)
             .child(filter_row)
             .child(
@@ -551,7 +551,7 @@ impl Sidebar {
                                 .flex_1()
                                 .min_w_0()
                                 .truncate()
-                                .text_size(diffpilot_ui_kit::text_px(11.))
+                                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
                                 .text_color(tertiary)
                                 .child(SharedString::from(entry.parent_path.clone())),
                         )
@@ -561,7 +561,7 @@ impl Sidebar {
                         this.child(
                             tag(h_flex(), || format!("sidebar:comments:{path}:{comments}"))
                                 .gap(px(2.))
-                                .text_size(diffpilot_ui_kit::text_px(11.))
+                                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
                                 .text_color(secondary)
                                 .child(Icon::new(Glyph::MessageSquare).size(px(11.)))
                                 .child(comments.to_string()),

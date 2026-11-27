@@ -162,7 +162,7 @@ impl ClaudeArea {
             .gap(px(6.))
             .border_b_1()
             .border_color(theme.ui.line)
-            .text_size(diffpilot_ui_kit::text_px(12.))
+            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
             .text_color(theme.ui.muted)
             .child(
                 tag(
@@ -274,7 +274,7 @@ impl ClaudeArea {
             div()
                 .mt(px(12.))
                 .mb(px(6.))
-                .text_size(diffpilot_ui_kit::text_px(12.))
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme.ui.muted)
                 .child(text)
@@ -294,7 +294,7 @@ impl ClaudeArea {
             .overflow_y_scroll()
             .border_r_1()
             .border_color(theme.ui.line)
-            .text_size(diffpilot_ui_kit::text_px(12.5))
+            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
             .text_color(theme.ui.text)
             .child(heading("Plan".into()).mt(px(0.)))
             .when(steps.is_empty(), |pane| {
@@ -350,7 +350,7 @@ impl ClaudeArea {
                 )
                 .children(at_ms.map(|at| {
                     div()
-                        .text_size(diffpilot_ui_kit::text_px(11.))
+                        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
                         .text_color(theme.ui.muted)
                         .child(mmss(at))
                 }))
@@ -393,7 +393,7 @@ impl ClaudeArea {
                     .justify_end()
                     .border_t_1()
                     .border_color(theme.ui.line)
-                    .text_size(diffpilot_ui_kit::text_px(11.))
+                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
                     .text_color(theme.ui.muted)
                     .when(following, |footer| footer.child("Following the run")),
             )
@@ -435,7 +435,7 @@ impl Render for ClaudeArea {
                 .items_center()
                 .justify_center()
                 .gap(px(6.))
-                .text_size(diffpilot_ui_kit::text_px(13.))
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
                 .text_color(theme.ui.muted)
                 .child(tag(div(), || "claude-area:empty").child("Claude has not run on this review yet."))
                 .child("Start a review with Ask Claude, and its plan and log show up here.")
@@ -606,7 +606,7 @@ fn log_row(entry: &LogEntry, theme: Theme, mono: &SharedString) -> AnyElement {
         h_flex().h(px(ROW_HEIGHT)).px(px(14.)).gap(px(8.)).items_center(),
         || format!("claude-area:log:{}:{text}", kind_name(entry.kind)),
     )
-    .text_size(diffpilot_ui_kit::text_px(12.5))
+    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
     .text_color(color)
     .child(time_cell(entry.at_ms, theme, mono))
     .child(glyph_icon(kind_glyph(entry.kind), 13., color))
@@ -627,7 +627,7 @@ fn thinking_row(elapsed_ms: u64, theme: Theme, mono: &SharedString) -> AnyElemen
         h_flex().h(px(ROW_HEIGHT)).px(px(14.)).gap(px(8.)).items_center(),
         || "claude-area:thinking",
     )
-    .text_size(diffpilot_ui_kit::text_px(12.5))
+    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
     .text_color(theme.ui.muted)
     .child(time_cell(elapsed_ms, theme, mono))
     .child(spinner("claude-area-thinking", 13., theme.ui.muted))
@@ -640,7 +640,7 @@ fn time_cell(at_ms: u64, theme: Theme, mono: &SharedString) -> impl IntoElement 
         .w(px(38.))
         .flex_none()
         .font_family(mono.clone())
-        .text_size(diffpilot_ui_kit::text_px(11.))
+        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
         .text_color(theme.ui.faint)
         .child(mmss(at_ms))
 }

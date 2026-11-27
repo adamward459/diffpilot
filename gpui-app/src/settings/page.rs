@@ -505,8 +505,8 @@ impl Render for SettingsPage {
                         .when(ix == last, |this| this.min_h(viewport))
                         .child(
                             div()
-                                .text_size(diffpilot_ui_kit::text_px(20.))
-                                .line_height(px(28.))
+                                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::TITLE))
+                                .line_height(px(20.))
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .child(section.title()),
                         )
@@ -562,7 +562,7 @@ impl Render for SettingsPage {
             .size_full()
             .text_color(t.ui.text)
             .font_family(cx.theme().font_family.clone())
-            .text_size(diffpilot_ui_kit::text_px(13.))
+            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
             .child(header)
             .child(
                 div().flex_none().flex().px(px(20.)).pb(px(12.)).child(tag(
@@ -599,7 +599,7 @@ impl Render for SettingsPage {
                                 div()
                                     .px(px(10.))
                                     .pb(px(16.))
-                                    .text_size(px(12.))
+                                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                                     .text_color(t.ui.muted)
                                     .child(format!("Version {}", env!("CARGO_PKG_VERSION"))),
                                 || format!("settings:version:{}", env!("CARGO_PKG_VERSION")),
@@ -660,7 +660,7 @@ impl SettingsPage {
             .child(
                 div()
                     .flex_1()
-                    .text_size(diffpilot_ui_kit::text_px(15.))
+                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::TITLE))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .child("Settings"),
             )

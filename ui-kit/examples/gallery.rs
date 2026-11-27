@@ -3,9 +3,9 @@
 use diffpilot_core::review::Severity;
 use diffpilot_ui_kit::components::menu::{Menu, MenuItem, MenuRow, MenuSection};
 use diffpilot_ui_kit::components::{
-    BadgeTone, Button, Fills, Look, State, avatar, capsule, card_shell, chip, filled_check, filter_field, glass_button,
-    icon_button, interactive, popover, segmented, segmented_control, severity_badge, status_badge, toggle_capsule,
-    viewed_toggle,
+    BadgeTone, Button, Fills, Look, Presence, State, avatar, capsule, card_shell, chip, dialog, filled_check,
+    filter_field, glass_button, icon_button, interactive, popover, segmented, segmented_control, severity_badge,
+    side_sheet, status_badge, toggle_capsule, viewed_toggle,
 };
 use diffpilot_ui_kit::{Assets, Glyph, Theme};
 use gpui::{
@@ -17,6 +17,24 @@ use std::rc::Rc;
 
 struct Gallery {
     menu: Entity<Menu>,
+    sheet: Presence,
+    dialog: Presence,
+}
+
+fn shells(theme: &Theme, cx: &mut Context<Gallery>) -> impl IntoElement {
+    let button = |id: &'static str, label: &'static str, field: fn(&mut Gallery) -> &mut Presence| {
+        Button::new(id)
+            .label(label)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                let presence = *field(this);
+                field(this).set_open(!presence.is_open(), cx, field);
+            }))
+    };
+    h_flex()
+        .gap(px(8.))
+        .child(button("sheet-toggle", "Toggle side sheet", |this| &mut this.sheet))
+        .child(button("dialog-toggle", "Toggle dialog", |this| &mut this.dialog))
+        .text_color(theme.ui.text)
 }
 
 fn section(theme: &Theme, title: &'static str, body: impl IntoElement) -> impl IntoElement {
@@ -24,7 +42,7 @@ fn section(theme: &Theme, title: &'static str, body: impl IntoElement) -> impl I
         .gap(px(10.))
         .child(
             div()
-                .text_size(diffpilot_ui_kit::text_px(11.))
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
                 .text_color(theme.ui.muted)
                 .child(title.to_uppercase()),
         )
@@ -167,7 +185,7 @@ fn overlays(theme: &Theme, menu: &Entity<Menu>) -> impl IntoElement {
     let note = |theme: &Theme, text: &'static str| {
         v_flex().gap(px(4.)).w(px(210.)).child(
             div()
-                .text_size(diffpilot_ui_kit::text_px(13.))
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
                 .text_color(theme.ui.text)
                 .child(text),
         )
@@ -255,7 +273,7 @@ fn card(theme: &Theme) -> impl IntoElement {
     card_shell(theme, theme.ui.line).child(
         div()
             .p(px(12.))
-            .text_size(diffpilot_ui_kit::text_px(13.))
+            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
             .child("A card shell with a border and a shadow."),
     )
 }
@@ -413,7 +431,7 @@ fn state_rows() -> Vec<(&'static str, Cell)> {
                     .px(px(8.))
                     .rounded(px(8.))
                     .items_center()
-                    .text_size(diffpilot_ui_kit::text_px(12.))
+                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                     .child("archive.md"),
                 Fills {
                     rest: clear,
@@ -435,7 +453,7 @@ fn states(theme: &Theme) -> impl IntoElement {
         .children(STATES.map(|(name, _)| {
             div()
                 .w(px(120.))
-                .text_size(diffpilot_ui_kit::text_px(11.))
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
                 .text_color(theme.ui.muted)
                 .child(name.to_uppercase())
         }));
@@ -446,7 +464,7 @@ fn states(theme: &Theme) -> impl IntoElement {
             .child(
                 div()
                     .w(px(150.))
-                    .text_size(diffpilot_ui_kit::text_px(12.))
+                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                     .text_color(theme.ui.muted)
                     .child(label),
             )
@@ -484,17 +502,43 @@ impl Render for Gallery {
                 "Interaction states",
                 states(&theme),
             )))
-            .child(section(&theme, "Overlays", overlays(&theme, &self.menu)));
+            .child(section(&theme, "Overlays", overlays(&theme, &self.menu)))
+            .child(section(&theme, "Side sheet and dialog", shells(&theme, cx)));
+        let panel_text = |text: &'static str| {
+            div()
+                .p(px(16.))
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
+                .text_color(theme.ui.text)
+                .child(text)
+        };
+        let close = cx.listener(|this, _, _, cx| {
+            this.sheet.set_open(false, cx, |this| &mut this.sheet);
+            this.dialog.set_open(false, cx, |this| &mut this.dialog);
+        });
+        let dialog_close = cx.listener(|this, _, _, cx| this.dialog.set_open(false, cx, |this| &mut this.dialog));
         h_flex()
+            .relative()
             .size_full()
             .bg(theme.background)
             .text_color(theme.ui.text)
-            .text_size(diffpilot_ui_kit::text_px(13.))
+            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
             .p(px(20.))
             .gap(px(24.))
             .items_start()
             .child(left)
             .child(right)
+            .children(self.sheet.is_mounted().then(|| {
+                side_sheet("gallery-sheet", &self.sheet)
+                    .width(320.)
+                    .on_backdrop_click(close)
+                    .child(panel_text("A side sheet slides in from the right edge."))
+            }))
+            .children(self.dialog.is_mounted().then(|| {
+                dialog("gallery-dialog", &self.dialog)
+                    .size(420., 220.)
+                    .on_backdrop_click(dialog_close)
+                    .child(panel_text("A dialog fades in over a dimmed backdrop."))
+            }))
     }
 }
 
@@ -526,6 +570,8 @@ fn main() {
                         cx,
                     )
                 }),
+                sheet: Presence::new(false),
+                dialog: Presence::new(false),
             });
             cx.new(|cx| Root::new(gallery, window, cx))
         })

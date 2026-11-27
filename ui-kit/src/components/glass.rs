@@ -17,8 +17,8 @@ pub const OVERLAY_PADDING: f32 = 5.;
 pub const OVERLAY_ROW_HEIGHT: f32 = 24.;
 pub const OVERLAY_ROW_RADIUS: f32 = 6.;
 pub const OVERLAY_ROW_PADDING: f32 = 6.;
-pub const OVERLAY_TEXT: f32 = 13.;
-pub const OVERLAY_DETAIL_TEXT: f32 = 12.;
+pub const OVERLAY_TEXT: f32 = crate::theme::text_size::BODY;
+pub const OVERLAY_DETAIL_TEXT: f32 = crate::theme::text_size::SECONDARY;
 
 pub fn glass_fills(theme: &Theme, rest: Hsla) -> Fills {
     Fills {
@@ -177,7 +177,7 @@ pub fn segmented(
             .flex()
             .items_center()
             .rounded_full()
-            .text_size(crate::theme::text_px(14.))
+            .text_size(crate::theme::text_px(crate::theme::text_size::BODY))
             .text_color(theme.chrome.label)
             .cursor_pointer();
         let item = if chosen {

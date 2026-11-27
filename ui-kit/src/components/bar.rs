@@ -35,7 +35,7 @@ pub fn switch_bar(theme: &Theme, id: &'static str, items: &[SwitchItem], selecte
             .justify_center()
             .gap(px(6.))
             .rounded_full()
-            .text_size(crate::theme::text_px(14.))
+            .text_size(crate::theme::text_px(crate::theme::text_size::BODY))
             .text_color(theme.chrome.label)
             .when(chosen, |this| thumb(this, theme, None))
             .when(!enabled, |this| this.opacity(DISABLED_OPACITY))
@@ -49,7 +49,7 @@ pub fn switch_bar(theme: &Theme, id: &'static str, items: &[SwitchItem], selecte
             .child(item.label)
             .child(
                 div()
-                    .text_size(crate::theme::text_px(12.5))
+                    .text_size(crate::theme::text_px(crate::theme::text_size::SECONDARY))
                     .text_color(theme.ui.faint)
                     .child(item.hint),
             )
@@ -74,7 +74,7 @@ pub fn status_bar(theme: &Theme) -> Div {
         .gap(px(12.))
         .border_t_1()
         .border_color(theme.ui.line)
-        .text_size(crate::theme::text_px(14.))
+        .text_size(crate::theme::text_px(crate::theme::text_size::BODY))
         .text_color(theme.ui.muted)
 }
 
@@ -91,7 +91,7 @@ pub fn crumbs(theme: &Theme, items: Vec<Crumb>) -> Div {
         .min_w_0()
         .gap(px(6.))
         .overflow_hidden()
-        .text_size(crate::theme::text_px(14.))
+        .text_size(crate::theme::text_px(crate::theme::text_size::BODY))
         .text_color(theme.ui.text2)
         .whitespace_nowrap()
         .children(
@@ -137,7 +137,7 @@ pub fn chip_label(theme: &Theme, text: impl Into<SharedString>, tone: ChipTone) 
         .gap(px(4.))
         .rounded_full()
         .bg(fill)
-        .text_size(crate::theme::text_px(13.))
+        .text_size(crate::theme::text_px(crate::theme::text_size::BODY))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(text_color)
         .whitespace_nowrap()
@@ -216,7 +216,7 @@ pub fn activity_capsule(theme: &Theme) -> Div {
     super::glass::capsule(theme, CAPSULE_HEIGHT)
         .px(px(4.))
         .gap(px(2.))
-        .text_size(crate::theme::text_px(14.))
+        .text_size(crate::theme::text_px(crate::theme::text_size::BODY))
         .text_color(theme.ui.text2)
 }
 
@@ -244,7 +244,7 @@ pub fn label_switch(
                     .h_full()
                     .px(px(10.))
                     .rounded_full()
-                    .text_size(crate::theme::text_px(13.))
+                    .text_size(crate::theme::text_px(crate::theme::text_size::BODY))
                     .text_color(theme.chrome.label)
                     .when(chosen, |this| this.bg(thumb))
                     .when(!chosen, |this| {

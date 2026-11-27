@@ -327,8 +327,12 @@ pub fn shows(cx: &mut VisualTestContext, selector: &str) -> bool {
     bounds_of(cx, selector).is_some()
 }
 
-/// Bounds of a tag once it has stopped moving, so a click lands after a menu or drawer finishes opening.
+/// Bounds of a tag once it has stopped moving, so a click lands after a menu or drawer finishes opening. Panels
+/// that were closing are gone by then, as they would be for a user who waits.
 fn settled_bounds(cx: &mut VisualTestContext, selector: &str) -> Bounds<Pixels> {
+    if diffpilot_ui_kit::components::closing_motions() > 0 {
+        wait_for_motion(cx);
+    }
     let mut bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
     for _ in 0..60 {
         std::thread::sleep(std::time::Duration::from_millis(16));
@@ -463,6 +467,13 @@ pub fn drag_by(cx: &mut VisualTestContext, selector: &str, dx: f32, dy: f32) {
 
 pub fn press(cx: &mut VisualTestContext, keys: &str) {
     cx.simulate_keystrokes(keys);
+    draw(cx);
+}
+
+/// Lets every close animation run out, so a panel that was closing is gone.
+pub fn wait_for_motion(cx: &mut VisualTestContext) {
+    cx.executor()
+        .advance_clock(diffpilot_ui_kit::components::PANEL_DURATION + std::time::Duration::from_millis(10));
     draw(cx);
 }
 

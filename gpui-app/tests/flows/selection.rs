@@ -110,7 +110,7 @@ fn dragging_over_code_can_span_lines(app: &mut TestAppContext) {
         cx,
         "pane:hunk:base.txt:0",
         (code(12.0), SECOND_ROW),
-        (code(2.0), SECOND_ROW + 20.0),
+        (code(2.0), SECOND_ROW + 18.0),
     );
     press(cx, "cmd-c");
     assert_eq!(clipboard(cx).as_deref(), Some("beta;\nmo"));

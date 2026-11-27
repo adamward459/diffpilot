@@ -234,6 +234,9 @@ impl Rig {
     }
 
     fn click(&self, cx: &mut VisualTestContext, selector: &'static str) {
+        if diffpilot_ui_kit::components::closing_motions() > 0 {
+            crate::testing::wait_for_motion(cx);
+        }
         self.settle(cx);
         self.reveal(cx, selector);
         let bounds = cx

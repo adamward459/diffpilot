@@ -5,7 +5,7 @@ use diffpilot_core::review::{Effort, ModelName, ReviewModel};
 use diffpilot_core::settings::Settings;
 use diffpilot_ui_kit::components::menu::{MenuItem, MenuRow, MenuSection, menu_button};
 use diffpilot_ui_kit::components::{
-    Button, Row, caption, glyph_icon, grouped, mono_text, note, picker, section, spinner, switch, tag,
+    Button, Row, caption, caption_code, glyph_icon, grouped, note, picker, section, spinner, switch, tag,
 };
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
@@ -33,7 +33,7 @@ fn intro(t: &Theme) -> impl IntoElement {
         ..Default::default()
     };
     div()
-        .text_size(diffpilot_ui_kit::text_px(12.))
+        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
         .line_height(px(18.))
         .text_color(t.ui.text2)
         .child(StyledText::new(TEXT).with_highlights([(start..start + "@claude".len(), mention)]))
@@ -44,7 +44,7 @@ fn status_chip(icon: Glyph, color: Hsla, text: impl Into<SharedString>) -> Div {
         .flex()
         .items_center()
         .gap(px(5.))
-        .text_size(diffpilot_ui_kit::text_px(12.))
+        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
         .text_color(color)
         .child(glyph_icon(icon, 12., color))
         .child(text.into())
@@ -55,7 +55,7 @@ fn checking(t: &Theme, id: &'static str, text: &'static str) -> Div {
         .flex()
         .items_center()
         .gap(px(5.))
-        .text_size(diffpilot_ui_kit::text_px(12.))
+        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
         .text_color(t.ui.muted)
         .child(spinner(id, 12., t.ui.muted))
         .child(text)
@@ -75,13 +75,11 @@ fn connection(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) ->
         },
     };
     let sub: AnyElement = match &page.claude {
-        Load::Ready(ClaudeStatus::Found { path, .. }) => div()
-            .flex()
-            .items_center()
-            .gap(px(4.))
-            .child(caption(t, "Uses your Claude login. Found"))
-            .child(mono_text(t, cx, path.display().to_string()))
-            .into_any_element(),
+        Load::Ready(ClaudeStatus::Found { path, .. }) => tag(
+            caption_code(t, cx, "Uses your Claude login. Found", path.display().to_string()),
+            || "claude:path",
+        )
+        .into_any_element(),
         Load::Ready(ClaudeStatus::NotFound) => caption(
             t,
             "Claude Code was not found. Install it, or choose where it is with Set Path…",
@@ -325,14 +323,12 @@ fn terminal_agents(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage
             .into_any_element(),
         Row::new(t, "Claude Code")
             .leading(Glyph::SquareTerminal)
-            .subtitle(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.))
-                    .child(caption(t, "Adds the diffpilot MCP server with"))
-                    .child(mono_text(t, cx, "claude mcp add --scope user")),
-            )
+            .subtitle(caption_code(
+                t,
+                cx,
+                "Adds the diffpilot MCP server with",
+                "claude mcp add --scope user",
+            ))
             .control(control)
             .dim(!allowed)
             .into_any_element(),

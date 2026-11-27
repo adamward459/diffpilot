@@ -16,7 +16,7 @@ pub mod metrics {
     pub const PAD_Y: f32 = 8.0;
     pub const ICON: f32 = 14.0;
     pub const GAP: f32 = 8.0;
-    pub const TEXT_SIZE: f32 = 13.0;
+    pub const TEXT_SIZE: f32 = diffpilot_ui_kit::text_size::BODY;
     pub const LINE: f32 = 19.0;
     pub const LABEL_LINE: f32 = 17.0;
 }
@@ -85,7 +85,7 @@ impl Render for NoteCard {
                         column.child(
                             div()
                                 .h(px(m::LABEL_LINE))
-                                .text_size(diffpilot_ui_kit::text_px(12.0))
+                                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(tint)
                                 .child("Take extra care"),

@@ -210,8 +210,8 @@ impl RenderOnce for Button {
         let theme = Theme::of(cx);
         let c = colors(self.look, &theme);
         let (size, weight, pad, height) = match self.scale {
-            Scale::Compact => (13., FontWeight::MEDIUM, 11., 26.),
-            Scale::Regular => (14., FontWeight::NORMAL, 13., 30.),
+            Scale::Compact => (crate::theme::text_size::BODY, FontWeight::MEDIUM, 11., 26.),
+            Scale::Regular => (crate::theme::text_size::BODY, FontWeight::NORMAL, 13., 30.),
         };
         let glass = self.look != Look::Ghost;
         let rise = match self.state {
@@ -280,7 +280,12 @@ impl RenderOnce for Button {
             .children(self.children)
             .when(self.caret, |b| b.child(Icon::new(Glyph::ChevronDown).size(px(13.))))
             .when_some(self.hint, |b, hint| {
-                b.child(div().text_size(crate::theme::text_px(11.)).opacity(0.75).child(hint))
+                b.child(
+                    div()
+                        .text_size(crate::theme::text_px(crate::theme::text_size::SMALL))
+                        .opacity(0.75)
+                        .child(hint),
+                )
             })
     }
 }
@@ -300,7 +305,7 @@ pub fn chip(name: &'static str, on: bool) -> Button {
         .regular()
         .px(px(12.))
         .rounded_full()
-        .text_size(crate::theme::text_px(13.))
+        .text_size(crate::theme::text_px(crate::theme::text_size::BODY))
         .look(if on { Look::Tint } else { Look::Plain });
     if on { chip.icon(Glyph::CheckThin, 11.) } else { chip }
 }

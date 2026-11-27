@@ -229,7 +229,7 @@ fn keycaps(t: &Theme, cx: &App, keys: &str) -> Div {
         .border_1()
         .border_color(t.ui.cap_border)
         .font_family(cx.theme().mono_font_family.clone())
-        .text_size(diffpilot_ui_kit::text_px(11.))
+        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
         .text_color(t.ui.text2)
         .child(keys.to_string())
 }

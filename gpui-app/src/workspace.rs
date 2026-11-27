@@ -7,12 +7,12 @@ use diffpilot_core::diff::DiffMode;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::{DataScope, Store};
 use diffpilot_core::viewed::ViewedStore;
-use diffpilot_ui_kit::components::{glass_panel, tag};
-use diffpilot_ui_kit::{Glyph, Theme};
+use diffpilot_ui_kit::Glyph;
+use diffpilot_ui_kit::components::{Presence, dialog};
 use gpui::prelude::*;
 use gpui::{
-    App, Context, Entity, FocusHandle, IntoElement, Menu, MenuItem, MouseButton, ParentElement, PathPromptOptions,
-    Render, Styled, Subscription, Window, WindowControlArea, actions, div, px,
+    App, Context, Entity, FocusHandle, IntoElement, Menu, MenuItem, ParentElement, PathPromptOptions, Render, Styled,
+    Subscription, Window, WindowControlArea, actions, div, px,
 };
 use gpui_component::button::Button;
 use gpui_component::{ActiveTheme, Icon, Sizable, StyledExt, h_flex, v_flex};
@@ -132,6 +132,7 @@ pub struct Workspace {
     review_store: Arc<Store>,
     benching: bool,
     settings_page: Option<(Entity<SettingsPage>, Subscription)>,
+    settings_presence: Presence,
     focus: FocusHandle,
     _menu_events: Subscription,
     _focus_lost: Subscription,
@@ -161,6 +162,7 @@ impl Workspace {
             review_store,
             benching,
             settings_page: None,
+            settings_presence: Presence::new(false),
             focus: cx.focus_handle(),
             _menu_events: menu_events,
             _focus_lost: focus_lost,
@@ -177,6 +179,7 @@ impl Workspace {
 
     fn show_folder(&mut self, folder: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.settings_page = None;
+        self.settings_presence = Presence::new(false);
         let folder = folder.canonicalize().unwrap_or(folder);
         self.settings.remember_folder(&folder);
         match self.views.iter().position(|(path, _)| *path == folder) {
@@ -233,7 +236,10 @@ impl Workspace {
     }
 
     pub fn settings_page(&self) -> Option<&Entity<SettingsPage>> {
-        self.settings_page.as_ref().map(|(page, _)| page)
+        self.settings_page
+            .as_ref()
+            .filter(|_| self.settings_presence.is_open())
+            .map(|(page, _)| page)
     }
 
     fn active_view(&self) -> Option<&Entity<RepoView>> {
@@ -266,8 +272,16 @@ impl Workspace {
     }
 
     pub fn open_settings(&mut self, section: Option<Section>, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some((page, _)) = &self.settings_page {
+        if let Some(page) = self.settings_page().cloned() {
             page.update(cx, |page, cx| page.focus_search(window, cx));
+            return;
+        }
+        if let Some((page, _)) = &self.settings_page
+            && self.settings_presence.is_mounted()
+        {
+            page.update(cx, |page, cx| page.focus_search(window, cx));
+            self.settings_presence
+                .set_open(true, cx, |this| &mut this.settings_presence);
             return;
         }
         let Some(services) = settings::services(cx) else { return };
@@ -278,27 +292,30 @@ impl Workspace {
             PageEvent::DataDeleted(scope) => this.rebuild_views(scope, window, cx),
         });
         self.settings_page = Some((page, closing));
-        cx.notify();
+        self.settings_presence = Presence::new(false);
+        self.settings_presence
+            .set_open(true, cx, |this| &mut this.settings_presence);
     }
 
     // The menu bar and every shortcut reach this view through the focused element, so focus must never rest on
     // an element that left the window.
     fn restore_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match &self.settings_page {
-            Some((page, _)) => page.update(cx, |page, cx| page.focus_search(window, cx)),
+        match self.settings_page().cloned() {
+            Some(page) => page.update(cx, |page, cx| page.focus_search(window, cx)),
             None => window.focus(&self.focus),
         }
     }
 
     fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.settings_page.take().is_none() {
+        if self.settings_page().is_none() {
             return;
         }
+        self.settings_presence
+            .set_open(false, cx, |this| &mut this.settings_presence);
         window.focus(&self.focus);
         if let Some(repo) = self.active_view() {
             repo.read(cx).focus_sidebar(window, cx);
         }
-        cx.notify();
     }
 
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
@@ -334,35 +351,13 @@ impl Workspace {
     }
 
     fn settings_dialog(&self, page: &Entity<SettingsPage>, cx: &mut Context<Self>) -> gpui::AnyElement {
-        let theme = Theme::of(cx);
-        tag(
-            div()
-                .id("settings-backdrop")
-                .absolute()
-                .inset_0()
-                .occlude()
-                .flex()
-                .items_center()
-                .justify_center()
-                .p(px(SETTINGS_MARGIN))
-                .bg(gpui::black().opacity(0.4))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, window, cx| this.close_settings(window, cx)),
-                )
-                .child(
-                    tag(glass_panel(&theme).id("settings-dialog"), || "settings:dialog")
-                        .w(px(SETTINGS_WIDTH))
-                        .h(px(SETTINGS_HEIGHT))
-                        .max_w_full()
-                        .max_h_full()
-                        .overflow_hidden()
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .child(page.clone()),
-                ),
-            || "settings:backdrop",
-        )
-        .into_any_element()
+        dialog("settings", &self.settings_presence)
+            .tags("settings:backdrop", "settings:dialog")
+            .size(SETTINGS_WIDTH, SETTINGS_HEIGHT)
+            .margin(SETTINGS_MARGIN)
+            .on_backdrop_click(cx.listener(|this, _, window, cx| this.close_settings(window, cx)))
+            .child(page.clone())
+            .into_any_element()
     }
 
     fn empty_state(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -391,13 +386,13 @@ impl Workspace {
                             .child(Icon::new(Glyph::Folder).size(px(36.)).text_color(muted))
                             .child(
                                 div()
-                                    .text_size(diffpilot_ui_kit::text_px(17.))
+                                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::TITLE))
                                     .font_semibold()
                                     .child("No Folder"),
                             )
                             .child(
                                 div()
-                                    .text_size(diffpilot_ui_kit::text_px(13.))
+                                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
                                     .text_color(muted)
                                     .text_center()
                                     .child("Press ⌘O to open a Git repository."),
@@ -442,6 +437,7 @@ impl Render for Workspace {
         let dialog = self
             .settings_page
             .as_ref()
+            .filter(|_| self.settings_presence.is_mounted())
             .map(|(page, _)| self.settings_dialog(page, cx));
         div()
             .id("workspace")

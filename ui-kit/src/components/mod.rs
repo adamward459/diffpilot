@@ -8,6 +8,7 @@ mod glass;
 mod interaction;
 pub mod menu;
 mod motion;
+mod overlay;
 mod popover;
 
 pub use badge::{BadgeTone, avatar, filled_check, severity_badge, status_badge};
@@ -19,7 +20,8 @@ pub use button::{Button, Look, Scale, chip, icon_button};
 pub use card::card_shell;
 pub use check::viewed_toggle;
 pub use form::{
-    Row, caption, glyph_icon, grouped, mono_text, note, picker, section, segmented_control, spinner, switch, tag,
+    Row, caption, caption_code, glyph_icon, grouped, mono_text, note, picker, section, segmented_control, spinner,
+    switch, tag,
 };
 pub use glass::{
     CAPSULE_HEIGHT, CONTROL_HEIGHT, OVERLAY_DETAIL_TEXT, OVERLAY_PADDING, OVERLAY_RADIUS, OVERLAY_ROW_HEIGHT,
@@ -27,5 +29,6 @@ pub use glass::{
     glass_panel, glass_surface, rim, segmented, slab, thumb, toggle_capsule,
 };
 pub use interaction::{DISABLED_OPACITY, Fills, State, interactive};
-pub use motion::{DRAWER_DURATION, Drawer, OPEN_DURATION, open_motion, settle_after};
+pub use motion::{OVERLAY_DURATION, PANEL_DURATION, Presence, STATE_DURATION, Transition, closing_motions};
+pub use overlay::{Dialog, Edge, SideSheet, dialog, side_sheet};
 pub use popover::{ArrowPopover, popover};

@@ -2,10 +2,10 @@ use super::model::{
     MenuItem, MenuRow, MenuSection, SEPARATOR_HEIGHT, Slot, SlotKind, TITLE_HEIGHT, jump, layout, step,
 };
 use crate::components::interaction::DISABLED_OPACITY;
-use crate::components::popover::arrow_frame;
+use crate::components::popover::{arrow_frame, inert};
 use crate::components::{
     OVERLAY_DETAIL_TEXT, OVERLAY_PADDING as PADDING, OVERLAY_ROW_HEIGHT as ROW_HEIGHT, OVERLAY_ROW_PADDING,
-    OVERLAY_ROW_RADIUS, OVERLAY_TEXT, glass_panel, open_motion,
+    OVERLAY_ROW_RADIUS, OVERLAY_TEXT, Presence, glass_panel,
 };
 use crate::icons::Glyph;
 use crate::theme::Theme;
@@ -31,6 +31,7 @@ pub struct Menu {
     min_width: Pixels,
     max_height: Pixels,
     opens_below: bool,
+    presence: Presence,
     arrow: Option<Rc<Cell<Option<Bounds<Pixels>>>>>,
     bounds: Rc<Cell<Bounds<Pixels>>>,
 }
@@ -64,6 +65,7 @@ impl Menu {
             min_width: px(180.),
             max_height: px(520.),
             opens_below: true,
+            presence: Presence::entering(),
             arrow: None,
             bounds: Rc::default(),
         }
@@ -72,6 +74,11 @@ impl Menu {
     pub fn min_width(mut self, width: Pixels) -> Self {
         self.min_width = width;
         self
+    }
+
+    /// The open state of the popup that holds this menu. A menu without one opens when it is drawn.
+    pub fn set_presence(&mut self, presence: Presence) {
+        self.presence = presence;
     }
 
     pub fn opens_below(mut self, below: bool) -> Self {
@@ -324,7 +331,7 @@ impl Menu {
                 .h(px(TITLE_HEIGHT))
                 .px(px(10.))
                 .pt(px(6.))
-                .text_size(crate::theme::text_px(11.))
+                .text_size(crate::theme::text_px(crate::theme::text_size::SMALL))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme.ui.muted)
                 .whitespace_nowrap()
@@ -422,14 +429,18 @@ impl Render for Menu {
             .map(|(ix, slot)| self.render_slot(ix, slot, &theme, cx))
             .collect();
         // The submenu sits beside the scroll area, not inside it, because a scroll area clips its children.
-        let submenu = self.submenu.as_ref().map(|open| {
-            let top = slots[open.slot].top + f32::from(self.scroll.offset().y);
-            div().absolute().left(relative(1.)).top(px(top)).child(
-                anchored()
-                    .snap_to_window_with_margin(px(8.))
-                    .child(div().occlude().child(open.menu.clone())),
-            )
-        });
+        let submenu = self
+            .submenu
+            .as_ref()
+            .filter(|_| !self.presence.is_closing())
+            .map(|open| {
+                let top = slots[open.slot].top + f32::from(self.scroll.offset().y);
+                div().absolute().left(relative(1.)).top(px(top)).child(
+                    anchored()
+                        .snap_to_window_with_margin(px(8.))
+                        .child(div().occlude().child(open.menu.clone())),
+                )
+            });
         let bounds = self.bounds.clone();
         let panel = glass_panel(&theme).child(
             div()
@@ -447,14 +458,15 @@ impl Render for Menu {
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
             .on_mouse_down_out(cx.listener(Self::mouse_down_out))
-            .child(open_motion(
+            .child(self.presence.slide(
+                format!("{}:open", self.id),
                 match &self.arrow {
                     Some(trigger) => arrow_frame(panel, self.opens_below, trigger.clone()),
                     None => div().child(panel),
                 },
-                ElementId::Name(format!("{}:open", self.id).into()),
                 self.opens_below,
             ))
+            .children(self.presence.is_closing().then(inert))
             .child(
                 canvas(move |area, _, _| bounds.set(area), |_, _, _, _| {})
                     .absolute()

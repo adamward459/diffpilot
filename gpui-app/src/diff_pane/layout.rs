@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthChar;
 pub const FILE_HEADER: f32 = 38.0;
 pub const HUNK: f32 = 28.0;
 pub const HUD: f32 = 34.0;
-pub const LINE: f32 = 20.0;
+pub const LINE: f32 = 18.0;
 pub const GAP: f32 = 12.0;
 pub const NOTICE: f32 = 96.0;
 pub const PREVIEW: f32 = 220.0;
@@ -409,7 +409,10 @@ mod tests {
             heights,
             [FILE_HEADER, HUNK, LINE, LINE, LINE, GAP, FILE_HEADER, HUNK, LINE, GAP]
         );
-        assert_eq!(tops.total(), 38.0 + 28.0 + 60.0 + 12.0 + 38.0 + 28.0 + 20.0 + 12.0);
+        assert_eq!(
+            tops.total(),
+            FILE_HEADER + HUNK + 3.0 * LINE + GAP + FILE_HEADER + HUNK + LINE + GAP
+        );
     }
 
     #[test]
@@ -460,7 +463,7 @@ mod tests {
     #[test]
     fn pins_the_header_and_the_hunk_under_it() {
         let (_, rows, tops) = model(None);
-        let at = tops.top(2) + 5.0;
+        let at = tops.top(2);
         let pos = position(&rows, &tops, at).unwrap();
         assert_eq!(pos.file, 0);
         let sticky = pos.sticky.unwrap();
@@ -473,11 +476,11 @@ mod tests {
     fn next_header_pushes_the_pinned_one_up() {
         let (_, rows, tops) = model(None);
         let next = tops.top(rows.header_index(1).unwrap());
-        assert_eq!(next, 138.0);
-        let with_hunk = position(&rows, &tops, 78.0).unwrap().sticky.unwrap();
+        assert_eq!(next, FILE_HEADER + HUNK + 3.0 * LINE + GAP);
+        let with_hunk = position(&rows, &tops, next - 60.0).unwrap().sticky.unwrap();
         assert_eq!(with_hunk.hunk, Some(0));
         assert_eq!(with_hunk.push, -6.0);
-        let header_only = position(&rows, &tops, 133.0).unwrap().sticky.unwrap();
+        let header_only = position(&rows, &tops, next - 5.0).unwrap().sticky.unwrap();
         assert_eq!(header_only.hunk, None);
         assert_eq!(header_only.push, -33.0);
         let clear = position(&rows, &tops, 66.0).unwrap().sticky.unwrap();

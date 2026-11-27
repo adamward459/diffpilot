@@ -3,4 +3,4 @@ pub mod icons;
 pub mod theme;
 
 pub use icons::{Assets, Glyph};
-pub use theme::{Theme, init, text_px};
+pub use theme::{Theme, init, text_px, text_size};

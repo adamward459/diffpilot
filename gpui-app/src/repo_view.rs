@@ -32,8 +32,8 @@ use diffpilot_core::tree;
 use diffpilot_core::viewed::{ViewedFiles, ViewedKey, ViewedStore};
 use diffpilot_core::watcher::{self, WatchGuard};
 use diffpilot_ui_kit::components::{
-    BAR_HEIGHT, Button, CAPSULE_HEIGHT, Crumb, Drawer, IconSegment, Look, OnSelect, SwitchItem, bar_button, capsule,
-    crumbs, glyph_icon, icon_switch, jump_bar, popover, settle_after, status_bar, switch_bar, tag,
+    BAR_HEIGHT, Button, CAPSULE_HEIGHT, Crumb, IconSegment, Look, OnSelect, Presence, SwitchItem, bar_button, capsule,
+    crumbs, glyph_icon, icon_switch, jump_bar, popover, status_bar, switch_bar, tag,
 };
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
@@ -210,11 +210,9 @@ pub struct RepoView {
     session: Option<Session>,
     next_session_id: u64,
     nav: Nav,
-    inspector: Drawer,
-    claude_area: Drawer,
-    claude_area_generation: u32,
-    comments_open: bool,
-    sidebar: Drawer,
+    inspector: Presence,
+    claude_area: Presence,
+    sidebar: Presence,
     sidebar_width: Pixels,
     resizing: bool,
     should_move: Rc<Cell<bool>>,
@@ -278,11 +276,9 @@ impl RepoView {
             session: None,
             next_session_id: 0,
             nav: Nav::Files,
-            inspector: Drawer::new(true),
-            claude_area: Drawer::new(false),
-            claude_area_generation: 0,
-            comments_open: false,
-            sidebar: Drawer::new(true),
+            inspector: Presence::new(true),
+            claude_area: Presence::new(false),
+            sidebar: Presence::new(true),
             sidebar_width: px(IDEAL_SIDEBAR),
             resizing: false,
             should_move: Rc::new(Cell::new(false)),
@@ -385,15 +381,8 @@ impl RepoView {
     }
 
     pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
-        let closing = self.sidebar.set_open(!self.sidebar.is_open());
-        if let Some(generation) = closing {
-            settle_after(cx, move |this: &mut Self, cx| {
-                if this.sidebar.settle(generation) {
-                    cx.notify();
-                }
-            });
-        }
-        cx.notify();
+        self.sidebar
+            .set_open(!self.sidebar.is_open(), cx, |this| &mut this.sidebar);
     }
 
     fn load_refs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -485,7 +474,6 @@ impl RepoView {
         };
         let inspector = cx.new(|cx| GuideInspector::new(guide.clone(), cx));
         self.compact_toolbar = false;
-        self.comments_open = false;
         let subscriptions = vec![
             cx.subscribe_in(
                 &comments,
@@ -900,32 +888,28 @@ impl RepoView {
     }
 
     fn set_claude_area(&mut self, open: bool, cx: &mut Context<Self>) {
-        if self.claude_area.is_open() != open {
-            self.claude_area_generation += 1;
-            if let Some(generation) = self.claude_area.set_open(open) {
-                settle_after(cx, move |this: &mut Self, cx| {
-                    if this.claude_area.settle(generation) {
-                        cx.notify();
-                    }
-                });
-            }
-            cx.notify();
-        }
+        self.claude_area.set_open(open, cx, |this| &mut this.claude_area);
     }
 
     pub fn toggle_comments(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.set_comments(!self.comments_open, window, cx);
+        self.set_comments(!self.comments_open(cx), window, cx);
+    }
+
+    fn comments_open(&self, cx: &App) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| session.comments.read(cx).is_open())
     }
 
     fn set_comments(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = &self.session else { return };
-        if self.comments_open == open {
-            return;
-        }
-        self.comments_open = open;
-        if open {
-            session.comments.update(cx, |panel, cx| panel.show(window, cx));
-        }
+        session.comments.update(cx, |panel, cx| {
+            if open {
+                panel.show(window, cx);
+            } else {
+                panel.hide(cx);
+            }
+        });
         cx.notify();
     }
 
@@ -937,14 +921,8 @@ impl RepoView {
     }
 
     pub fn toggle_inspector(&mut self, cx: &mut Context<Self>) {
-        if let Some(generation) = self.inspector.set_open(!self.inspector.is_open()) {
-            settle_after(cx, move |this: &mut Self, cx| {
-                if this.inspector.settle(generation) {
-                    cx.notify();
-                }
-            });
-        }
-        cx.notify();
+        self.inspector
+            .set_open(!self.inspector.is_open(), cx, |this| &mut this.inspector);
     }
 
     fn chapter_open(&self, cx: &App) -> bool {
@@ -1235,7 +1213,7 @@ impl RepoView {
                 tag(h_flex(), || format!("jump-bar:threads:{threads}"))
                     .gap(px(3.))
                     .flex_none()
-                    .text_size(diffpilot_ui_kit::text_px(14.))
+                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
                     .text_color(tokens.ui.text2)
                     .child(
                         Icon::new(Glyph::MessageSquare)
@@ -1293,7 +1271,7 @@ impl RepoView {
                     review,
                     cx,
                     self.claude_area.is_open(),
-                    self.claude_area_generation,
+                    self.claude_area.generation(),
                     &tokens,
                     Actions {
                         toggle: cx.listener(|this, _, _, cx| this.toggle_claude_area(cx)),
@@ -1390,7 +1368,7 @@ impl RepoView {
                     .px(px(12.))
                     .gap(px(6.))
                     .cursor_pointer()
-                    .when(self.comments_open, |this| this.bg(press))
+                    .when(self.comments_open(cx), |this| this.bg(press))
                     .hover(move |style| style.bg(hover))
                     .tooltip(move |window, cx| {
                         gpui_component::tooltip::Tooltip::new(format!("Comments \u{b7} {open} open")).build(window, cx)
@@ -1400,7 +1378,7 @@ impl RepoView {
                     .children((open > 0).then(|| {
                         tag(
                             div()
-                                .text_size(px(14.))
+                                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
                                 .text_color(tokens.ui.text)
                                 .child(open.to_string()),
                             move || format!("toolbar:comments:{open}"),
@@ -1450,7 +1428,7 @@ impl RepoView {
                         .child(match &self.folder_menu {
                             Some(menu) => menu.clone().into_any_element(),
                             None => div()
-                                .text_size(diffpilot_ui_kit::text_px(15.))
+                                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::TITLE))
                                 .font_semibold()
                                 .text_color(tokens.ui.text)
                                 .whitespace_nowrap()
@@ -1459,7 +1437,7 @@ impl RepoView {
                         })
                         .child(
                             div()
-                                .text_size(diffpilot_ui_kit::text_px(12.))
+                                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                                 .text_color(tokens.ui.muted)
                                 .whitespace_nowrap()
                                 .overflow_hidden()
@@ -1493,7 +1471,7 @@ impl Render for RepoView {
             Some(session) if self.claude_area.is_mounted() => {
                 let slot = div().id("claude-area-slot");
                 let slot = if self.claude_area.is_open() {
-                    tag(slot, || format!("claude-area:{}", self.claude_area_generation))
+                    tag(slot, || format!("claude-area:{}", self.claude_area.generation()))
                 } else {
                     slot
                 };
@@ -1667,12 +1645,7 @@ impl Render for RepoView {
                     .children(claude_area)
                     .child(bottom_bar),
             )
-            .children(
-                self.session
-                    .as_ref()
-                    .filter(|_| self.comments_open)
-                    .map(|session| session.comments.clone()),
-            )
+            .children(self.session.as_ref().map(|session| session.comments.clone()))
     }
 }
 

@@ -6,7 +6,7 @@ use diffpilot_ui_kit::components::{Button, Look, chip, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, AppContext, Context, Entity, EventEmitter, FontWeight, IntoElement, ParentElement, Render,
+    AnyElement, AppContext, Context, Corner, Entity, EventEmitter, FontWeight, IntoElement, ParentElement, Render,
     SharedString, Styled, Subscription, Window, div, px,
 };
 use gpui_component::input::{Input, InputEvent, InputState};
@@ -69,10 +69,13 @@ impl ReviewPopover {
 
     fn model_menu(&self, model: ReviewModel) -> AnyElement {
         let session = self.session.clone();
-        let trigger = Button::new("review-model")
-            .icon(Glyph::Sparkles, 12.)
-            .label(model.title())
-            .regular();
+        let trigger = tag(
+            Button::new("review-model")
+                .icon(Glyph::Sparkles, 12.)
+                .label(model.title())
+                .regular(),
+            move || format!("review:model:{}", model.title()),
+        );
         menu_button("review-model", trigger, move |_, _| {
             let pick = |label: &str, next: ReviewModel, checked: bool| {
                 let session = session.clone();
@@ -99,6 +102,8 @@ impl ReviewPopover {
                 MenuSection::titled("Effort", efforts),
             ]
         })
+        .inline()
+        .anchor(Corner::BottomLeft)
         .into_any_element()
     }
 }
@@ -143,7 +148,7 @@ impl Render for ReviewPopover {
         let plural = if files == 1 { "file" } else { "files" };
         let section = |text: &'static str| {
             div()
-                .text_size(diffpilot_ui_kit::text_px(12.))
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme.ui.text)
                 .child(text)
@@ -152,7 +157,7 @@ impl Render for ReviewPopover {
             .w(px(WIDTH - 24.))
             .p(px(4.))
             .gap(px(0.))
-            .text_size(diffpilot_ui_kit::text_px(13.))
+            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
             .text_color(theme.ui.text)
             .child(
                 h_flex()
@@ -164,7 +169,7 @@ impl Render for ReviewPopover {
                     .child(div().flex_1())
                     .child(
                         div()
-                            .text_size(diffpilot_ui_kit::text_px(10.))
+                            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
                             .text_color(theme.ui.muted)
                             .child("Claude Code"),
                     ),
@@ -174,7 +179,7 @@ impl Render for ReviewPopover {
                     .gap_1p5()
                     .mb(px(14.))
                     .items_center()
-                    .text_size(diffpilot_ui_kit::text_px(12.))
+                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                     .text_color(theme.ui.muted)
                     .child(Icon::new(Glyph::GitBranch).size_3p5())
                     .child(
@@ -202,7 +207,10 @@ impl Render for ReviewPopover {
                 div()
                     .mb(px(10.))
                     .relative()
-                    .child(Input::new(&self.instructions).text_size(diffpilot_ui_kit::text_px(13.)))
+                    .child(
+                        Input::new(&self.instructions)
+                            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY)),
+                    )
                     .when(self.instructions.read(cx).value().is_empty(), |field| {
                         field.child(
                             div()
@@ -210,7 +218,7 @@ impl Render for ReviewPopover {
                                 .top(px(9.))
                                 .left(px(13.))
                                 .right(px(13.))
-                                .text_size(diffpilot_ui_kit::text_px(13.))
+                                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
                                 .text_color(theme.ui.muted)
                                 .child(INSTRUCTIONS_HINT),
                         )

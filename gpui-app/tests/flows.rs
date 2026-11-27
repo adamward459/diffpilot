@@ -18,6 +18,7 @@ mod flows {
     mod scrollbar;
     mod selection;
     mod settings;
+    mod settings_wrap;
     mod sidebar_keys;
     mod threads;
     mod viewed;

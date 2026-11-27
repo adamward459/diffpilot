@@ -1,4 +1,6 @@
-use diffpilot::testing::{click, fake_claude, fixture, hover, open_repo_in, open_workspace, press, shows, type_text};
+use diffpilot::testing::{
+    click, fake_claude, fixture, hover, open_repo_in, open_workspace, press, shows, type_text, wait_for_motion,
+};
 use diffpilot_core::settings::Settings;
 use diffpilot_core::threads::USER_NAME;
 use diffpilot_core::viewed::ViewedStore;
@@ -99,6 +101,43 @@ fn escape_and_a_click_outside_close_the_panel(app: &mut TestAppContext) {
     assert!(
         shows(cx, "jump-bar:path:src/staged.rs"),
         "the panel is gone, so the click selects the file"
+    );
+}
+
+#[gpui::test]
+fn the_panel_is_still_on_screen_while_it_closes_and_gone_after(app: &mut TestAppContext) {
+    let dir = fixture();
+    let cx = open_workspace(app, dir.path(), Arc::new(Settings::in_memory()));
+
+    press(cx, "c");
+    assert!(shows(cx, "comments:panel"));
+    press(cx, "escape");
+    assert!(
+        shows(cx, "comments:overlay:closing"),
+        "the panel is still drawn right after Escape"
+    );
+
+    wait_for_motion(cx);
+    click(cx, "sidebar:row:src/staged.rs");
+    assert!(
+        shows(cx, "jump-bar:path:src/staged.rs"),
+        "after the close time nothing covers the app, so the click selects the file"
+    );
+}
+
+#[gpui::test]
+fn opening_the_panel_again_during_its_close_keeps_it_open(app: &mut TestAppContext) {
+    let dir = fixture();
+    let cx = open_workspace(app, dir.path(), Arc::new(Settings::in_memory()));
+
+    press(cx, "c");
+    press(cx, "escape");
+    press(cx, "c");
+    wait_for_motion(cx);
+    click(cx, "sidebar:row:src/staged.rs");
+    assert!(
+        !shows(cx, "jump-bar:path:src/staged.rs"),
+        "the panel stayed open, so the click outside only closed it"
     );
 }
 

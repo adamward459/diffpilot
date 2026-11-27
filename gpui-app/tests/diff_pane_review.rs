@@ -465,7 +465,7 @@ fn the_plus_on_a_hovered_line_starts_a_comment_on_it(cx: &mut TestAppContext) {
     let line = point(px(300.0), px(38.0 + 28.0 + 30.0));
     cx.simulate_mouse_move(line, None, Modifiers::default());
     draw(&opened.pane, cx);
-    cx.simulate_click(point(px(70.0), px(38.0 + 28.0 + 20.0 + 10.0)), Modifiers::default());
+    cx.simulate_click(point(px(70.0), px(38.0 + 28.0 + LINE + 10.0)), Modifiers::default());
     cx.run_until_parked();
     draw(&opened.pane, cx);
     let threads: Vec<_> = opened

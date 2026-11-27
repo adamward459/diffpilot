@@ -54,7 +54,7 @@ impl ChecksPopover {
                         let (name, text) = (name.clone(), text.clone());
                         move || format!("checks:duration:{name}:{text}")
                     })
-                    .text_size(diffpilot_ui_kit::text_px(12.))
+                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                     .text_color(theme.ui.muted)
                     .child(text.clone()),
                 )
@@ -98,7 +98,7 @@ impl ChecksPopover {
                     .px(px(10.))
                     .pt(px(8.))
                     .pb(px(2.))
-                    .text_size(diffpilot_ui_kit::text_px(12.))
+                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme.ui.muted)
                     .child(stage.name),
@@ -131,7 +131,7 @@ impl Render for ChecksPopover {
         let header = label.map_or_else(|| "Checks".to_string(), |label| format!("Checks · {label}"));
         v_flex()
             .w(px(WIDTH))
-            .text_size(diffpilot_ui_kit::text_px(13.))
+            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
             .text_color(theme.ui.text)
             .child(
                 h_flex()
@@ -168,7 +168,7 @@ impl Render for ChecksPopover {
                         .mb(px(4.))
                         .gap(px(8.))
                         .items_start()
-                        .text_size(diffpilot_ui_kit::text_px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                         .text_color(theme.danger)
                         .child(glyph_icon(Glyph::CircleAlert, 14., theme.danger))
                         .child(div().min_w_0().child(message)),
@@ -191,7 +191,7 @@ fn note(theme: &Theme, text: &'static str) -> gpui::AnyElement {
     div()
         .px(px(10.))
         .py(px(6.))
-        .text_size(diffpilot_ui_kit::text_px(12.))
+        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
         .text_color(theme.ui.muted)
         .child(text)
         .into_any_element()

@@ -2,23 +2,23 @@ use crate::review::session::ReviewSession;
 use diffpilot_core::store::{SessionId, SessionThreads, Store};
 use diffpilot_core::thread_groups::{FileGroup, Grouped, Row, StatusFilter, ViewGroup, group_threads, line_label};
 use diffpilot_core::threads::{CommentSource, ReviewThread, ThreadId, ThreadStatus};
-use diffpilot_ui_kit::components::{Button, Look, avatar, bar_button, glass_panel, glyph_icon, label_switch, tag};
+use diffpilot_ui_kit::components::{
+    Button, Look, Presence, avatar, bar_button, glyph_icon, label_switch, side_sheet, tag,
+};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    Animation, AnimationExt, AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, div, ease_out_quint, px,
+    AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement,
+    IntoElement, KeyDownEvent, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
+    Window, div, px,
 };
 use gpui_component::{h_flex, v_flex};
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub const WIDTH: f32 = 460.0;
 const INSET: f32 = 8.0;
-const SLIDE: Duration = Duration::from_millis(220);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommentsEvent {
@@ -41,6 +41,7 @@ pub struct CommentsPanel {
     hovered: Option<ThreadId>,
     others: Vec<SessionThreads>,
     focus: FocusHandle,
+    presence: Presence,
     _review: Subscription,
 }
 
@@ -95,6 +96,7 @@ impl CommentsPanel {
             hovered: None,
             others: Vec::new(),
             focus: cx.focus_handle(),
+            presence: Presence::new(false),
             _review: subscription,
         }
     }
@@ -102,7 +104,15 @@ impl CommentsPanel {
     pub fn show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.reload(cx);
         window.focus(&self.focus);
-        cx.notify();
+        self.presence.set_open(true, cx, |this| &mut this.presence);
+    }
+
+    pub fn hide(&mut self, cx: &mut Context<Self>) {
+        self.presence.set_open(false, cx, |this| &mut this.presence);
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.presence.is_open()
     }
 
     fn reload(&mut self, cx: &App) {
@@ -185,7 +195,7 @@ impl CommentsPanel {
             .child(glyph_icon(Glyph::MessageSquare, 16., theme.ui.text2))
             .child(
                 div()
-                    .text_size(px(15.))
+                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::TITLE))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme.ui.text)
                     .child("Comments"),
@@ -252,7 +262,7 @@ impl CommentsPanel {
                     .overflow_hidden()
                     .text_ellipsis()
                     .whitespace_nowrap()
-                    .text_size(px(13.))
+                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.ui.text)
                     .child(diffpilot_core::thread_groups::view_label(&view.key)),
@@ -263,7 +273,7 @@ impl CommentsPanel {
             .child(div().flex_1())
             .child(
                 div()
-                    .text_size(px(12.))
+                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                     .text_color(theme.ui.muted)
                     .child(view.count.to_string()),
             )
@@ -287,7 +297,7 @@ impl CommentsPanel {
                     .text_ellipsis()
                     .whitespace_nowrap()
                     .font_family(cx.global::<gpui_component::Theme>().mono_font_family.clone())
-                    .text_size(px(11.5))
+                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
                     .text_color(theme.ui.text2)
                     .child(title),
             )
@@ -318,7 +328,7 @@ impl CommentsPanel {
                 div()
                     .flex_none()
                     .font_family(cx.global::<gpui_component::Theme>().mono_font_family.clone())
-                    .text_size(px(11.5))
+                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
                     .text_color(theme.ui.text2)
                     .child(label)
             }))
@@ -328,7 +338,7 @@ impl CommentsPanel {
                     .overflow_hidden()
                     .text_ellipsis()
                     .whitespace_nowrap()
-                    .text_size(px(12.))
+                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                     .text_color(theme.ui.text2)
                     .child(first.author.clone()),
             )
@@ -393,7 +403,7 @@ impl CommentsPanel {
                 .child(
                     div()
                         .line_clamp(2)
-                        .text_size(px(13.))
+                        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
                         .line_height(px(18.))
                         .text_color(theme.ui.text)
                         .child(first.body.clone()),
@@ -401,7 +411,7 @@ impl CommentsPanel {
                 .when(replies > 0, |this| {
                     this.child(
                         div()
-                            .text_size(px(12.))
+                            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                             .text_color(theme.ui.muted)
                             .child(format!("{replies} {}", if replies == 1 { "reply" } else { "replies" })),
                     )
@@ -457,7 +467,7 @@ impl CommentsPanel {
                 .border_b_1()
                 .border_color(theme.ui.line)
                 .font_family(mono.clone())
-                .text_size(px(11.5))
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
                 .text_color(theme.ui.muted)
                 .child(text.clone())
         }))
@@ -475,7 +485,7 @@ impl CommentsPanel {
                         })
                         .child(
                             div()
-                                .text_size(px(12.))
+                                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(theme.ui.text)
                                 .child(comment.author.clone()),
@@ -483,7 +493,7 @@ impl CommentsPanel {
                 )
                 .child(
                     div()
-                        .text_size(px(13.))
+                        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
                         .line_height(px(18.))
                         .text_color(theme.ui.text2)
                         .child(comment.body.clone()),
@@ -500,7 +510,7 @@ fn pill(text: impl Into<SharedString>, fill: gpui::Hsla, color: gpui::Hsla) -> A
         .px(px(6.))
         .rounded_full()
         .bg(fill)
-        .text_size(px(10.5))
+        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(color)
         .whitespace_nowrap()
@@ -510,6 +520,9 @@ fn pill(text: impl Into<SharedString>, fill: gpui::Hsla, color: gpui::Hsla) -> A
 
 impl Render for CommentsPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.presence.is_mounted() {
+            return div().into_any_element();
+        }
         let theme = Theme::of(cx);
         let grouped = self.grouped(cx);
         let session = self.review.read(cx).session_id();
@@ -520,7 +533,7 @@ impl Render for CommentsPanel {
                 .px(px(24.))
                 .py(px(40.))
                 .text_center()
-                .text_size(px(13.))
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
                 .line_height(px(19.))
                 .text_color(theme.ui.muted)
                 .child(empty_message(self.status, total, self.scope))
@@ -536,14 +549,17 @@ impl Render for CommentsPanel {
                 }))
                 .into_any_element()
         };
-        let panel = tag(glass_panel(&theme).id("comments-panel"), || "comments:panel")
-            .occlude()
-            .absolute()
-            .top(px(INSET))
-            .bottom(px(INSET))
-            .w(px(WIDTH))
-            .flex()
-            .flex_col()
+        side_sheet("comments", &self.presence)
+            .tags("comments:overlay", "comments:panel")
+            .width(WIDTH)
+            .inset(INSET)
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape" {
+                    cx.emit(CommentsEvent::Close);
+                }
+            }))
+            .on_backdrop_click(cx.listener(|_, _, _, cx| cx.emit(CommentsEvent::Close)))
             .child(self.header(&theme, cx))
             .child(self.status_row(&theme, &grouped, cx))
             .child(
@@ -554,32 +570,7 @@ impl Render for CommentsPanel {
                     .overflow_y_scroll()
                     .child(list),
             )
-            .with_animation(
-                "comments-slide",
-                Animation::new(SLIDE).with_easing(ease_out_quint()),
-                |panel, t| panel.right(px(INSET - (WIDTH + INSET) * (1. - t))).opacity(t),
-            );
-        tag(div().id("comments-overlay"), || "comments:overlay")
-            .absolute()
-            .inset_0()
-            .track_focus(&self.focus)
-            .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
-                if event.keystroke.key == "escape" {
-                    cx.emit(CommentsEvent::Close);
-                }
-            }))
-            .child(
-                div()
-                    .id("comments-backdrop")
-                    .occlude()
-                    .absolute()
-                    .inset_0()
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|_, _, _, cx| cx.emit(CommentsEvent::Close)),
-                    ),
-            )
-            .child(panel)
+            .into_any_element()
     }
 }
 

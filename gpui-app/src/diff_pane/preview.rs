@@ -32,7 +32,7 @@ const IMAGE_PAD: f32 = 8.0;
 const FALLBACK_BOX: f32 = 120.0;
 const LABEL: f32 = 22.0;
 const META: f32 = 24.0;
-const TEXT: f32 = 13.0;
+const TEXT: f32 = diffpilot_ui_kit::text_size::BODY;
 const LINE: f32 = 20.0;
 const CODE: f32 = 12.0;
 const CODE_LINE: f32 = 18.0;
@@ -562,7 +562,7 @@ fn stacked(old: &ImageBody, new: &ImageBody, theme: &Theme, width: f32, controls
                 .justify_center()
                 .gap(px(10.0))
                 .h(px(SLIDER_ROW))
-                .text_size(diffpilot_ui_kit::text_px(12.0))
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                 .text_color(theme.diff.muted)
                 .child("Before")
                 .child(track)
@@ -591,7 +591,7 @@ fn stacked(old: &ImageBody, new: &ImageBody, theme: &Theme, width: f32, controls
                 .w(px(stage_w.max(CAPTION_MIN)))
                 .h(px(META))
                 .pt(px(6.0))
-                .text_size(diffpilot_ui_kit::text_px(12.0))
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                 .text_color(theme.diff.muted)
                 .child(caption("Before", old))
                 .child(caption("After", new)),
@@ -607,7 +607,7 @@ fn side_view(side: &LoadedSide, theme: &Theme, column: f32, cx: &App) -> Div {
     let label = side.label.map(|label| {
         div()
             .h(px(LABEL))
-            .text_size(diffpilot_ui_kit::text_px(12.5))
+            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(tint)
             .child(label)
@@ -625,7 +625,7 @@ fn side_view(side: &LoadedSide, theme: &Theme, column: f32, cx: &App) -> Div {
 fn note(theme: &Theme, text: &'static str) -> Div {
     div()
         .h(px(LINE))
-        .text_size(diffpilot_ui_kit::text_px(12.5))
+        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
         .text_color(theme.diff.muted)
         .child(text)
 }
@@ -644,7 +644,7 @@ fn image_box(image: &ImageBody, theme: &Theme, column: f32) -> Div {
     if image.broken {
         return frame
             .h(px(FALLBACK_BOX))
-            .text_size(diffpilot_ui_kit::text_px(12.5))
+            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
             .text_color(theme.diff.muted)
             .child("Preview not available.");
     }
@@ -679,7 +679,7 @@ fn image_meta(image: &ImageBody, theme: &Theme) -> Div {
     div()
         .h(px(META))
         .pt(px(6.0))
-        .text_size(diffpilot_ui_kit::text_px(12.0))
+        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
         .text_color(theme.diff.muted)
         .child(text)
 }
@@ -813,7 +813,15 @@ fn table(head: &[Rich], rows: &[Vec<Rich>], theme: &Theme, fonts: &Fonts) -> Any
                     .py(px(4.0))
                     .border_r_1()
                     .border_color(theme.diff.line)
-                    .child(rich(cell, theme, fonts, 12.5, 18.0, theme.diff.text, weight))
+                    .child(rich(
+                        cell,
+                        theme,
+                        fonts,
+                        diffpilot_ui_kit::text_size::SECONDARY,
+                        18.0,
+                        theme.diff.text,
+                        weight,
+                    ))
             }))
     };
     div()

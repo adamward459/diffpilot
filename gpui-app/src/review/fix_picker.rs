@@ -158,7 +158,7 @@ impl Render for FixPicker {
                             .px_2()
                             .pt(px(6.))
                             .pb(px(2.))
-                            .text_size(diffpilot_ui_kit::text_px(11.5))
+                            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme.ui.text2)
                             .child(if path.is_empty() { "General" } else { path }.to_string()),
@@ -171,7 +171,7 @@ impl Render for FixPicker {
         v_flex()
             .w(px(WIDTH - 24.))
             .p(px(4.))
-            .text_size(diffpilot_ui_kit::text_px(13.))
+            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
             .text_color(theme.ui.text)
             .child(
                 h_flex()
@@ -186,7 +186,7 @@ impl Render for FixPicker {
                             div()
                                 .id("fix-toggle-all")
                                 .cursor_pointer()
-                                .text_size(diffpilot_ui_kit::text_px(12.))
+                                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                                 .text_color(theme.ui.muted)
                                 .hover(|label| label.text_color(theme.ui.text))
                                 .child(if all { "Select none" } else { "Select all" }),
@@ -210,7 +210,7 @@ impl Render for FixPicker {
                 col.child(
                     div()
                         .mb(px(8.))
-                        .text_size(diffpilot_ui_kit::text_px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                         .text_color(theme.amber)
                         .child(message),
                 )

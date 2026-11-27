@@ -240,3 +240,29 @@ fn the_previous_thread_arrow_reaches_the_review_summary(app: &mut TestAppContext
     click(cx, "jump-bar:thread-previous");
     assert!(shows(cx, &summary), "the previous arrow scrolls up to the summary");
 }
+
+#[gpui::test]
+fn picking_an_effort_in_the_review_popover_changes_the_model(app: &mut TestAppContext) {
+    let dir = fixture();
+    let (_, cx) = open_repo(
+        app,
+        dir.path(),
+        Arc::new(Settings::in_memory()),
+        Arc::new(ViewedStore::in_memory()),
+    );
+
+    click(cx, "review:open");
+    click(cx, "review:model:Opus · High");
+    click(cx, "review-model:Low");
+    assert!(
+        shows(cx, "review:model:Opus · Low"),
+        "the button shows the picked effort"
+    );
+
+    click(cx, "review:model:Opus · Low");
+    click(cx, "review-model:Sonnet");
+    assert!(
+        shows(cx, "review:model:Sonnet · Low"),
+        "the review popover stays open, so a second pick works"
+    );
+}

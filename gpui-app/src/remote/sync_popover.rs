@@ -122,7 +122,7 @@ impl Render for SyncPopover {
         v_flex()
             .w(px(WIDTH))
             .gap(px(2.))
-            .text_size(diffpilot_ui_kit::text_px(13.))
+            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
             .text_color(theme.ui.text)
             .child(
                 tag(div(), {
@@ -146,7 +146,7 @@ impl Render for SyncPopover {
                         .items_start()
                         .rounded(px(OVERLAY_ROW_RADIUS))
                         .bg(theme.amber.opacity(0.14))
-                        .text_size(diffpilot_ui_kit::text_px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                         .text_color(theme.ui.text)
                         .child(glyph_icon(Glyph::TriangleAlert, 14., theme.amber))
                         .child(div().min_w_0().child(text)),
@@ -161,7 +161,7 @@ impl Render for SyncPopover {
                         .py(px(6.))
                         .gap(px(8.))
                         .items_start()
-                        .text_size(diffpilot_ui_kit::text_px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                         .text_color(theme.danger)
                         .child(glyph_icon(Glyph::CircleAlert, 14., theme.danger))
                         .child(div().min_w_0().child(message)),
@@ -176,7 +176,7 @@ impl Render for SyncPopover {
                         .py(px(6.))
                         .gap(px(8.))
                         .items_start()
-                        .text_size(diffpilot_ui_kit::text_px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                         .text_color(theme.danger)
                         .child(glyph_icon(Glyph::CircleAlert, 14., theme.danger))
                         .child(div().min_w_0().child(message)),

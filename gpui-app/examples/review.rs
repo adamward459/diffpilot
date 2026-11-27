@@ -119,7 +119,7 @@ impl Render for Gallery {
                     .child(
                         div()
                             .text_color(muted)
-                            .text_size(diffpilot_ui_kit::text_px(11.))
+                            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
                             .child(room),
                     ),
             )

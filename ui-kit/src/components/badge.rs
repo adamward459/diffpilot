@@ -32,7 +32,7 @@ pub fn status_badge(code: &'static str, tone: BadgeTone, mono: Font, theme: &The
         .text_color(text)
         .font(mono)
         .font_weight(FontWeight::SEMIBOLD)
-        .text_size(crate::theme::text_px(10.5))
+        .text_size(crate::theme::text_px(crate::theme::text_size::SMALL))
         .child(code)
 }
 
@@ -105,7 +105,7 @@ pub fn avatar(author: &str, claude: bool, theme: &Theme, size: f32) -> AnyElemen
         .size(px(size))
         .rounded_full()
         .text_color(gpui::white())
-        .text_size(crate::theme::text_px(10.))
+        .text_size(crate::theme::text_px(crate::theme::text_size::SMALL))
         .font_weight(FontWeight::BOLD);
     if claude {
         base.bg(theme.ui.claude)

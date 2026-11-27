@@ -888,7 +888,7 @@ impl DiffPane {
             bar = bar.child(
                 div()
                     .px(px(6.0))
-                    .text_size(diffpilot_ui_kit::text_px(11.5))
+                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
                     .text_color(self.theme.danger)
                     .child(message.clone()),
             );
@@ -899,7 +899,7 @@ impl DiffPane {
                 .child(
                     div()
                         .px(px(6.0))
-                        .text_size(diffpilot_ui_kit::text_px(12.0))
+                        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                         .child(format!("Discard {changed} changed {noun}?")),
                 )
                 .child(tag(
@@ -1552,7 +1552,7 @@ impl DiffPane {
                 .items_center()
                 .justify_center()
                 .size_full()
-                .text_size(diffpilot_ui_kit::text_px(12.5))
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                 .text_color(theme.diff.muted)
                 .child("Loading preview\u{2026}"),
         };
@@ -1621,7 +1621,7 @@ impl DiffPane {
             .pr(px(8.0))
             .whitespace_nowrap()
             .font(self.fonts.mono.clone())
-            .text_size(diffpilot_ui_kit::text_px(11.5))
+            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
             .text_color(theme.diff.muted)
             .child(div().min_w_0().overflow_hidden().child(source.header.clone()));
         match glass {
@@ -1643,7 +1643,7 @@ impl DiffPane {
             .w_full()
             .border_b_1()
             .border_color(theme.diff.line)
-            .text_size(diffpilot_ui_kit::text_px(12.5))
+            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
             .text_color(theme.diff.muted)
             .child(SharedString::from(notice.text()));
         if notice.can_load() {
@@ -1659,7 +1659,7 @@ impl DiffPane {
                     .border_color(theme.diff.line)
                     .bg(theme.diff.cap)
                     .cursor_pointer()
-                    .text_size(diffpilot_ui_kit::text_px(12.0))
+                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.diff.text)
                     .child("Load diff")
@@ -1844,7 +1844,7 @@ impl Render for DiffPane {
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_size(diffpilot_ui_kit::text_px(13.0))
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
                 .text_color(theme.diff.muted)
                 .child("No changes");
         }
