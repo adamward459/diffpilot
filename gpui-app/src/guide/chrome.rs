@@ -108,7 +108,7 @@ pub fn overview_bar(guide: &Entity<GuideSession>, tokens: &Theme, cx: &App) -> S
         .child(div().flex_1())
         .child(
             div()
-                .text_size(px(12.))
+                .text_size(diffpilot_ui_kit::text_px(12.))
                 .text_color(tokens.ui.muted)
                 .child(SharedString::from(written)),
         )
@@ -169,7 +169,7 @@ pub fn chapter_bar(
             h_flex()
                 .gap(px(2.))
                 .flex_none()
-                .text_size(px(13.))
+                .text_size(diffpilot_ui_kit::text_px(13.))
                 .text_color(tokens.ui.text2)
                 .child(bar_button(
                     tokens,

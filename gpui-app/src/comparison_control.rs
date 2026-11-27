@@ -53,7 +53,7 @@ pub fn comparison_control(
         .when(!compact, |this| {
             this.child(
                 div()
-                    .text_size(px(14.))
+                    .text_size(diffpilot_ui_kit::text_px(14.))
                     .text_color(tokens.chrome.secondary)
                     .child("compared to"),
             )

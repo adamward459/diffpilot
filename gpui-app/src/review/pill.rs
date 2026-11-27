@@ -283,7 +283,7 @@ impl Render for ReviewPill {
         h_flex()
             .gap_1p5()
             .items_center()
-            .text_size(px(13.))
+            .text_size(diffpilot_ui_kit::text_px(13.))
             .text_color(cx.theme().foreground)
             .child(claude)
     }

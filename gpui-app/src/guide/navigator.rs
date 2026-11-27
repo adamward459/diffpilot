@@ -70,7 +70,7 @@ impl GuideNavigator {
             .child(
                 div()
                     .id("guide-progress-text")
-                    .text_size(px(12.))
+                    .text_size(diffpilot_ui_kit::text_px(12.))
                     .text_color(tokens.chrome.secondary)
                     .whitespace_nowrap()
                     .overflow_hidden()
@@ -110,7 +110,7 @@ impl Render for GuideNavigator {
                     div()
                         .px_3()
                         .pt(px(6.))
-                        .text_size(px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(12.))
                         .text_color(tokens.chrome.tertiary)
                         .child("Claude has not written a guide for this change."),
                 )
@@ -164,7 +164,7 @@ impl Render for GuideNavigator {
                         .px(px(8.))
                         .pt(px(10.))
                         .pb(px(3.))
-                        .text_size(px(11.))
+                        .text_size(diffpilot_ui_kit::text_px(11.))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(tokens.chrome.tertiary)
                         .child(SharedString::from(phase)),
@@ -189,7 +189,7 @@ impl Render for GuideNavigator {
                     .justify_center()
                     .rounded_full()
                     .bg(badge_bg)
-                    .text_size(px(10.))
+                    .text_size(diffpilot_ui_kit::text_px(10.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(if read && !current {
                         gpui::white()

@@ -24,7 +24,7 @@ fn section(theme: &Theme, title: &'static str, body: impl IntoElement) -> impl I
         .gap(px(10.))
         .child(
             div()
-                .text_size(px(11.))
+                .text_size(diffpilot_ui_kit::text_px(11.))
                 .text_color(theme.ui.muted)
                 .child(title.to_uppercase()),
         )
@@ -165,10 +165,12 @@ fn glass(theme: &Theme) -> impl IntoElement {
 
 fn overlays(theme: &Theme, menu: &Entity<Menu>) -> impl IntoElement {
     let note = |theme: &Theme, text: &'static str| {
-        v_flex()
-            .gap(px(4.))
-            .w(px(210.))
-            .child(div().text_size(px(13.)).text_color(theme.ui.text).child(text))
+        v_flex().gap(px(4.)).w(px(210.)).child(
+            div()
+                .text_size(diffpilot_ui_kit::text_px(13.))
+                .text_color(theme.ui.text)
+                .child(text),
+        )
     };
     h_flex()
         .h(px(230.))
@@ -253,7 +255,7 @@ fn card(theme: &Theme) -> impl IntoElement {
     card_shell(theme, theme.ui.line).child(
         div()
             .p(px(12.))
-            .text_size(px(13.))
+            .text_size(diffpilot_ui_kit::text_px(13.))
             .child("A card shell with a border and a shadow."),
     )
 }
@@ -411,7 +413,7 @@ fn state_rows() -> Vec<(&'static str, Cell)> {
                     .px(px(8.))
                     .rounded(px(8.))
                     .items_center()
-                    .text_size(px(12.))
+                    .text_size(diffpilot_ui_kit::text_px(12.))
                     .child("archive.md"),
                 Fills {
                     rest: clear,
@@ -433,7 +435,7 @@ fn states(theme: &Theme) -> impl IntoElement {
         .children(STATES.map(|(name, _)| {
             div()
                 .w(px(120.))
-                .text_size(px(11.))
+                .text_size(diffpilot_ui_kit::text_px(11.))
                 .text_color(theme.ui.muted)
                 .child(name.to_uppercase())
         }));
@@ -444,7 +446,7 @@ fn states(theme: &Theme) -> impl IntoElement {
             .child(
                 div()
                     .w(px(150.))
-                    .text_size(px(12.))
+                    .text_size(diffpilot_ui_kit::text_px(12.))
                     .text_color(theme.ui.muted)
                     .child(label),
             )
@@ -487,7 +489,7 @@ impl Render for Gallery {
             .size_full()
             .bg(theme.background)
             .text_color(theme.ui.text)
-            .text_size(px(13.))
+            .text_size(diffpilot_ui_kit::text_px(13.))
             .p(px(20.))
             .gap(px(24.))
             .items_start()

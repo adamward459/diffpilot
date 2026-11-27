@@ -115,14 +115,14 @@ impl GuideStage {
             .gap(px(6.))
             .child(
                 div()
-                    .text_size(px(11.))
+                    .text_size(diffpilot_ui_kit::text_px(11.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(tokens.ui.muted)
                     .child("LINKED FOLDERS"),
             )
             .child(
                 div()
-                    .text_size(px(12.))
+                    .text_size(diffpilot_ui_kit::text_px(12.))
                     .text_color(tokens.ui.text2)
                     .child("Claude can read these for context. They are not reviewed."),
             );
@@ -134,7 +134,7 @@ impl GuideStage {
             section = section.child(
                 tag(h_flex(), || format!("guide-linked-folder:{shown}"))
                     .gap(px(6.))
-                    .text_size(px(12.5))
+                    .text_size(diffpilot_ui_kit::text_px(12.5))
                     .child(glyph_icon(
                         if missing { Glyph::TriangleAlert } else { Glyph::Folder },
                         13.,
@@ -146,7 +146,7 @@ impl GuideStage {
                             .min_w_0()
                             .truncate()
                             .font_family("Menlo")
-                            .text_size(px(11.5))
+                            .text_size(diffpilot_ui_kit::text_px(11.5))
                             .text_color(color)
                             .child(SharedString::from(shown.clone())),
                     )
@@ -179,7 +179,11 @@ impl GuideStage {
             .child(
                 h_flex()
                     .gap(px(6.))
-                    .child(div().flex_1().child(Input::new(&form.input).text_size(px(12.5))))
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(Input::new(&form.input).text_size(diffpilot_ui_kit::text_px(12.5))),
+                    )
                     .child(tag(
                         Button::new("guide-link-browse")
                             .label("Browse…")
@@ -191,7 +195,7 @@ impl GuideStage {
                 section.child(
                     tag(h_flex(), || "guide-link-error")
                         .gap(px(6.))
-                        .text_size(px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(12.))
                         .text_color(tokens.amber)
                         .child(glyph_icon(Glyph::TriangleAlert, 13., tokens.amber))
                         .child(SharedString::from(error.to_string())),
@@ -249,13 +253,13 @@ impl GuideStage {
                 .child(glyph_icon(Glyph::BookOpen, 22., tokens.ui.claude))
                 .child(
                     div()
-                        .text_size(px(17.))
+                        .text_size(diffpilot_ui_kit::text_px(17.))
                         .font_weight(FontWeight::SEMIBOLD)
                         .child("Read it chapter by chapter"),
                 )
                 .child(
                     div()
-                        .text_size(px(13.))
+                        .text_size(diffpilot_ui_kit::text_px(13.))
                         .text_color(tokens.ui.text2)
                         .child("Claude explains what this change does, then splits it into chapters in the order to read them, with notes under the lines that matter."),
                 )
@@ -265,7 +269,7 @@ impl GuideStage {
                         h_flex()
                             .id("guide-failure")
                             .gap(px(6.))
-                            .text_size(px(12.5))
+                            .text_size(diffpilot_ui_kit::text_px(12.5))
                             .text_color(tokens.amber)
                             .child(glyph_icon(Glyph::TriangleAlert, 14., tokens.amber))
                             .child(SharedString::from(message)),
@@ -285,7 +289,7 @@ impl GuideStage {
                         ))
                         .child(
                             div()
-                                .text_size(px(12.))
+                                .text_size(diffpilot_ui_kit::text_px(12.))
                                 .text_color(tokens.ui.muted)
                                 .child(SharedString::from(model)),
                         ),
@@ -312,14 +316,14 @@ impl GuideStage {
                         .child(
                             div()
                                 .id("guide-writing")
-                                .text_size(px(15.))
+                                .text_size(diffpilot_ui_kit::text_px(15.))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .child("Claude is writing the guide"),
                         ),
                 )
                 .child(
                     div()
-                        .text_size(px(13.))
+                        .text_size(diffpilot_ui_kit::text_px(13.))
                         .text_color(tokens.ui.text2)
                         .child(SharedString::from(progress)),
                 )
@@ -349,7 +353,7 @@ impl GuideStage {
         let read = guide.is_read(chapter);
         let mut title = h_flex().gap(px(8.)).flex_wrap().child(
             div()
-                .text_size(px(13.5))
+                .text_size(diffpilot_ui_kit::text_px(13.5))
                 .font_weight(FontWeight::MEDIUM)
                 .child(SharedString::from(chapter.title.clone())),
         );
@@ -364,7 +368,7 @@ impl GuideStage {
                         .items_center()
                         .rounded_full()
                         .bg(tokens.ui.raised)
-                        .text_size(px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(12.))
                         .text_color(tokens.ui.muted)
                         .child("Skim"),
                 )
@@ -397,7 +401,7 @@ impl GuideStage {
                     .justify_center()
                     .rounded_full()
                     .bg(if read { tokens.success } else { cx.theme().muted })
-                    .text_size(px(11.))
+                    .text_size(diffpilot_ui_kit::text_px(11.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(if read { gpui::white() } else { tokens.ui.text2 })
                     .child(if read {
@@ -423,7 +427,7 @@ impl GuideStage {
                     .flex_none()
                     .whitespace_nowrap()
                     .font_family(cx.theme().mono_font_family.clone())
-                    .text_size(px(11.5))
+                    .text_size(diffpilot_ui_kit::text_px(11.5))
                     .child(
                         div()
                             .text_color(tokens.success)
@@ -464,7 +468,7 @@ impl GuideStage {
             .child(
                 h_flex()
                     .gap(px(5.))
-                    .text_size(px(12.))
+                    .text_size(diffpilot_ui_kit::text_px(12.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(tokens.ui.claude)
                     .child(glyph_icon(Glyph::Sparkles, 13., tokens.ui.claude))
@@ -472,7 +476,7 @@ impl GuideStage {
             )
             .child(
                 div()
-                    .text_size(px(24.))
+                    .text_size(diffpilot_ui_kit::text_px(24.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(SharedString::from(overview.title.clone())),
             )
@@ -502,7 +506,7 @@ impl GuideStage {
                         .bg(if accent { tokens.ui.claude_bg } else { tokens.ui.raised })
                         .child(
                             div()
-                                .text_size(px(11.))
+                                .text_size(diffpilot_ui_kit::text_px(11.))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(if accent { tokens.ui.claude } else { tokens.ui.muted })
                                 .child(label),
@@ -539,7 +543,7 @@ impl GuideStage {
                 .items_baseline()
                 .child(
                     div()
-                        .text_size(px(15.))
+                        .text_size(diffpilot_ui_kit::text_px(15.))
                         .font_weight(FontWeight::SEMIBOLD)
                         .child(match count {
                             1 => "Read it in 1 chapter".to_string(),
@@ -548,7 +552,7 @@ impl GuideStage {
                 )
                 .child(
                     div()
-                        .text_size(px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(12.))
                         .text_color(tokens.ui.muted)
                         .child("core change first, what to skim last"),
                 ),
@@ -558,7 +562,7 @@ impl GuideStage {
                 article = article.child(
                     div()
                         .pt(px(6.))
-                        .text_size(px(11.))
+                        .text_size(diffpilot_ui_kit::text_px(11.))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(tokens.ui.muted)
                         .child(SharedString::from(phase.to_uppercase())),
@@ -596,7 +600,7 @@ impl GuideStage {
                     .px(px(24.))
                     .pt(px(14.))
                     .gap(px(6.))
-                    .text_size(px(12.5))
+                    .text_size(diffpilot_ui_kit::text_px(12.5))
                     .text_color(tokens.amber)
                     .child(glyph_icon(Glyph::TriangleAlert, 14., tokens.amber))
                     .child(SharedString::from(message))
@@ -622,7 +626,7 @@ pub fn banner(guide: &Entity<GuideSession>, tokens: &Theme, cx: &App) -> Option<
             .border_1()
             .border_color(tokens.amber.opacity(0.4))
             .bg(tokens.amber.opacity(0.12))
-            .text_size(px(12.5))
+            .text_size(diffpilot_ui_kit::text_px(12.5))
             .child(glyph_icon(Glyph::TriangleAlert, 15., tokens.amber))
             .child(div().font_weight(FontWeight::SEMIBOLD).child("Out of date."))
             .child(

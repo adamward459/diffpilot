@@ -95,7 +95,7 @@ fn legend(theme: &Theme, layout: &Layout) -> Vec<AnyElement> {
         .map(|(color, label)| {
             h_flex()
                 .gap(px(4.))
-                .text_size(px(11.5))
+                .text_size(diffpilot_ui_kit::text_px(11.5))
                 .text_color(theme.ui.muted)
                 .child(div().size(px(8.)).rounded_full().bg(color))
                 .child(label)
@@ -110,7 +110,7 @@ fn source_block(theme: &Theme, diagram: &Diagram) -> impl IntoElement {
         .bg(theme.ui.raised)
         .p(px(10.))
         .font_family("Menlo")
-        .text_size(px(12.))
+        .text_size(diffpilot_ui_kit::text_px(12.))
         .text_color(theme.ui.text2)
         .child(SharedString::from(diagram.source.clone()))
 }
@@ -149,7 +149,7 @@ pub fn diagram_card(id: &str, diagram: &Diagram, window: &mut Window, cx: &mut A
         .flex_wrap()
         .child(
             div()
-                .text_size(px(13.))
+                .text_size(diffpilot_ui_kit::text_px(13.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(SharedString::from(
                     diagram.title.clone().unwrap_or_else(|| "Diagram".into()),
@@ -223,7 +223,7 @@ pub fn diagram_card(id: &str, diagram: &Diagram, window: &mut Window, cx: &mut A
             if let Err(note) = parsed {
                 card = card.child(
                     tag(div().id("guide-diagram-note"), || "guide-diagram-note")
-                        .text_size(px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(12.))
                         .text_color(theme.ui.muted)
                         .child(note),
                 );
@@ -269,7 +269,7 @@ fn stepper(
         .child(
             div()
                 .min_w(px(40.))
-                .text_size(px(12.))
+                .text_size(diffpilot_ui_kit::text_px(12.))
                 .text_color(theme.ui.text2)
                 .flex()
                 .justify_center()
@@ -295,7 +295,7 @@ fn stepper(
         .when_some(step.and_then(|at| diagram.flow.get(at)), |column, current| {
             column.child(
                 tag(div().id("guide-diagram-step-text"), || "guide-diagram-step-text")
-                    .text_size(px(12.5))
+                    .text_size(diffpilot_ui_kit::text_px(12.5))
                     .text_color(theme.ui.text2)
                     .child(SharedString::from(current.text.clone())),
             )

@@ -324,7 +324,7 @@ impl Menu {
                 .h(px(TITLE_HEIGHT))
                 .px(px(10.))
                 .pt(px(6.))
-                .text_size(px(11.))
+                .text_size(crate::theme::text_px(11.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme.ui.muted)
                 .whitespace_nowrap()
@@ -354,7 +354,7 @@ impl Menu {
             .px(px(OVERLAY_ROW_PADDING))
             .gap(px(6.))
             .rounded(px(OVERLAY_ROW_RADIUS))
-            .text_size(px(OVERLAY_TEXT))
+            .text_size(crate::theme::text_px(OVERLAY_TEXT))
             .text_color(text)
             .whitespace_nowrap()
             .when(on, |this| this.bg(theme.accent))
@@ -391,7 +391,7 @@ impl Menu {
                 this.child(
                     div()
                         .flex_none()
-                        .text_size(px(OVERLAY_DETAIL_TEXT))
+                        .text_size(crate::theme::text_px(OVERLAY_DETAIL_TEXT))
                         .text_color(muted)
                         .child(shortcut),
                 )

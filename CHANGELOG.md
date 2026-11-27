@@ -41,6 +41,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 - The project and branch menus in the toolbar now have an arrow that points at the button that opened them, like the popovers.
 - Loading indicators now look like the native macOS spinner, and the bottom bar no longer spins a second one while Claude works.
+- Text across the app is a little larger (about 8%). The code in the diff keeps its size.
 - A guide now belongs to the branch you are on, not to the compare target. Change the target and the guide stays; if the diff is now different, it shows as out of date.
 - Menus, popovers, context menus and the selection bar now share one liquid-glass look, and they fade in when they open.
 - The sidebar, inspector and Claude area now slide in and out instead of jumping.

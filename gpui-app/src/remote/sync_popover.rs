@@ -69,20 +69,20 @@ impl SyncPopover {
                     .min_w_0()
                     .child(
                         div()
-                            .text_size(px(OVERLAY_TEXT))
+                            .text_size(diffpilot_ui_kit::text_px(OVERLAY_TEXT))
                             .text_color(theme.ui.text)
                             .child(row.title),
                     )
                     .child(
                         tag(div(), move || format!("remote:detail:{name}:{detail}"))
-                            .text_size(px(OVERLAY_DETAIL_TEXT))
+                            .text_size(diffpilot_ui_kit::text_px(OVERLAY_DETAIL_TEXT))
                             .text_color(theme.ui.muted)
                             .child(row.detail),
                     ),
             )
             .child(
                 div()
-                    .text_size(px(OVERLAY_DETAIL_TEXT))
+                    .text_size(diffpilot_ui_kit::text_px(OVERLAY_DETAIL_TEXT))
                     .text_color(theme.ui.faint)
                     .child(shortcut),
             )
@@ -122,7 +122,7 @@ impl Render for SyncPopover {
         v_flex()
             .w(px(WIDTH))
             .gap(px(2.))
-            .text_size(px(13.))
+            .text_size(diffpilot_ui_kit::text_px(13.))
             .text_color(theme.ui.text)
             .child(
                 tag(div(), {
@@ -146,7 +146,7 @@ impl Render for SyncPopover {
                         .items_start()
                         .rounded(px(OVERLAY_ROW_RADIUS))
                         .bg(theme.amber.opacity(0.14))
-                        .text_size(px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(12.))
                         .text_color(theme.ui.text)
                         .child(glyph_icon(Glyph::TriangleAlert, 14., theme.amber))
                         .child(div().min_w_0().child(text)),
@@ -161,7 +161,7 @@ impl Render for SyncPopover {
                         .py(px(6.))
                         .gap(px(8.))
                         .items_start()
-                        .text_size(px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(12.))
                         .text_color(theme.danger)
                         .child(glyph_icon(Glyph::CircleAlert, 14., theme.danger))
                         .child(div().min_w_0().child(message)),
@@ -176,7 +176,7 @@ impl Render for SyncPopover {
                         .py(px(6.))
                         .gap(px(8.))
                         .items_start()
-                        .text_size(px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(12.))
                         .text_color(theme.danger)
                         .child(glyph_icon(Glyph::CircleAlert, 14., theme.danger))
                         .child(div().min_w_0().child(message)),

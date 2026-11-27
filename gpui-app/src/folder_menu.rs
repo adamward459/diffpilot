@@ -139,7 +139,7 @@ fn stats(status: &FolderStatus, theme: &Theme, mono: SharedString, highlighted: 
     };
     if status.files == 0 {
         return div()
-            .text_size(px(11.5))
+            .text_size(diffpilot_ui_kit::text_px(11.5))
             .text_color(muted)
             .child("no changes")
             .into_any_element();
@@ -152,7 +152,7 @@ fn stats(status: &FolderStatus, theme: &Theme, mono: SharedString, highlighted: 
     let noun = if status.files == 1 { "file" } else { "files" };
     h_flex()
         .gap_1()
-        .text_size(px(11.5))
+        .text_size(diffpilot_ui_kit::text_px(11.5))
         .text_color(muted)
         .child(format!("{} {noun} ·", status.files))
         .child(
@@ -220,7 +220,7 @@ impl Render for FolderMenu {
                 .rounded_full()
                 .h(px(30.))
                 .gap(px(6.))
-                .text_size(px(15.))
+                .text_size(diffpilot_ui_kit::text_px(15.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .label(name.clone())
                 .caret(true),
@@ -264,7 +264,7 @@ impl Render for FolderMenu {
                         .gap(px(5.))
                         .items_center()
                         .flex_none()
-                        .text_size(px(11.5))
+                        .text_size(diffpilot_ui_kit::text_px(11.5))
                         .text_color(theme.ui.muted)
                         .child(div().size(px(6.)).rounded_full().bg(theme.chrome.uncommitted))
                         .child(if others == 1 {

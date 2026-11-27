@@ -32,7 +32,7 @@ pub fn status_badge(code: &'static str, tone: BadgeTone, mono: Font, theme: &The
         .text_color(text)
         .font(mono)
         .font_weight(FontWeight::SEMIBOLD)
-        .text_size(px(10.5))
+        .text_size(crate::theme::text_px(10.5))
         .child(code)
 }
 
@@ -46,7 +46,7 @@ pub fn severity_badge(severity: Severity, theme: &Theme, size: f32) -> AnyElemen
             .items_center()
             .justify_center()
             .text_color(gpui::white())
-            .text_size(px(size))
+            .text_size(crate::theme::text_px(size))
             .font_weight(FontWeight::BOLD)
             .child(text)
     };
@@ -105,7 +105,7 @@ pub fn avatar(author: &str, claude: bool, theme: &Theme, size: f32) -> AnyElemen
         .size(px(size))
         .rounded_full()
         .text_color(gpui::white())
-        .text_size(px(10.))
+        .text_size(crate::theme::text_px(10.))
         .font_weight(FontWeight::BOLD);
     if claude {
         base.bg(theme.ui.claude)

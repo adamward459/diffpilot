@@ -177,7 +177,7 @@ pub fn segmented(
             .flex()
             .items_center()
             .rounded_full()
-            .text_size(px(14.))
+            .text_size(crate::theme::text_px(14.))
             .text_color(theme.chrome.label)
             .cursor_pointer();
         let item = if chosen {

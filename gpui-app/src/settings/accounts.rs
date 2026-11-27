@@ -33,7 +33,7 @@ pub fn render(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) ->
                     .flex()
                     .items_center()
                     .gap(px(5.))
-                    .text_size(px(12.))
+                    .text_size(diffpilot_ui_kit::text_px(12.))
                     .text_color(t.ui.muted)
                     .child(spinner("github-busy", 12., t.ui.muted))
                     .child(if working { "Working…" } else { "Checking…" }),

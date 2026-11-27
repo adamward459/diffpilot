@@ -187,7 +187,7 @@ impl Fonts {
             return div().h(px(m::LINE)).into_any_element();
         }
         div()
-            .text_size(px(m::TEXT_SIZE))
+            .text_size(diffpilot_ui_kit::text_px(m::TEXT_SIZE))
             .line_height(px(m::LINE))
             .child(StyledText::new(markup.text.clone()).with_runs(self.runs(markup)))
             .into_any_element()
@@ -583,7 +583,7 @@ impl ThreadCard {
                         .rounded_full()
                         .bg(theme.ui.claude_bg)
                         .text_color(theme.ui.claude)
-                        .text_size(px(11.))
+                        .text_size(diffpilot_ui_kit::text_px(11.))
                         .child(Icon::new(Glyph::Sparkles).size(px(11.)))
                         .child(chip),
                 )
@@ -594,7 +594,7 @@ impl ThreadCard {
                         .overflow_hidden()
                         .text_ellipsis()
                         .whitespace_nowrap()
-                        .text_size(px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(12.))
                         .text_color(theme.ui.muted)
                         .children(summary),
                 )
@@ -636,7 +636,7 @@ impl ThreadCard {
                             .h(px(m::NAME_LINE))
                             .gap_2()
                             .items_center()
-                            .text_size(px(12.))
+                            .text_size(diffpilot_ui_kit::text_px(12.))
                             .child(
                                 div()
                                     .font_weight(FontWeight::SEMIBOLD)
@@ -658,7 +658,7 @@ impl ThreadCard {
         tag(div().id(("edit", comment.id as usize)), || {
             format!("comment:edit:{}", comment.body)
         })
-        .text_size(px(11.))
+        .text_size(diffpilot_ui_kit::text_px(11.))
         .text_color(if editing { theme.ui.claude } else { theme.ui.muted })
         .cursor_pointer()
         .on_mouse_down(
@@ -683,7 +683,7 @@ impl ThreadCard {
                 .child(
                     Input::new(&composer.input)
                         .appearance(true)
-                        .text_size(px(12.5))
+                        .text_size(diffpilot_ui_kit::text_px(12.5))
                         .line_height(px(m::INPUT_ROW))
                         .px(px(9.))
                         .py(px(4.)),
@@ -700,7 +700,7 @@ impl ThreadCard {
             .border_1()
             .border_color(theme.ui.line)
             .bg(theme.background)
-            .text_size(px(12.5))
+            .text_size(diffpilot_ui_kit::text_px(12.5))
             .text_color(theme.ui.muted)
             .cursor_text()
             .on_mouse_down(
@@ -725,7 +725,7 @@ impl ThreadCard {
                         .h(px(m::SUGGEST))
                         .gap_2()
                         .items_center()
-                        .text_size(px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(12.))
                         .text_color(theme.ui.claude)
                         .cursor_pointer()
                         .on_mouse_down(
@@ -754,7 +754,7 @@ impl ThreadCard {
                                     .rounded_full()
                                     .bg(theme.ui.claude_bg)
                                     .text_color(theme.ui.claude)
-                                    .text_size(px(11.))
+                                    .text_size(diffpilot_ui_kit::text_px(11.))
                                     .child(Icon::new(Glyph::Sparkles).size(px(11.)))
                                     .child("Claude will reply"),
                             )
@@ -824,7 +824,7 @@ impl ThreadCard {
             .pr_2()
             .gap_2()
             .items_center()
-            .text_size(px(m::TEXT_SIZE))
+            .text_size(diffpilot_ui_kit::text_px(m::TEXT_SIZE))
             .child(severity_badge(finding.severity, &theme, 15.))
             .child(
                 tag(div(), || format!("finding:{}", finding.title))
@@ -838,7 +838,7 @@ impl ThreadCard {
             .child(
                 div()
                     .flex_none()
-                    .text_size(px(12.))
+                    .text_size(diffpilot_ui_kit::text_px(12.))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(color)
                     .child(finding.severity.title()),
@@ -891,7 +891,7 @@ impl ThreadCard {
                         .pt(px(6.))
                         .gap_1p5()
                         .items_start()
-                        .text_size(px(11.5))
+                        .text_size(diffpilot_ui_kit::text_px(11.5))
                         .text_color(theme.ui.muted)
                         .child(
                             h_flex()
@@ -933,7 +933,7 @@ impl ThreadCard {
                 .pr_2()
                 .gap_2()
                 .items_center()
-                .text_size(px(m::TEXT_SIZE))
+                .text_size(diffpilot_ui_kit::text_px(m::TEXT_SIZE))
                 .child(
                     div()
                         .text_color(theme.ui.claude)
@@ -942,7 +942,7 @@ impl ThreadCard {
                 .child(div().font_weight(FontWeight::SEMIBOLD).child("Review summary"))
                 .child(
                     div()
-                        .text_size(px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(12.))
                         .text_color(theme.ui.muted)
                         .child("Whole change · Claude"),
                 )
@@ -1014,7 +1014,7 @@ impl ThreadCard {
             .items_center()
             .border_b_1()
             .border_color(theme.ui.line)
-            .text_size(px(12.))
+            .text_size(diffpilot_ui_kit::text_px(12.))
             .text_color(theme.ui.muted)
             .child(label)
             .when(thread.comments.is_empty(), |row| {
@@ -1027,7 +1027,7 @@ impl ThreadCard {
                         .rounded_full()
                         .bg(theme.amber.opacity(0.16))
                         .text_color(theme.amber)
-                        .text_size(px(11.))
+                        .text_size(diffpilot_ui_kit::text_px(11.))
                         .child("Draft"),
                 )
             })
@@ -1150,7 +1150,7 @@ impl Render for ThreadCard {
         div()
             .w_full()
             .font_family(cx.theme().font_family.clone())
-            .text_size(px(m::TEXT_SIZE))
+            .text_size(diffpilot_ui_kit::text_px(m::TEXT_SIZE))
             .when(dismissed, |card| card.opacity(0.6))
             .on_action(cx.listener(|this, _: &SendToClaude, window, cx| this.send_to_claude(window, cx)))
             .child(card)

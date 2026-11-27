@@ -2,8 +2,8 @@ use diffpilot_core::file_kind::FileTint;
 use diffpilot_core::review::Severity;
 use diffpilot_core::settings::{Appearance, appearance_override};
 use gpui::{
-    App, Background, BoxShadow, Global, Hsla, Rgba, Window, WindowAppearance, linear_color_stop, linear_gradient,
-    point, px, rgb, rgba,
+    App, Background, BoxShadow, Global, Hsla, Pixels, Rgba, Window, WindowAppearance, linear_color_stop,
+    linear_gradient, point, px, rgb, rgba,
 };
 use gpui_component::{Theme as ComponentTheme, ThemeMode};
 
@@ -445,11 +445,18 @@ pub fn set_dark(dark: bool, window: Option<&mut Window>, cx: &mut App) {
     }
 }
 
+// Every UI text size goes through this, so one number makes the whole app's text larger or smaller.
+pub const TEXT_SCALE: f32 = 1.08;
+
+pub fn text_px(size: f32) -> Pixels {
+    px(size * TEXT_SCALE)
+}
+
 fn apply_to_components(theme: &Theme, cx: &mut App) {
     let dark = theme.dark;
     let pick = |light: u32, dark_value: u32| -> Hsla { rgb(if dark { dark_value } else { light }).into() };
     let target = ComponentTheme::global_mut(cx);
-    target.font_size = px(14.);
+    target.font_size = text_px(14.);
     target.radius = px(6.);
     target.radius_lg = px(10.);
     target.background = theme.background;

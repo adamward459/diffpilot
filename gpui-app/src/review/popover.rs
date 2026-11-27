@@ -143,7 +143,7 @@ impl Render for ReviewPopover {
         let plural = if files == 1 { "file" } else { "files" };
         let section = |text: &'static str| {
             div()
-                .text_size(px(12.))
+                .text_size(diffpilot_ui_kit::text_px(12.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme.ui.text)
                 .child(text)
@@ -152,7 +152,7 @@ impl Render for ReviewPopover {
             .w(px(WIDTH - 24.))
             .p(px(4.))
             .gap(px(0.))
-            .text_size(px(13.))
+            .text_size(diffpilot_ui_kit::text_px(13.))
             .text_color(theme.ui.text)
             .child(
                 h_flex()
@@ -162,14 +162,19 @@ impl Render for ReviewPopover {
                     .child(Icon::new(Glyph::Sparkles).size(px(13.)).text_color(theme.ui.claude))
                     .child(div().font_weight(FontWeight::BOLD).child("Ask Claude"))
                     .child(div().flex_1())
-                    .child(div().text_size(px(10.)).text_color(theme.ui.muted).child("Claude Code")),
+                    .child(
+                        div()
+                            .text_size(diffpilot_ui_kit::text_px(10.))
+                            .text_color(theme.ui.muted)
+                            .child("Claude Code"),
+                    ),
             )
             .child(
                 h_flex()
                     .gap_1p5()
                     .mb(px(14.))
                     .items_center()
-                    .text_size(px(12.))
+                    .text_size(diffpilot_ui_kit::text_px(12.))
                     .text_color(theme.ui.muted)
                     .child(Icon::new(Glyph::GitBranch).size_3p5())
                     .child(
@@ -197,7 +202,7 @@ impl Render for ReviewPopover {
                 div()
                     .mb(px(10.))
                     .relative()
-                    .child(Input::new(&self.instructions).text_size(px(13.)))
+                    .child(Input::new(&self.instructions).text_size(diffpilot_ui_kit::text_px(13.)))
                     .when(self.instructions.read(cx).value().is_empty(), |field| {
                         field.child(
                             div()
@@ -205,7 +210,7 @@ impl Render for ReviewPopover {
                                 .top(px(9.))
                                 .left(px(13.))
                                 .right(px(13.))
-                                .text_size(px(13.))
+                                .text_size(diffpilot_ui_kit::text_px(13.))
                                 .text_color(theme.ui.muted)
                                 .child(INSTRUCTIONS_HINT),
                         )

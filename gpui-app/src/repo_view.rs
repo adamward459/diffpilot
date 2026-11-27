@@ -1222,7 +1222,7 @@ impl RepoView {
                 tag(h_flex(), || format!("jump-bar:threads:{threads}"))
                     .gap(px(3.))
                     .flex_none()
-                    .text_size(px(14.))
+                    .text_size(diffpilot_ui_kit::text_px(14.))
                     .text_color(tokens.ui.text2)
                     .child(
                         Icon::new(Glyph::MessageSquare)
@@ -1434,7 +1434,7 @@ impl RepoView {
                         .child(match &self.folder_menu {
                             Some(menu) => menu.clone().into_any_element(),
                             None => div()
-                                .text_size(px(15.))
+                                .text_size(diffpilot_ui_kit::text_px(15.))
                                 .font_semibold()
                                 .text_color(tokens.ui.text)
                                 .whitespace_nowrap()
@@ -1443,7 +1443,7 @@ impl RepoView {
                         })
                         .child(
                             div()
-                                .text_size(px(12.))
+                                .text_size(diffpilot_ui_kit::text_px(12.))
                                 .text_color(tokens.ui.muted)
                                 .whitespace_nowrap()
                                 .overflow_hidden()

@@ -35,7 +35,7 @@ pub fn section(theme: &Theme, title: &'static str, content: impl IntoElement) ->
         .gap(px(8.))
         .child(
             div()
-                .text_size(px(15.))
+                .text_size(crate::theme::text_px(15.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme.ui.text)
                 .child(title),
@@ -63,7 +63,7 @@ pub fn note(theme: &Theme, color: Hsla, text: impl Into<SharedString>) -> Div {
     div()
         .px(px(13.))
         .py(px(8.))
-        .text_size(px(14.))
+        .text_size(crate::theme::text_px(14.))
         .line_height(px(20.))
         .text_color(color)
         .bg(theme.ui.raised)
@@ -72,7 +72,7 @@ pub fn note(theme: &Theme, color: Hsla, text: impl Into<SharedString>) -> Div {
 
 pub fn caption(theme: &Theme, text: impl Into<SharedString>) -> Div {
     div()
-        .text_size(px(13.))
+        .text_size(crate::theme::text_px(13.))
         .line_height(px(18.))
         .text_color(theme.ui.muted)
         .child(text.into())
@@ -81,7 +81,7 @@ pub fn caption(theme: &Theme, text: impl Into<SharedString>) -> Div {
 pub fn mono_text(theme: &Theme, cx: &App, text: impl Into<SharedString>) -> Div {
     div()
         .font_family(cx.theme().mono_font_family.clone())
-        .text_size(px(13.))
+        .text_size(crate::theme::text_px(13.))
         .text_color(theme.ui.text2)
         .child(text.into())
 }
@@ -151,7 +151,7 @@ impl RenderOnce for Row {
                     .min_w_0()
                     .child(
                         div()
-                            .text_size(px(15.))
+                            .text_size(crate::theme::text_px(15.))
                             .line_height(px(20.))
                             .text_color(t.ui.text)
                             .child(self.title),
@@ -206,7 +206,7 @@ pub fn picker(theme: &Theme, id: impl Into<ElementId>, label: impl Into<SharedSt
         .bg(theme.glass_body(theme.ui.cap))
         .shadow(theme.slab_shadow(Rise::Rest))
         .child(rim(theme, Some(7.)))
-        .text_size(px(14.))
+        .text_size(crate::theme::text_px(14.))
         .text_color(theme.ui.text)
         .whitespace_nowrap()
         .child(label.into())
@@ -254,7 +254,7 @@ pub fn segmented_control(
                     .h(px(24.))
                     .px(px(12.))
                     .rounded(px(6.))
-                    .text_size(px(13.))
+                    .text_size(crate::theme::text_px(13.))
                     .text_color(text)
                     .when(chosen, |this| thumb(this, theme, Some(6.)))
                     .when(enabled && !chosen, |this| {

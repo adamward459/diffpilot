@@ -116,7 +116,12 @@ impl Render for Gallery {
                     .border_color(border)
                     .child(div().text_color(muted).child("large"))
                     .child(self.pill.clone())
-                    .child(div().text_color(muted).text_size(px(11.)).child(room)),
+                    .child(
+                        div()
+                            .text_color(muted)
+                            .text_size(diffpilot_ui_kit::text_px(11.))
+                            .child(room),
+                    ),
             )
             .child(
                 v_flex()

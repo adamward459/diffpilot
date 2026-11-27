@@ -132,7 +132,7 @@ pub fn render(window: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) 
             .flex()
             .items_center()
             .gap(px(5.))
-            .text_size(px(12.))
+            .text_size(diffpilot_ui_kit::text_px(12.))
             .text_color(t.ui.muted)
             .child(spinner("data-load", 12., t.ui.muted))
             .child("Loading…")
@@ -190,7 +190,7 @@ fn repo_counts(repo: &RepoData) -> [u32; 5] {
 
 fn warning(t: &Theme, text: &'static str) -> Div {
     div()
-        .text_size(px(13.))
+        .text_size(diffpilot_ui_kit::text_px(13.))
         .line_height(px(18.))
         .text_color(t.danger)
         .child(text)
@@ -266,7 +266,10 @@ fn repo_rows(
         .gap(px(8.))
         .when(project.missing, |this| {
             this.child(tag(
-                div().text_size(px(12.)).text_color(t.amber).child("Folder missing"),
+                div()
+                    .text_size(diffpilot_ui_kit::text_px(12.))
+                    .text_color(t.amber)
+                    .child("Folder missing"),
                 || format!("data:missing:{repo}"),
             ))
         })

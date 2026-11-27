@@ -194,7 +194,7 @@ impl Render for FixButton {
         let content = self.content(theme, cx);
         h_flex()
             .items_center()
-            .text_size(px(13.))
+            .text_size(diffpilot_ui_kit::text_px(13.))
             .text_color(cx.theme().foreground)
             .children(content.map(|content| div().ml_1p5().child(content)))
     }

@@ -38,7 +38,7 @@ pub fn viewed_toggle(theme: &Theme, id: impl Into<ElementId>, viewed: bool, stat
             .px(px(8.0))
             .rounded_full()
             .cursor_pointer()
-            .text_size(px(13.0))
+            .text_size(crate::theme::text_px(13.0))
             .text_color(theme.ui.text2),
         Fills {
             rest: clear,

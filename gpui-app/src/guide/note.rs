@@ -85,7 +85,7 @@ impl Render for NoteCard {
                         column.child(
                             div()
                                 .h(px(m::LABEL_LINE))
-                                .text_size(px(12.0))
+                                .text_size(diffpilot_ui_kit::text_px(12.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(tint)
                                 .child("Take extra care"),

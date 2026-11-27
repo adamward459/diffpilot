@@ -389,10 +389,15 @@ impl Workspace {
                             .gap_2()
                             .px_6()
                             .child(Icon::new(Glyph::Folder).size(px(36.)).text_color(muted))
-                            .child(div().text_size(px(17.)).font_semibold().child("No Folder"))
                             .child(
                                 div()
-                                    .text_size(px(13.))
+                                    .text_size(diffpilot_ui_kit::text_px(17.))
+                                    .font_semibold()
+                                    .child("No Folder"),
+                            )
+                            .child(
+                                div()
+                                    .text_size(diffpilot_ui_kit::text_px(13.))
                                     .text_color(muted)
                                     .text_center()
                                     .child("Press ⌘O to open a Git repository."),

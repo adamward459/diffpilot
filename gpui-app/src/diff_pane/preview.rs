@@ -562,7 +562,7 @@ fn stacked(old: &ImageBody, new: &ImageBody, theme: &Theme, width: f32, controls
                 .justify_center()
                 .gap(px(10.0))
                 .h(px(SLIDER_ROW))
-                .text_size(px(12.0))
+                .text_size(diffpilot_ui_kit::text_px(12.0))
                 .text_color(theme.diff.muted)
                 .child("Before")
                 .child(track)
@@ -591,7 +591,7 @@ fn stacked(old: &ImageBody, new: &ImageBody, theme: &Theme, width: f32, controls
                 .w(px(stage_w.max(CAPTION_MIN)))
                 .h(px(META))
                 .pt(px(6.0))
-                .text_size(px(12.0))
+                .text_size(diffpilot_ui_kit::text_px(12.0))
                 .text_color(theme.diff.muted)
                 .child(caption("Before", old))
                 .child(caption("After", new)),
@@ -607,7 +607,7 @@ fn side_view(side: &LoadedSide, theme: &Theme, column: f32, cx: &App) -> Div {
     let label = side.label.map(|label| {
         div()
             .h(px(LABEL))
-            .text_size(px(12.5))
+            .text_size(diffpilot_ui_kit::text_px(12.5))
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(tint)
             .child(label)
@@ -625,7 +625,7 @@ fn side_view(side: &LoadedSide, theme: &Theme, column: f32, cx: &App) -> Div {
 fn note(theme: &Theme, text: &'static str) -> Div {
     div()
         .h(px(LINE))
-        .text_size(px(12.5))
+        .text_size(diffpilot_ui_kit::text_px(12.5))
         .text_color(theme.diff.muted)
         .child(text)
 }
@@ -644,7 +644,7 @@ fn image_box(image: &ImageBody, theme: &Theme, column: f32) -> Div {
     if image.broken {
         return frame
             .h(px(FALLBACK_BOX))
-            .text_size(px(12.5))
+            .text_size(diffpilot_ui_kit::text_px(12.5))
             .text_color(theme.diff.muted)
             .child("Preview not available.");
     }
@@ -679,7 +679,7 @@ fn image_meta(image: &ImageBody, theme: &Theme) -> Div {
     div()
         .h(px(META))
         .pt(px(6.0))
-        .text_size(px(12.0))
+        .text_size(diffpilot_ui_kit::text_px(12.0))
         .text_color(theme.diff.muted)
         .child(text)
 }
@@ -782,7 +782,7 @@ fn block_view(block: &Block, theme: &Theme, fonts: &Fonts) -> AnyElement {
                             .flex_none()
                             .w(px(22.0))
                             .h(px(LINE))
-                            .text_size(px(TEXT))
+                            .text_size(diffpilot_ui_kit::text_px(TEXT))
                             .text_color(theme.diff.muted)
                             .flex()
                             .justify_end()
@@ -837,7 +837,11 @@ fn rich(
     color: Hsla,
     weight: FontWeight,
 ) -> AnyElement {
-    let frame = div().w_full().min_w_0().text_size(px(size)).line_height(px(line));
+    let frame = div()
+        .w_full()
+        .min_w_0()
+        .text_size(diffpilot_ui_kit::text_px(size))
+        .line_height(px(line));
     if text.text.is_empty() {
         return frame.h(px(line)).into_any_element();
     }

@@ -505,7 +505,7 @@ impl Render for SettingsPage {
                         .when(ix == last, |this| this.min_h(viewport))
                         .child(
                             div()
-                                .text_size(px(20.))
+                                .text_size(diffpilot_ui_kit::text_px(20.))
                                 .line_height(px(28.))
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .child(section.title()),
@@ -562,7 +562,7 @@ impl Render for SettingsPage {
             .size_full()
             .text_color(t.ui.text)
             .font_family(cx.theme().font_family.clone())
-            .text_size(px(13.))
+            .text_size(diffpilot_ui_kit::text_px(13.))
             .child(header)
             .child(
                 div().flex_none().flex().px(px(20.)).pb(px(12.)).child(tag(
@@ -660,7 +660,7 @@ impl SettingsPage {
             .child(
                 div()
                     .flex_1()
-                    .text_size(px(15.))
+                    .text_size(diffpilot_ui_kit::text_px(15.))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .child("Settings"),
             )

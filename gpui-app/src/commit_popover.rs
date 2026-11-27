@@ -239,7 +239,7 @@ impl Render for CommitPopover {
         v_flex()
             .w(px(WIDTH - 24.))
             .p(px(4.))
-            .text_size(px(13.))
+            .text_size(diffpilot_ui_kit::text_px(13.))
             .text_color(theme.ui.text)
             .child(
                 h_flex()
@@ -252,7 +252,7 @@ impl Render for CommitPopover {
             .child(
                 div()
                     .mb(px(12.))
-                    .text_size(px(12.))
+                    .text_size(diffpilot_ui_kit::text_px(12.))
                     .text_color(theme.ui.muted)
                     .child(format!(
                         "Stages all {} changed {plural} and commits them.",
@@ -262,14 +262,18 @@ impl Render for CommitPopover {
             .child(
                 div()
                     .mb(px(12.))
-                    .child(Input::new(&self.message).text_size(px(13.)).disabled(generating))
+                    .child(
+                        Input::new(&self.message)
+                            .text_size(diffpilot_ui_kit::text_px(13.))
+                            .disabled(generating),
+                    )
                     .when(self.message.read(cx).value().is_empty(), |field| {
                         field.child(
                             div()
                                 .absolute()
                                 .top(px(9.))
                                 .left(px(13.))
-                                .text_size(px(13.))
+                                .text_size(diffpilot_ui_kit::text_px(13.))
                                 .text_color(theme.ui.muted)
                                 .child("Commit message"),
                         )
@@ -289,7 +293,7 @@ impl Render for CommitPopover {
                         })
                         .mb(px(12.))
                         .min_w_0()
-                        .text_size(px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(12.))
                         .text_color(theme.danger)
                         .child(text),
                     )
@@ -332,7 +336,7 @@ impl CommitPopover {
                 .child(spinner("commit-generating", 13., theme.ui.claude))
                 .child(
                     div()
-                        .text_size(px(12.))
+                        .text_size(diffpilot_ui_kit::text_px(12.))
                         .text_color(theme.ui.muted)
                         .child("Writing\u{2026}"),
                 )

@@ -56,7 +56,7 @@ impl GuideInspector {
 fn heading(tokens: &Theme, text: &'static str) -> impl IntoElement {
     div()
         .mt(px(6.))
-        .text_size(px(11.5))
+        .text_size(diffpilot_ui_kit::text_px(11.5))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(tokens.ui.muted)
         .child(text)
@@ -112,7 +112,7 @@ impl Render for GuideInspector {
                 .child(glyph_icon(Glyph::BookOpen, 13., tokens.ui.claude))
                 .child(
                     div()
-                        .text_size(px(12.5))
+                        .text_size(diffpilot_ui_kit::text_px(12.5))
                         .font_weight(FontWeight::SEMIBOLD)
                         .child(SharedString::from(step_label)),
                 )
@@ -140,7 +140,7 @@ impl Render for GuideInspector {
             .child(
                 div()
                     .id("guide-chapter-title")
-                    .text_size(px(17.))
+                    .text_size(diffpilot_ui_kit::text_px(17.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(SharedString::from(chapter.title.clone())),
             )
@@ -168,7 +168,7 @@ impl Render for GuideInspector {
                 .child(
                     h_flex()
                         .gap(px(6.))
-                        .text_size(px(12.5))
+                        .text_size(diffpilot_ui_kit::text_px(12.5))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(tokens.amber)
                         .child(glyph_icon(Glyph::TriangleAlert, 14., tokens.amber))
@@ -234,7 +234,7 @@ impl Render for GuideInspector {
                             row.child(
                                 h_flex()
                                     .gap(px(4.))
-                                    .text_size(px(11.))
+                                    .text_size(diffpilot_ui_kit::text_px(11.))
                                     .text_color(tokens.ui.muted)
                                     .child(glyph_icon(Glyph::Folder, 11., tokens.ui.muted))
                                     .child(SharedString::from(tilde_path(folder))),
@@ -244,7 +244,7 @@ impl Render for GuideInspector {
                             h_flex()
                                 .gap(px(4.))
                                 .font_family("Menlo")
-                                .text_size(px(11.5))
+                                .text_size(diffpilot_ui_kit::text_px(11.5))
                                 .child(SharedString::from(site))
                                 .when(impact.folder.is_some(), |row| {
                                     row.child(glyph_icon(Glyph::ExternalLink, 11., tokens.ui.muted))

@@ -246,7 +246,7 @@ impl RenderOnce for Button {
             })
             .when(!glass, |b| b.bg(fill))
             .text_color(c.text)
-            .text_size(px(size))
+            .text_size(crate::theme::text_px(size))
             .font_weight(weight)
             .whitespace_nowrap()
             .when(disabled, |b| b.opacity(DISABLED_OPACITY))
@@ -280,7 +280,7 @@ impl RenderOnce for Button {
             .children(self.children)
             .when(self.caret, |b| b.child(Icon::new(Glyph::ChevronDown).size(px(13.))))
             .when_some(self.hint, |b, hint| {
-                b.child(div().text_size(px(11.)).opacity(0.75).child(hint))
+                b.child(div().text_size(crate::theme::text_px(11.)).opacity(0.75).child(hint))
             })
     }
 }
@@ -300,7 +300,7 @@ pub fn chip(name: &'static str, on: bool) -> Button {
         .regular()
         .px(px(12.))
         .rounded_full()
-        .text_size(px(13.))
+        .text_size(crate::theme::text_px(13.))
         .look(if on { Look::Tint } else { Look::Plain });
     if on { chip.icon(Glyph::CheckThin, 11.) } else { chip }
 }

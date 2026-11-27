@@ -106,7 +106,7 @@ pub fn element(id: impl Into<ElementId>, inline: &Inline, body: Body, on_ref: Op
         _ => styled.into_any_element(),
     };
     div()
-        .text_size(px(body.size))
+        .text_size(diffpilot_ui_kit::text_px(body.size))
         .line_height(px(body.line))
         .child(text)
         .into_any_element()
