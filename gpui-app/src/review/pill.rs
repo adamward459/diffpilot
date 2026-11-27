@@ -2,8 +2,8 @@ use crate::review::popover::{PopoverEvent, ReviewPopover};
 use crate::review::session::{ReviewEvent, ReviewSession};
 use diffpilot_core::review::Severity;
 use diffpilot_core::run::{Progress, Run, RunId, RunKind, RunState};
-use diffpilot_ui_kit::components::popover;
 use diffpilot_ui_kit::components::{Button, Look, filled_check, severity_badge, tag};
+use diffpilot_ui_kit::components::{popover, spinner};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -11,9 +11,8 @@ use gpui::{
     IntoElement, KeyBinding, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
     Task, WeakEntity, Window, actions, div, px,
 };
-use gpui_component::spinner::Spinner;
 use gpui_component::tooltip::Tooltip;
-use gpui_component::{ActiveTheme, Icon, Sizable, h_flex};
+use gpui_component::{ActiveTheme, h_flex};
 use std::time::Duration;
 
 actions!(review_ui, [StopReview]);
@@ -315,12 +314,7 @@ fn working(run: Working, theme: Theme, cx: &Context<ReviewPill>) -> impl IntoEle
                 .gap(px(7.))
                 .items_center()
                 .cursor_pointer()
-                .child(
-                    Spinner::new()
-                        .icon(Icon::new(Glyph::Spinner))
-                        .color(theme.ui.muted)
-                        .with_size(px(16.)),
-                )
+                .child(spinner(("pill-spinner", 0usize), 16., theme.ui.muted))
                 .child(
                     h_flex()
                         .gap_1()

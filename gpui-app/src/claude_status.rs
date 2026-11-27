@@ -2,7 +2,7 @@ use crate::claude_area::{ago, comments_of, state_glyph};
 use crate::review::ReviewSession;
 use crate::runs::now_ms;
 use diffpilot_core::run::{LogKind, Run, RunKind, RunState};
-use diffpilot_ui_kit::components::{Button, Look, bar_button, glyph_icon, spinner, tag};
+use diffpilot_ui_kit::components::{Button, Look, bar_button, glyph_icon, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
 use gpui::{AnyElement, App, ClickEvent, IntoElement, ParentElement, Styled, Window, div, px};
@@ -86,7 +86,7 @@ where
     let status = status_of(session, now_ms());
     let icon = match &status {
         Status::Idle(_) => glyph_icon(Glyph::Sparkles, 14., theme.ui.muted).into_any_element(),
-        Status::Working(_) => spinner("claude-status-spinner", 14., theme.ui.muted).into_any_element(),
+        Status::Working(_) => glyph_icon(Glyph::Sparkles, 14., theme.ui.claude).into_any_element(),
         Status::Finished(state, _) => {
             let (glyph, color) = state_glyph(*state, theme);
             glyph_icon(glyph, 14., color).into_any_element()

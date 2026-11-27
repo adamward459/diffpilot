@@ -14,11 +14,12 @@ pub fn glyph_icon(glyph: Glyph, size: f32, color: Hsla) -> Icon {
     Icon::new(glyph).size(px(size)).flex_none().text_color(color)
 }
 
+// 12 steps, one per spoke in spinner.svg.
 pub fn spinner(id: impl Into<ElementId>, size: f32, color: Hsla) -> impl IntoElement {
-    glyph_icon(Glyph::LoaderCircle, size, color).with_animation(
+    glyph_icon(Glyph::Spinner, size, color).with_animation(
         id,
-        Animation::new(Duration::from_millis(900)).repeat(),
-        |icon, delta| icon.transform(Transformation::rotate(percentage(delta))),
+        Animation::new(Duration::from_millis(1000)).repeat(),
+        |icon, delta| icon.transform(Transformation::rotate(percentage((delta * 12.).floor() / 12.))),
     )
 }
 

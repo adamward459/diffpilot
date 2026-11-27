@@ -73,7 +73,6 @@ glyphs! {
     ListFilter => "list-filter",
     ListPlus => "list-plus",
     ListTree => "list-tree",
-    LoaderCircle => "loader-circle",
     MessageSquare => "message-square",
     MessageSquarePlus => "message-square-plus",
     PanelBottom => "panel-bottom",
