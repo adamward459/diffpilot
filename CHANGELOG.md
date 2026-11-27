@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ### Changed
 
+- The folder name in the title bar no longer has the path under it. Hover the name to see the path. The linked folders and other changed folders now sit on a small second line, so they never run under the toolbar.
 - Adding a linked folder is simpler: type a path and press Enter, drop a folder on the field, or choose Choose…. Changes save as you edit. The Guide start card lists the linked folders as chips, with Edit….
 - The folder menu item Add Folder… is now called Open Folder…. Open Folder… and ⌘O open the sheet, not the system folder picker.
 - The title bar now shows what you compare as one label, like feature → main. Click it to open the Open Folder sheet on this folder and change the branches or pick a pull request.

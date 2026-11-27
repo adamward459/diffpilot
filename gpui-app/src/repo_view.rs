@@ -140,20 +140,8 @@ fn load_diff(repo: &std::path::Path, comparison: &Comparison) -> DiffLoaded {
     }
 }
 
-fn home_relative(path: &std::path::Path) -> String {
-    shorten(&tilde_path(path))
-}
-
 pub(crate) fn tilde_path(path: &std::path::Path) -> String {
     relative_to(path, std::env::var_os("HOME").as_deref().map(std::path::Path::new))
-}
-
-fn shorten(path: &str) -> String {
-    let parts: Vec<&str> = path.split('/').collect();
-    match parts.as_slice() {
-        [first, .., prev, last] if parts.len() > 4 => format!("{first}/\u{2026}/{prev}/{last}"),
-        _ => path.to_string(),
-    }
 }
 
 fn relative_to(path: &std::path::Path, home: Option<&std::path::Path>) -> String {
@@ -1439,26 +1427,16 @@ impl RepoView {
                 .gap_2()
                 .children(leading)
                 .child(
-                    anchor(v_flex().min_w_0(), Stop::Folder)
-                        .child(match &self.folder_menu {
-                            Some(menu) => menu.clone().into_any_element(),
-                            None => div()
-                                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::TITLE))
-                                .font_semibold()
-                                .text_color(tokens.ui.text)
-                                .whitespace_nowrap()
-                                .child(self.folder_name.clone())
-                                .into_any_element(),
-                        })
-                        .child(
-                            div()
-                                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
-                                .text_color(tokens.ui.muted)
-                                .whitespace_nowrap()
-                                .overflow_hidden()
-                                .text_ellipsis()
-                                .child(home_relative(&self.repo)),
-                        ),
+                    anchor(v_flex().min_w_0(), Stop::Folder).child(match &self.folder_menu {
+                        Some(menu) => menu.clone().into_any_element(),
+                        None => div()
+                            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::TITLE))
+                            .font_semibold()
+                            .text_color(tokens.ui.text)
+                            .whitespace_nowrap()
+                            .child(self.folder_name.clone())
+                            .into_any_element(),
+                    }),
                 ),
         )
         .children(pill)
@@ -1715,8 +1693,6 @@ mod tests {
         let home = Some(Path::new("/Users/me"));
         assert_eq!(relative_to(Path::new("/Users/me/code/app"), home), "~/code/app");
         assert_eq!(relative_to(Path::new("/Users/me"), home), "~");
-        assert_eq!(shorten("~/a/b/c/d/e"), "~/\u{2026}/d/e");
-        assert_eq!(shorten("~/a/b/c"), "~/a/b/c");
         assert_eq!(relative_to(Path::new("/srv/app"), home), "/srv/app");
         assert_eq!(relative_to(Path::new("/Users/me/app"), None), "/Users/me/app");
     }

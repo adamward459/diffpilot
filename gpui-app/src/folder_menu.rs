@@ -1,4 +1,5 @@
 use crate::linked_folders::{LinkedEvent, LinkedFolders};
+use crate::repo_view::tilde_path;
 use diffpilot_core::comparison::{self, Comparison};
 use diffpilot_core::folder_status::{FolderStatus, folder_status};
 use diffpilot_core::refs::Refs;
@@ -283,7 +284,11 @@ impl FolderMenu {
             Button::new("linked-pill")
                 .look(Look::Ghost)
                 .rounded_full()
-                .icon_color(Glyph::Link, 12., color)
+                .h(px(20.))
+                .px(px(6.))
+                .gap(px(4.))
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
+                .icon_color(Glyph::Link, 11., color)
                 .text_color(color)
                 .child(tag(div(), move || format!("linked-count:{label}")).child(text)),
             || "linked-pill",
@@ -366,7 +371,8 @@ impl Render for FolderMenu {
                 .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::TITLE))
                 .font_weight(FontWeight::SEMIBOLD)
                 .label(name.clone())
-                .caret(true),
+                .caret(true)
+                .when_some(active.as_deref(), |button, path| button.tooltip(tilde_path(path))),
             || "folder-title",
         );
 
@@ -418,25 +424,40 @@ impl Render for FolderMenu {
             }
         });
 
-        tag(h_flex(), || format!("folder-active:{name}"))
-            .gap(px(8.))
-            .items_center()
+        let changed = (others > 0).then(|| {
+            h_flex()
+                .gap(px(5.))
+                .items_center()
+                .flex_none()
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
+                .text_color(theme.ui.muted)
+                .child(div().size(px(6.)).rounded_full().bg(theme.chrome.uncommitted))
+                .child(if others == 1 {
+                    "1 other changed".to_string()
+                } else {
+                    format!("{others} others changed")
+                })
+        });
+        let separator = (linked_pill.is_some() && changed.is_some()).then(|| {
+            div()
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
+                .text_color(theme.ui.muted)
+                .child("·")
+        });
+        let has_extras = linked_pill.is_some() || changed.is_some();
+        tag(v_flex(), || format!("folder-active:{name}"))
+            .min_w_0()
             .child(popover)
-            .children(linked_pill)
-            .when(others > 0, |this| {
+            .when(has_extras, |this| {
                 this.child(
                     h_flex()
-                        .gap(px(5.))
+                        .gap(px(4.))
                         .items_center()
-                        .flex_none()
-                        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
-                        .text_color(theme.ui.muted)
-                        .child(div().size(px(6.)).rounded_full().bg(theme.chrome.uncommitted))
-                        .child(if others == 1 {
-                            "1 other changed".to_string()
-                        } else {
-                            format!("{others} others changed")
-                        }),
+                        .min_w_0()
+                        .overflow_hidden()
+                        .children(linked_pill)
+                        .children(separator)
+                        .children(changed),
                 )
             })
     }

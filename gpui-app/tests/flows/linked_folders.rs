@@ -1,6 +1,6 @@
 use diffpilot::testing::{
-    click, fixture_named, open_empty_workspace, open_workspace, pick_next, press, shows, type_text, wait_for_motion,
-    wait_until_shows,
+    bounds, click, fixture_named, open_empty_workspace, open_workspace, pick_next, press, shows, type_text,
+    wait_for_motion, wait_until_shows,
 };
 use diffpilot_core::settings::Settings;
 use gpui::TestAppContext;
@@ -11,6 +11,18 @@ fn shared_folder() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().canonicalize().expect("path");
     (dir, path)
+}
+
+#[gpui::test]
+fn the_linked_pill_sits_on_its_own_line_under_the_folder_name(app: &mut TestAppContext) {
+    let (_alpha_dir, alpha) = fixture_named("alpha");
+    let cx = open_workspace(app, &alpha, Arc::new(Settings::in_memory()));
+    let title = bounds(cx, "folder-title");
+    let pill = bounds(cx, "linked-pill");
+    assert!(
+        pill.top() >= title.bottom(),
+        "the pill is below the name, not beside it: title {title:?}, pill {pill:?}"
+    );
 }
 
 #[gpui::test]
