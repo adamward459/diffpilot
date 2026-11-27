@@ -17,6 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 ### Changed
 
 - A guide now belongs to the branch you are on, not to the compare target. Change the target and the guide stays; if the diff is now different, it shows as out of date.
+- Menus, popovers, context menus and the selection bar now share one liquid-glass look, and they fade in when they open.
+- The sidebar, inspector and Claude area now slide in and out instead of jumping.
 - Popovers (Checks, Sync, Ask Claude, Fix, Queue) now have an arrow that points at the button that opened them, like native macOS popovers.
 - Settings now open inside the main window, like in VS Code, with a search box and a section list. Press Esc to go back.
 - Fix is now its own toolbar button, next to Ask Claude. It opens a list where you pick which comments to send, and it stays available while a review runs.

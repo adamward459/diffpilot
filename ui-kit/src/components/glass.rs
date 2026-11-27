@@ -12,6 +12,14 @@ pub type OnSelect = Rc<dyn Fn(usize, &mut Window, &mut App)>;
 pub const CONTROL_HEIGHT: f32 = 32.;
 pub const CAPSULE_HEIGHT: f32 = 38.;
 
+pub const OVERLAY_RADIUS: f32 = 12.;
+pub const OVERLAY_PADDING: f32 = 5.;
+pub const OVERLAY_ROW_HEIGHT: f32 = 24.;
+pub const OVERLAY_ROW_RADIUS: f32 = 6.;
+pub const OVERLAY_ROW_PADDING: f32 = 6.;
+pub const OVERLAY_TEXT: f32 = 13.;
+pub const OVERLAY_DETAIL_TEXT: f32 = 12.;
+
 pub fn glass_fills(theme: &Theme, rest: Hsla) -> Fills {
     Fills {
         rest,
@@ -73,6 +81,19 @@ pub fn glass_surface(row: Div, theme: &Theme) -> Div {
         .border_color(theme.chrome.glass_border)
         .shadow(theme.slab_shadow(Rise::Rest))
         .child(rim(theme, None))
+}
+
+/// The floating glass surface of every menu, popover and selection bar. The rim is an absolute child, so a
+/// scroll area goes inside the panel, not on it.
+pub fn glass_panel(theme: &Theme) -> Div {
+    div()
+        .relative()
+        .rounded(px(OVERLAY_RADIUS))
+        .bg(theme.glass_body(theme.chrome.glass))
+        .border_1()
+        .border_color(theme.chrome.glass_border)
+        .shadow(theme.overlay_shadow())
+        .child(rim(theme, Some(OVERLAY_RADIUS)))
 }
 
 pub fn capsule(theme: &Theme, height: f32) -> Div {

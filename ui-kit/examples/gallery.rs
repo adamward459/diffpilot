@@ -1,20 +1,23 @@
 //! Shows every ui-kit component. `DIFFPILOT_APPEARANCE=light|dark` picks the theme.
 
 use diffpilot_core::review::Severity;
+use diffpilot_ui_kit::components::menu::{Menu, MenuItem, MenuRow, MenuSection};
 use diffpilot_ui_kit::components::{
     BadgeTone, Button, Fills, Look, State, avatar, capsule, card_shell, chip, filled_check, filter_field, glass_button,
-    icon_button, interactive, segmented, segmented_control, severity_badge, status_badge, toggle_capsule,
+    icon_button, interactive, popover, segmented, segmented_control, severity_badge, status_badge, toggle_capsule,
     viewed_toggle,
 };
 use diffpilot_ui_kit::{Assets, Glyph, Theme};
 use gpui::{
-    AnyElement, App, Application, Bounds, Context, IntoElement, ParentElement, Render, Styled, Window, WindowBounds,
-    WindowOptions, div, font, point, prelude::*, px, size,
+    AnyElement, App, Application, Bounds, Context, Corner, Entity, IntoElement, ParentElement, Render, Styled, Window,
+    WindowBounds, WindowOptions, div, font, point, prelude::*, px, size,
 };
 use gpui_component::{Icon, Root, Selectable, h_flex, v_flex};
 use std::rc::Rc;
 
-struct Gallery;
+struct Gallery {
+    menu: Entity<Menu>,
+}
 
 fn section(theme: &Theme, title: &'static str, body: impl IntoElement) -> impl IntoElement {
     v_flex()
@@ -158,6 +161,41 @@ fn glass(theme: &Theme) -> impl IntoElement {
                     |_, _, _| {},
                 )),
         )
+}
+
+fn overlays(theme: &Theme, menu: &Entity<Menu>) -> impl IntoElement {
+    let note = |theme: &Theme, text: &'static str| {
+        v_flex()
+            .gap(px(4.))
+            .w(px(210.))
+            .child(div().text_size(px(13.)).text_color(theme.ui.text).child(text))
+    };
+    h_flex()
+        .h(px(230.))
+        .gap(px(24.))
+        .items_start()
+        .child(
+            popover("gallery-below")
+                .open(true)
+                .trigger(Button::new("gallery-below-trigger").label("Opens below"))
+                .content({
+                    let theme = *theme;
+                    move |_, _, _| note(&theme, "Popover that opens below its trigger.")
+                }),
+        )
+        .child(
+            div().h_full().flex().items_end().child(
+                popover("gallery-above")
+                    .anchor(Corner::BottomLeft)
+                    .open(true)
+                    .trigger(Button::new("gallery-above-trigger").label("Opens above"))
+                    .content({
+                        let theme = *theme;
+                        move |_, _, _| note(&theme, "Popover that opens above its trigger.")
+                    }),
+            ),
+        )
+        .child(menu.clone())
 }
 
 fn badges(theme: &Theme) -> impl IntoElement {
@@ -437,11 +475,14 @@ impl Render for Gallery {
             .child(section(&theme, "Viewed", checks(&theme)))
             .child(section(&theme, "Glyphs", glyphs(&theme)))
             .child(section(&theme, "Card", card(&theme)));
-        let right = div().p(px(14.)).rounded(px(10.)).bg(theme.chrome.panel).child(section(
-            &theme,
-            "Interaction states",
-            states(&theme),
-        ));
+        let right = v_flex()
+            .gap(px(18.))
+            .child(div().p(px(14.)).rounded(px(10.)).bg(theme.chrome.panel).child(section(
+                &theme,
+                "Interaction states",
+                states(&theme),
+            )))
+            .child(section(&theme, "Overlays", overlays(&theme, &self.menu)));
         h_flex()
             .size_full()
             .bg(theme.background)
@@ -461,13 +502,29 @@ fn main() {
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::new(
                 point(px(80.), px(80.)),
-                size(px(1500.), px(900.)),
+                size(px(1500.), px(1060.)),
             ))),
             ..WindowOptions::default()
         };
         cx.open_window(options, |window, cx| {
             diffpilot_ui_kit::theme::install(window, cx);
-            let gallery = cx.new(|_| Gallery);
+            let gallery = cx.new(|cx| Gallery {
+                menu: cx.new(|cx| {
+                    let item = |label: &'static str| MenuItem::new(label, |_, _| {});
+                    Menu::new(
+                        "gallery-menu",
+                        vec![
+                            MenuSection::new(vec![
+                                MenuRow::Item(item("Open").shortcut("⌘O")),
+                                MenuRow::Item(item("Copy Path").shortcut("⌘C")),
+                                MenuRow::Item(item("Reveal in Finder").checked(true)),
+                            ]),
+                            MenuSection::titled("More", vec![MenuRow::Item(item("Settings").detail("⌘,"))]),
+                        ],
+                        cx,
+                    )
+                }),
+            });
             cx.new(|cx| Root::new(gallery, window, cx))
         })
         .expect("open the window");

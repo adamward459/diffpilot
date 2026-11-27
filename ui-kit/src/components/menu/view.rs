@@ -1,8 +1,11 @@
 use super::model::{
-    MenuItem, MenuRow, MenuSection, PADDING, ROW_HEIGHT, SEPARATOR_HEIGHT, Slot, SlotKind, TITLE_HEIGHT, jump, layout,
-    step,
+    MenuItem, MenuRow, MenuSection, SEPARATOR_HEIGHT, Slot, SlotKind, TITLE_HEIGHT, jump, layout, step,
 };
 use crate::components::interaction::DISABLED_OPACITY;
+use crate::components::{
+    OVERLAY_DETAIL_TEXT, OVERLAY_PADDING as PADDING, OVERLAY_ROW_HEIGHT as ROW_HEIGHT, OVERLAY_ROW_PADDING,
+    OVERLAY_ROW_RADIUS, OVERLAY_TEXT, glass_panel, open_motion,
+};
 use crate::icons::Glyph;
 use crate::theme::Theme;
 use gpui::prelude::*;
@@ -26,6 +29,7 @@ pub struct Menu {
     scroll: ScrollHandle,
     min_width: Pixels,
     max_height: Pixels,
+    opens_below: bool,
     bounds: Rc<Cell<Bounds<Pixels>>>,
 }
 
@@ -57,12 +61,18 @@ impl Menu {
             scroll: ScrollHandle::new(),
             min_width: px(180.),
             max_height: px(520.),
+            opens_below: true,
             bounds: Rc::default(),
         }
     }
 
     pub fn min_width(mut self, width: Pixels) -> Self {
         self.min_width = width;
+        self
+    }
+
+    pub fn opens_below(mut self, below: bool) -> Self {
+        self.opens_below = below;
         self
     }
 
@@ -333,10 +343,10 @@ impl Menu {
             .id(ElementId::NamedInteger(self.id.clone(), ix as u64))
             .debug_selector(move || selector)
             .h(px(ROW_HEIGHT))
-            .px(px(6.))
+            .px(px(OVERLAY_ROW_PADDING))
             .gap(px(6.))
-            .rounded(px(6.))
-            .text_size(px(13.))
+            .rounded(px(OVERLAY_ROW_RADIUS))
+            .text_size(px(OVERLAY_TEXT))
             .text_color(text)
             .whitespace_nowrap()
             .when(on, |this| this.bg(theme.accent))
@@ -370,7 +380,13 @@ impl Menu {
                 this.child(accessory(on))
             })
             .when_some(item.and_then(|item| item.shortcut.clone()), |this, shortcut| {
-                this.child(div().flex_none().text_size(px(12.)).text_color(muted).child(shortcut))
+                this.child(
+                    div()
+                        .flex_none()
+                        .text_size(px(OVERLAY_DETAIL_TEXT))
+                        .text_color(muted)
+                        .child(shortcut),
+                )
             })
             .when(is_submenu, |this| {
                 this.child(
@@ -407,27 +423,27 @@ impl Render for Menu {
             )
         });
         let bounds = self.bounds.clone();
+        let panel = glass_panel(&theme).child(
+            div()
+                .id(ElementId::Name(self.id.clone()))
+                .min_w(self.min_width)
+                .max_w(px(520.))
+                .max_h(self.max_height)
+                .overflow_y_scroll()
+                .track_scroll(&self.scroll)
+                .p(px(PADDING))
+                .children(rows),
+        );
         div()
             .relative()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
             .on_mouse_down_out(cx.listener(Self::mouse_down_out))
-            .child(
-                div()
-                    .id(ElementId::Name(self.id.clone()))
-                    .min_w(self.min_width)
-                    .max_w(px(520.))
-                    .max_h(self.max_height)
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .p(px(PADDING))
-                    .rounded(px(12.))
-                    .bg(theme.chrome.glass)
-                    .border_1()
-                    .border_color(theme.chrome.glass_border)
-                    .shadow(theme.menu_shadow())
-                    .children(rows),
-            )
+            .child(open_motion(
+                div().child(panel),
+                ElementId::Name(format!("{}:open", self.id).into()),
+                self.opens_below,
+            ))
             .child(
                 canvas(move |area, _, _| bounds.set(area), |_, _, _, _| {})
                     .absolute()

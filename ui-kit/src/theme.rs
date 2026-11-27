@@ -346,7 +346,7 @@ impl Theme {
         composite(fill, if pressed { self.lift_press } else { self.lift_hover })
     }
 
-    pub fn menu_shadow(&self) -> Vec<BoxShadow> {
+    pub fn overlay_shadow(&self) -> Vec<BoxShadow> {
         vec![
             BoxShadow {
                 color: self.chrome.glass_shadow,
@@ -366,11 +366,16 @@ impl Theme {
     /// `base` lit from above: the sheen fades out by 60% of the height, as on a Glassy UI button.
     /// A see-through fill is laid over the page first, so the slab shadow never shows through the glass.
     pub fn glass_body(&self, base: Hsla) -> Background {
+        let (top, bottom) = self.glass_edges(base);
+        linear_gradient(180., linear_color_stop(top, 0.), linear_color_stop(bottom, 0.6))
+    }
+
+    /// The colors at the top and bottom of `glass_body(base)`, for a part that has to continue the glass.
+    pub fn glass_edges(&self, base: Hsla) -> (Hsla, Hsla) {
         let base = composite(self.background, base);
-        linear_gradient(
-            180.,
-            linear_color_stop(composite(base, self.glass.sheen.opacity(self.glass.sheen.a * 0.8)), 0.),
-            linear_color_stop(base, 0.6),
+        (
+            composite(base, self.glass.sheen.opacity(self.glass.sheen.a * 0.8)),
+            base,
         )
     }
 

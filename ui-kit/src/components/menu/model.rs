@@ -1,3 +1,4 @@
+use crate::components::OVERLAY_ROW_HEIGHT as ROW_HEIGHT;
 use crate::icons::Glyph;
 use gpui::{AnyElement, App, Hsla, SharedString, Window};
 use std::rc::Rc;
@@ -105,8 +106,6 @@ impl MenuItem {
     }
 }
 
-pub const PADDING: f32 = 5.0;
-pub const ROW_HEIGHT: f32 = 24.0;
 pub const TITLE_HEIGHT: f32 = 22.0;
 pub const SEPARATOR_HEIGHT: f32 = 9.0;
 

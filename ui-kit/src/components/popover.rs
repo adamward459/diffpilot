@@ -1,12 +1,15 @@
+use crate::components::{OVERLAY_RADIUS, glass_panel, open_motion};
 use crate::icons::Glyph;
+use crate::theme::Theme;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Bounds, Context, Corner, ElementId, IntoElement, Pixels, RenderOnce, SharedString,
-    TransformationMatrix, Window, canvas, div, point, px, size,
+    TransformationMatrix, Window, canvas, div, point, px, radians, size,
 };
 use gpui_component::popover::{Popover, PopoverState};
-use gpui_component::{ActiveTheme, Selectable, StyledExt, v_flex};
+use gpui_component::{Selectable, v_flex};
 use std::cell::Cell;
+use std::f32::consts::PI;
 use std::rc::Rc;
 
 const ARROW_WIDTH: f32 = 22.;
@@ -18,6 +21,7 @@ type Content = Rc<dyn Fn(&mut PopoverState, &mut Window, &mut Context<PopoverSta
 pub fn popover(id: impl Into<SharedString>) -> ArrowPopover {
     let id = id.into();
     ArrowPopover {
+        id: id.clone(),
         inner: Popover::new(ElementId::Name(id)).appearance(false),
         anchor: Corner::TopLeft,
         content: None,
@@ -26,6 +30,7 @@ pub fn popover(id: impl Into<SharedString>) -> ArrowPopover {
 
 #[derive(IntoElement)]
 pub struct ArrowPopover {
+    id: SharedString,
     inner: Popover,
     anchor: Corner,
     content: Option<Content>,
@@ -70,9 +75,10 @@ impl RenderOnce for ArrowPopover {
         let mut inner = self.inner.anchor(self.anchor);
         if let Some(content) = self.content {
             let trigger = trigger.clone();
+            let id = self.id;
             inner = inner.content(move |state, window, cx| {
                 let body = content(state, window, cx);
-                frame(body, below, trigger.clone(), cx)
+                frame(&id, body, below, trigger.clone(), cx)
             });
         }
         div().relative().child(inner).child(
@@ -83,7 +89,13 @@ impl RenderOnce for ArrowPopover {
     }
 }
 
-fn frame(body: AnyElement, below: bool, trigger: Rc<Cell<Option<Bounds<Pixels>>>>, cx: &App) -> AnyElement {
+fn frame(
+    id: &SharedString,
+    body: AnyElement,
+    below: bool,
+    trigger: Rc<Cell<Option<Bounds<Pixels>>>>,
+    cx: &App,
+) -> AnyElement {
     let arrow = canvas(
         |_, _, _| {},
         move |bounds, _, window, cx| {
@@ -97,7 +109,8 @@ fn frame(body: AnyElement, below: bool, trigger: Rc<Cell<Option<Bounds<Pixels>>>
     .right_0()
     .h(px(ARROW_HEIGHT + 1.))
     .map(|this| if below { this.top_0() } else { this.bottom_0() });
-    div()
+    let theme = Theme::of(cx);
+    let framed = div()
         .relative()
         .map(|this| {
             if below {
@@ -106,14 +119,19 @@ fn frame(body: AnyElement, below: bool, trigger: Rc<Cell<Option<Bounds<Pixels>>>
                 this.pb(px(ARROW_HEIGHT))
             }
         })
-        .child(v_flex().popover_style(cx).p_3().child(body))
-        .child(arrow)
-        .into_any_element()
+        .child(glass_panel(&theme).child(v_flex().p_3().child(body)))
+        .child(arrow);
+    open_motion(framed, ElementId::Name(format!("{id}:open").into()), below).into_any_element()
 }
 
 fn paint_arrow(window: &mut Window, bounds: Bounds<Pixels>, trigger: Bounds<Pixels>, below: bool, cx: &App) {
-    let theme = cx.theme();
-    let (fill, border, radius) = (theme.popover, theme.border, f32::from(theme.radius));
+    let theme = Theme::of(cx);
+    let (top, bottom) = theme.glass_edges(theme.chrome.glass);
+    let (fill, border, radius) = (
+        if below { top } else { bottom },
+        theme.chrome.glass_border,
+        OVERLAY_RADIUS,
+    );
     let half = ARROW_WIDTH / 2.;
     let inset = half + radius;
     let (left, right) = (f32::from(bounds.left()) + inset, f32::from(bounds.right()) - inset);
@@ -125,12 +143,15 @@ fn paint_arrow(window: &mut Window, bounds: Bounds<Pixels>, trigger: Bounds<Pixe
         point(px(x - half), bounds.top()),
         size(px(ARROW_WIDTH), px(ARROW_HEIGHT + 1.)),
     );
-    let (fill_glyph, border_glyph) = if below {
-        (Glyph::PopoverArrowUpFill, Glyph::PopoverArrowUpBorder)
+    let turn = if below {
+        TransformationMatrix::unit()
     } else {
-        (Glyph::PopoverArrowDownFill, Glyph::PopoverArrowDownBorder)
+        let center = arrow.center().scale(window.scale_factor());
+        TransformationMatrix::unit()
+            .translate(point(center.x * 2., center.y * 2.))
+            .compose(TransformationMatrix::unit().rotate(radians(PI)))
     };
-    for (glyph, color) in [(fill_glyph, fill), (border_glyph, border)] {
-        let _ = window.paint_svg(arrow, glyph.path().into(), TransformationMatrix::unit(), color, cx);
+    for (glyph, color) in [(Glyph::PopoverArrowFill, fill), (Glyph::PopoverArrowBorder, border)] {
+        let _ = window.paint_svg(arrow, glyph.path().into(), turn, color, cx);
     }
 }

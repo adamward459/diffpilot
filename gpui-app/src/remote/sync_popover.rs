@@ -1,6 +1,8 @@
 use super::rows::{SyncRow, fetch_detail, pull_first_warning, pull_row, push_row, sync_header};
 use super::{RemoteStatus, ReviewState, SyncKind, SyncState};
-use diffpilot_ui_kit::components::{DISABLED_OPACITY, glyph_icon, spinner, tag};
+use diffpilot_ui_kit::components::{
+    DISABLED_OPACITY, OVERLAY_DETAIL_TEXT, OVERLAY_ROW_RADIUS, OVERLAY_TEXT, glyph_icon, spinner, tag,
+};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{Context, Div, Entity, FontWeight, IntoElement, Render, Stateful, Subscription, Window, div, px};
@@ -43,7 +45,7 @@ impl SyncPopover {
             .px(px(10.))
             .py(px(6.))
             .gap(px(10.))
-            .rounded(px(8.))
+            .rounded(px(OVERLAY_ROW_RADIUS))
             .when(enabled, |this| {
                 this.cursor_pointer()
                     .hover(move |style| style.bg(hover))
@@ -65,15 +67,25 @@ impl SyncPopover {
                 v_flex()
                     .flex_1()
                     .min_w_0()
-                    .child(div().text_size(px(13.)).text_color(theme.ui.text).child(row.title))
+                    .child(
+                        div()
+                            .text_size(px(OVERLAY_TEXT))
+                            .text_color(theme.ui.text)
+                            .child(row.title),
+                    )
                     .child(
                         tag(div(), move || format!("remote:detail:{name}:{detail}"))
-                            .text_size(px(12.))
+                            .text_size(px(OVERLAY_DETAIL_TEXT))
                             .text_color(theme.ui.muted)
                             .child(row.detail),
                     ),
             )
-            .child(div().text_size(px(12.)).text_color(theme.ui.faint).child(shortcut))
+            .child(
+                div()
+                    .text_size(px(OVERLAY_DETAIL_TEXT))
+                    .text_color(theme.ui.faint)
+                    .child(shortcut),
+            )
     }
 }
 
@@ -132,7 +144,7 @@ impl Render for SyncPopover {
                         .py(px(6.))
                         .gap(px(8.))
                         .items_start()
-                        .rounded(px(8.))
+                        .rounded(px(OVERLAY_ROW_RADIUS))
                         .bg(theme.amber.opacity(0.14))
                         .text_size(px(12.))
                         .text_color(theme.ui.text)

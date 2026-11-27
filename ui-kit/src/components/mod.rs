@@ -7,6 +7,7 @@ mod form;
 mod glass;
 mod interaction;
 pub mod menu;
+mod motion;
 mod popover;
 
 pub use badge::{BadgeTone, avatar, filled_check, severity_badge, status_badge};
@@ -21,8 +22,10 @@ pub use form::{
     Row, caption, glyph_icon, grouped, mono_text, note, picker, section, segmented_control, spinner, switch, tag,
 };
 pub use glass::{
-    CAPSULE_HEIGHT, CONTROL_HEIGHT, OnSelect, capsule, filter_field, glass_button, glass_fills, glass_surface, rim,
-    segmented, slab, thumb, toggle_capsule,
+    CAPSULE_HEIGHT, CONTROL_HEIGHT, OVERLAY_DETAIL_TEXT, OVERLAY_PADDING, OVERLAY_RADIUS, OVERLAY_ROW_HEIGHT,
+    OVERLAY_ROW_PADDING, OVERLAY_ROW_RADIUS, OVERLAY_TEXT, OnSelect, capsule, filter_field, glass_button, glass_fills,
+    glass_panel, glass_surface, rim, segmented, slab, thumb, toggle_capsule,
 };
 pub use interaction::{DISABLED_OPACITY, Fills, State, interactive};
+pub use motion::{DRAWER_DURATION, Drawer, OPEN_DURATION, open_motion, settle_after};
 pub use popover::{ArrowPopover, popover};

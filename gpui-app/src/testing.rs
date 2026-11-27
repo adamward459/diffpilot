@@ -327,14 +327,28 @@ pub fn shows(cx: &mut VisualTestContext, selector: &str) -> bool {
     bounds_of(cx, selector).is_some()
 }
 
+/// Bounds of a tag once it has stopped moving, so a click lands after a menu or drawer finishes opening.
+fn settled_bounds(cx: &mut VisualTestContext, selector: &str) -> Bounds<Pixels> {
+    let mut bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
+    for _ in 0..60 {
+        std::thread::sleep(std::time::Duration::from_millis(16));
+        let Some(next) = bounds_of(cx, selector) else { break };
+        if next == bounds {
+            break;
+        }
+        bounds = next;
+    }
+    bounds
+}
+
 pub fn click(cx: &mut VisualTestContext, selector: &str) {
-    let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
+    let bounds = settled_bounds(cx, selector);
     cx.simulate_click(bounds.center(), Modifiers::default());
     draw(cx);
 }
 
 pub fn hover(cx: &mut VisualTestContext, selector: &str) {
-    let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
+    let bounds = settled_bounds(cx, selector);
     cx.simulate_mouse_move(bounds.center(), None, Modifiers::default());
     draw(cx);
 }

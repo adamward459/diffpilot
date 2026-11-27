@@ -1,7 +1,7 @@
 use crate::review::card::card_key;
 use crate::review::session::ReviewSession;
 use diffpilot_core::threads::{ReviewThread, ThreadAnchor, ThreadId};
-use diffpilot_ui_kit::components::{Button, Look, tag};
+use diffpilot_ui_kit::components::{Button, Look, OVERLAY_DETAIL_TEXT, OVERLAY_ROW_RADIUS, OVERLAY_TEXT, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -107,7 +107,7 @@ impl FixPicker {
             || format!("fix:row:{}", card_key(thread)),
         )
         .items_start()
-        .rounded(px(6.))
+        .rounded(px(OVERLAY_ROW_RADIUS))
         .cursor_pointer()
         .hover(|row| row.bg(theme.hover))
         .on_click(cx.listener(move |this, _, _, cx| this.toggle(id, cx)))
@@ -116,7 +116,7 @@ impl FixPicker {
             div()
                 .flex_none()
                 .w(px(52.))
-                .text_size(px(12.))
+                .text_size(px(OVERLAY_DETAIL_TEXT))
                 .text_color(theme.ui.muted)
                 .child(label),
         )
@@ -124,7 +124,7 @@ impl FixPicker {
             div()
                 .flex_1()
                 .min_w_0()
-                .text_size(px(12.5))
+                .text_size(px(OVERLAY_TEXT))
                 .line_height(px(17.))
                 .line_clamp(2)
                 .text_color(theme.ui.text)

@@ -6,7 +6,7 @@ use crate::comparison_control::{Select, comparison_control};
 use crate::diff_pane::layout::SPLIT_MIN_WIDTH;
 use crate::folder_menu::FolderMenu;
 use crate::guide::chrome::{chapter_bar, overview_bar};
-use crate::guide::inspector::{GuideInspector, InspectorEvent};
+use crate::guide::inspector::{GuideInspector, INSPECTOR_WIDTH, InspectorEvent};
 use crate::guide::navigator::{GuideNavigator, NavigatorEvent};
 use crate::guide::session::{GuideEvent, GuideRun, GuideSession, Step};
 use crate::guide::stage::{GuideStage, StageEvent, banner};
@@ -29,8 +29,8 @@ use diffpilot_core::tree;
 use diffpilot_core::viewed::{ViewedFiles, ViewedKey, ViewedStore};
 use diffpilot_core::watcher::{self, WatchGuard};
 use diffpilot_ui_kit::components::{
-    BAR_HEIGHT, Button, CAPSULE_HEIGHT, Crumb, IconSegment, Look, OnSelect, SwitchItem, bar_button, capsule, crumbs,
-    glyph_icon, icon_switch, jump_bar, popover, status_bar, switch_bar, tag,
+    BAR_HEIGHT, Button, CAPSULE_HEIGHT, Crumb, Drawer, IconSegment, Look, OnSelect, SwitchItem, bar_button, capsule,
+    crumbs, glyph_icon, icon_switch, jump_bar, popover, settle_after, status_bar, switch_bar, tag,
 };
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
@@ -229,10 +229,10 @@ pub struct RepoView {
     session: Option<Session>,
     next_session_id: u64,
     nav: Nav,
-    inspector_open: bool,
-    claude_area_open: bool,
+    inspector: Drawer,
+    claude_area: Drawer,
     claude_area_generation: u32,
-    sidebar_open: bool,
+    sidebar: Drawer,
     sidebar_width: Pixels,
     resizing: bool,
     should_move: Rc<Cell<bool>>,
@@ -298,10 +298,10 @@ impl RepoView {
             session: None,
             next_session_id: 0,
             nav: Nav::Files,
-            inspector_open: true,
-            claude_area_open: false,
+            inspector: Drawer::new(true),
+            claude_area: Drawer::new(false),
             claude_area_generation: 0,
-            sidebar_open: true,
+            sidebar: Drawer::new(true),
             sidebar_width: px(IDEAL_SIDEBAR),
             resizing: false,
             should_move: Rc::new(Cell::new(false)),
@@ -408,7 +408,14 @@ impl RepoView {
     }
 
     pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
-        self.sidebar_open = !self.sidebar_open;
+        let closing = self.sidebar.set_open(!self.sidebar.is_open());
+        if let Some(generation) = closing {
+            settle_after(cx, move |this: &mut Self, cx| {
+                if this.sidebar.settle(generation) {
+                    cx.notify();
+                }
+            });
+        }
         cx.notify();
     }
 
@@ -876,17 +883,23 @@ impl RepoView {
     }
 
     pub fn claude_area_open(&self) -> bool {
-        self.claude_area_open
+        self.claude_area.is_open()
     }
 
     pub fn toggle_claude_area(&mut self, cx: &mut Context<Self>) {
-        self.set_claude_area(!self.claude_area_open, cx);
+        self.set_claude_area(!self.claude_area.is_open(), cx);
     }
 
     fn set_claude_area(&mut self, open: bool, cx: &mut Context<Self>) {
-        if self.claude_area_open != open {
-            self.claude_area_open = open;
+        if self.claude_area.is_open() != open {
             self.claude_area_generation += 1;
+            if let Some(generation) = self.claude_area.set_open(open) {
+                settle_after(cx, move |this: &mut Self, cx| {
+                    if this.claude_area.settle(generation) {
+                        cx.notify();
+                    }
+                });
+            }
             cx.notify();
         }
     }
@@ -899,7 +912,13 @@ impl RepoView {
     }
 
     pub fn toggle_inspector(&mut self, cx: &mut Context<Self>) {
-        self.inspector_open = !self.inspector_open;
+        if let Some(generation) = self.inspector.set_open(!self.inspector.is_open()) {
+            settle_after(cx, move |this: &mut Self, cx| {
+                if this.inspector.settle(generation) {
+                    cx.notify();
+                }
+            });
+        }
         cx.notify();
     }
 
@@ -1245,7 +1264,7 @@ impl RepoView {
             .children(self.session.as_ref().map(|session| {
                 status_row(
                     session.review.read(cx),
-                    self.claude_area_open,
+                    self.claude_area.is_open(),
                     self.claude_area_generation,
                     &tokens,
                     Actions {
@@ -1343,11 +1362,11 @@ impl RepoView {
             Glyph::PanelRight,
             "Inspector",
             self.chapter_open(cx),
-            self.chapter_open(cx) && self.inspector_open,
+            self.chapter_open(cx) && self.inspector.is_open(),
             cx.listener(|this, _, _, cx| this.toggle_inspector(cx)),
         );
         let drag = drag_region(&self.should_move);
-        let leading = (!self.sidebar_open).then(|| tag(sidebar_toggle(cx), || "toolbar:sidebar-toggle"));
+        let leading = (!self.sidebar.is_open()).then(|| tag(sidebar_toggle(cx), || "toolbar:sidebar-toggle"));
         drag(
             h_flex()
                 .id("toolbar")
@@ -1363,7 +1382,7 @@ impl RepoView {
                 .min_w(px(110.))
                 .max_w(px(300.))
                 .flex_shrink()
-                .pl(px(if self.sidebar_open { 20. } else { TRAFFIC_LIGHTS }))
+                .pl(px(if self.sidebar.is_open() { 20. } else { TRAFFIC_LIGHTS }))
                 .gap_2()
                 .children(leading)
                 .child(
@@ -1411,14 +1430,24 @@ impl Render for RepoView {
         let jump_bar = self.jump_bar(cx);
         let bottom_bar = self.bottom_bar(cx);
         let claude_area = match &self.session {
-            Some(session) if self.claude_area_open => Some(
-                tag(div().id("claude-area-slot"), || {
-                    format!("claude-area:{}", self.claude_area_generation)
-                })
-                .h(px(CLAUDE_AREA_HEIGHT))
-                .flex_none()
-                .child(session.area.clone()),
-            ),
+            Some(session) if self.claude_area.is_mounted() => {
+                let slot = div().id("claude-area-slot");
+                let slot = if self.claude_area.is_open() {
+                    tag(slot, || format!("claude-area:{}", self.claude_area_generation))
+                } else {
+                    slot
+                };
+                let slot = slot.h(px(CLAUDE_AREA_HEIGHT)).flex_none().child(session.area.clone());
+                Some(self.claude_area.animate(
+                    "claude-area-motion",
+                    div().flex().flex_col().flex_none().child(slot),
+                    |this, open| {
+                        this.h(px(CLAUDE_AREA_HEIGHT * open))
+                            .opacity(open)
+                            .when(open < 1., |this| this.overflow_hidden())
+                    },
+                ))
+            }
             _ => None,
         };
 
@@ -1442,7 +1471,15 @@ impl Render for RepoView {
             None => div().into_any_element(),
         };
         let inspector = match &self.session {
-            Some(session) if chapter_open && self.inspector_open => Some(session.inspector.clone()),
+            Some(session) if chapter_open && self.inspector.is_mounted() => Some(self.inspector.animate(
+                "inspector-motion",
+                h_flex().flex_none().h_full().child(session.inspector.clone()),
+                |this, open| {
+                    this.w(px(INSPECTOR_WIDTH * open))
+                        .opacity(open)
+                        .when(open < 1., |this| this.overflow_hidden())
+                },
+            )),
             _ => None,
         };
         let selected_nav = match self.nav {
@@ -1476,8 +1513,8 @@ impl Render for RepoView {
                 MouseButton::Left,
                 cx.listener(|this, _: &MouseUpEvent, _, _| this.resizing = false),
             )
-            .when(self.sidebar_open, |this| {
-                this.child(
+            .when(self.sidebar.is_mounted(), |this| {
+                let column = {
                     div()
                         .id("sidebar-column")
                         .relative()
@@ -1539,8 +1576,17 @@ impl Render for RepoView {
                                 .w(px(6.))
                                 .cursor_col_resize()
                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, _| this.resizing = true)),
-                        ),
-                )
+                        )
+                };
+                this.child(self.sidebar.animate(
+                    "sidebar-motion",
+                    h_flex().h_full().flex_none().justify_end().child(column),
+                    move |this, open| {
+                        this.w(width * open)
+                            .opacity(open)
+                            .when(open < 1., |this| this.overflow_hidden())
+                    },
+                ))
             })
             .child(
                 v_flex()

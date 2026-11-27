@@ -21,8 +21,8 @@ use diffpilot_ui_kit::Glyph;
 use diffpilot_ui_kit::Theme;
 use diffpilot_ui_kit::components::menu::{MenuAt, MenuItem, MenuSection, menu_at, menu_button};
 use diffpilot_ui_kit::components::{
-    BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, glyph_icon, label_switch, status_badge, tag,
-    viewed_toggle,
+    BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, glass_panel, glyph_icon, label_switch,
+    status_badge, tag, viewed_toggle,
 };
 use gpui::{
     AnyView, App, AppContext as _, ClickEvent, Context, Div, Entity, EventEmitter, FontWeight, Hsla,
@@ -723,17 +723,12 @@ impl DiffPane {
 
     fn hud(&self) -> Div {
         let theme = &self.theme;
-        div()
+        glass_panel(theme)
             .h(px(HUD))
             .flex()
             .items_center()
             .gap(px(2.0))
             .px(px(4.0))
-            .rounded(px(8.0))
-            .bg(theme.ui.pop)
-            .border_1()
-            .border_color(theme.chrome.glass_border)
-            .shadow(theme.menu_shadow())
             .font(self.fonts.ui.clone())
     }
 

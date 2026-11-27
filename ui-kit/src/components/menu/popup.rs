@@ -83,6 +83,7 @@ impl RenderOnce for MenuButton {
         });
         let on_open_change = self.on_open_change.clone();
         let (id, build, min_width) = (self.id.clone(), self.build.clone(), self.min_width);
+        let below = matches!(self.anchor, Corner::TopLeft | Corner::TopRight);
         let content_menu = open_menu.clone();
         Popover::new(ElementId::Name(format!("{}:popover", self.id).into()))
             .appearance(false)
@@ -106,7 +107,11 @@ impl RenderOnce for MenuButton {
                     menu.update(cx, |menu, cx| menu.set_sections(sections, cx));
                     return menu;
                 }
-                let menu = cx.new(|cx| Menu::new(id.clone(), sections, cx).min_width(min_width));
+                let menu = cx.new(|cx| {
+                    Menu::new(id.clone(), sections, cx)
+                        .min_width(min_width)
+                        .opens_below(below)
+                });
                 menu.focus_handle(cx).focus(window);
                 let popover = cx.entity();
                 window
