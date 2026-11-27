@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Previous thread now stops on the review summary at the top of the diff, so you can step back to it from any comment.
+
 ## [0.1.0] - 2026-11-27
 
 ### Added

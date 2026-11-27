@@ -5,7 +5,7 @@ use crate::diff_pane::layout::{
 use crate::diff_pane::rows::{BlockId, BlockSlot, RowKind, RowRef, Rows, Visibility, body_notice, build};
 use diffpilot_core::diff::{DiffMode, FileDiff};
 use diffpilot_core::preview::{PreviewKind, preview_kind};
-use diffpilot_core::threads::Side;
+use diffpilot_core::threads::{Side, ThreadAnchor};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::Arc;
@@ -607,6 +607,9 @@ impl PaneState {
                 return None;
             }
             let top = self.tops.top(self.rows.block_row(slot as u32)?);
+            if matches!(block.anchor, ThreadAnchor::Change) {
+                return Some(top.min(max));
+            }
             let file = self.file_index(block.anchor.path())?;
             let header = self.tops.top(self.rows.header_index(file)?);
             Some((top - inset).max(header).clamp(0.0, max))
@@ -627,7 +630,7 @@ mod tests {
     use super::*;
     use crate::diff_pane::layout::{FILE_HEADER, GAP, HUNK, LINE, NOTICE, SPLIT_MIN_WIDTH};
     use crate::diff_pane::testing::{added, diff, lines_with};
-    use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
+    use diffpilot_core::threads::ThreadId;
 
     const GEOMETRY: Geometry = Geometry {
         width: 400.0,
