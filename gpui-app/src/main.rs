@@ -34,7 +34,9 @@ fn main() {
         // DIFFPILOT_REPO is a test variable: screenshot and scripted runs must not read or change the user's settings.
         let scripted = bench.is_some() || std::env::var_os("DIFFPILOT_REPO").is_some_and(|path| !path.is_empty());
         let settings = if scripted {
-            Settings::in_memory()
+            let settings = Settings::in_memory();
+            settings.set_tour_seen(true);
+            settings
         } else {
             Settings::open_default()
         };

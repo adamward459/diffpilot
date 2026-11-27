@@ -346,6 +346,7 @@ fn main() {
         workspace::init(cx);
         let claude = fake_engine();
         let settings = Arc::new(Settings::in_memory());
+        settings.set_tour_seen(true);
         let store = claude.store();
         let viewed = Arc::new(ViewedStore::from_env(store.clone()));
         diffpilot::settings::init(settings.clone(), offline_services(store.clone()), cx);

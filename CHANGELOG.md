@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - On the Open Folder sheet, Up and Down move through the recent folders, even while the search has focus, and Enter opens the one you picked.
 - Linked folders you edit on the Open Folder sheet are kept for each folder while the sheet is open. Only the folder you open is saved.
 - Type a path in the linked folder field or the Open Folder search to see up to 6 matching sub-folders. Use Up, Down, Tab, or Enter to complete one. Folders you cannot link say why.
+- The app tour has new stops for push and pull and for Commit, and its text covers linked folders, previews, and the comments button.
 - The Open Folder sheet says "1 needs you" on a folder with a pull request waiting for your review, and marks that pull request with a Review requested pill. Team requests are not counted yet.
 
 ### Changed

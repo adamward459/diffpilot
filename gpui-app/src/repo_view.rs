@@ -1295,16 +1295,19 @@ impl RepoView {
                 )
             }))
             .child(div().flex_1())
-            .when(uncommitted > 0, |this| {
-                this.child(
-                    h_flex()
-                        .gap(px(5.))
-                        .text_color(tokens.chrome.uncommitted)
-                        .child(glyph_icon(Glyph::Pencil, 13., tokens.chrome.uncommitted))
-                        .child(format!("{uncommitted} uncommitted")),
-                )
-            })
-            .child(self.commit_button(cx))
+            .child(
+                anchor(h_flex().relative().gap(px(10.)), Stop::Commit)
+                    .when(uncommitted > 0, |this| {
+                        this.child(
+                            h_flex()
+                                .gap(px(5.))
+                                .text_color(tokens.chrome.uncommitted)
+                                .child(glyph_icon(Glyph::Pencil, 13., tokens.chrome.uncommitted))
+                                .child(format!("{uncommitted} uncommitted")),
+                        )
+                    })
+                    .child(self.commit_button(cx)),
+            )
             .into_any_element()
     }
 
@@ -1400,7 +1403,7 @@ impl RepoView {
             .read(cx)
             .branch()
             .is_some()
-            .then(|| self.remote_capsule.clone());
+            .then(|| anchor(div().relative().flex_none(), Stop::Remote).child(self.remote_capsule.clone()));
         let inspector = bar_button(
             &tokens,
             "toggle-inspector",

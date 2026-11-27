@@ -36,7 +36,7 @@ fn open_unseen(app: &mut TestAppContext) -> (&'static mut VisualTestContext, Arc
 fn the_first_open_starts_the_tour_and_the_cut_out_wraps_the_real_control(app: &mut TestAppContext) {
     let (cx, settings, _dir) = open_unseen(app);
     assert!(shows(cx, "tour:title:Your repository"));
-    assert!(shows(cx, "tour:counter:1 of 6"));
+    assert!(shows(cx, "tour:counter:1 of 8"));
     assert!(!settings.tour_seen(), "the tour counts as seen once it is closed");
 
     click(cx, "tour:next");
@@ -84,10 +84,20 @@ fn next_and_back_move_between_stops_and_the_last_next_closes(app: &mut TestAppCo
     click(cx, "tour:back");
     assert!(!spotlights(cx, "comparison-label"), "the Back button goes back");
 
-    for _ in 0..5 {
+    for _ in 0..4 {
         press(cx, "enter");
     }
-    assert!(shows(cx, "tour:counter:6 of 6"));
+    assert!(shows(cx, "tour:title:Review with Claude"));
+    assert!(spotlights(cx, "review:open"), "the Claude pill holds Ask Claude");
+    assert!(spotlights(cx, "toolbar:comments"), "and the comments button");
+    press(cx, "enter");
+    assert!(shows(cx, "tour:title:Push and pull"));
+    assert!(spotlights(cx, "remote:status"));
+    press(cx, "enter");
+    assert!(shows(cx, "tour:title:Commit"));
+    assert!(spotlights(cx, "bottom-bar:commit"));
+    press(cx, "enter");
+    assert!(shows(cx, "tour:counter:8 of 8"));
     assert!(spotlights(cx, "nav-switch"));
     assert!(!settings.tour_seen());
 
@@ -124,7 +134,7 @@ fn help_show_tour_starts_it_again(app: &mut TestAppContext) {
 
     cx.dispatch_action(ShowTour);
     assert!(shows(cx, "tour:title:Your repository"));
-    assert!(shows(cx, "tour:counter:1 of 6"));
+    assert!(shows(cx, "tour:counter:1 of 8"));
 }
 
 #[gpui::test]
@@ -136,13 +146,13 @@ fn a_stop_whose_element_is_hidden_is_skipped_and_not_counted(app: &mut TestAppCo
     wait_for_motion(cx);
     cx.dispatch_action(ShowTour);
     assert!(
-        shows(cx, "tour:counter:1 of 4"),
+        shows(cx, "tour:counter:1 of 6"),
         "the sidebar and the Guide switch are hidden"
     );
 
     press(cx, "right");
     press(cx, "right");
-    assert!(shows(cx, "tour:counter:3 of 4"));
+    assert!(shows(cx, "tour:counter:3 of 6"));
     assert!(
         spotlights(cx, "pane:copy-path:docs/committed.md"),
         "the file list is skipped"

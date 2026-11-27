@@ -9,6 +9,8 @@ pub enum Stop {
     Sidebar,
     Diff,
     Review,
+    Remote,
+    Commit,
     Guide,
 }
 
@@ -18,6 +20,8 @@ pub const STOPS: &[Stop] = &[
     Stop::Sidebar,
     Stop::Diff,
     Stop::Review,
+    Stop::Remote,
+    Stop::Commit,
     Stop::Guide,
 ];
 
@@ -29,21 +33,29 @@ impl Stop {
             Stop::Sidebar => "Changed files",
             Stop::Diff => "The diff",
             Stop::Review => "Review with Claude",
+            Stop::Remote => "Push and pull",
+            Stop::Commit => "Commit",
             Stop::Guide => "Guide",
         }
     }
 
     pub fn body(self) -> &'static str {
         match self {
-            Stop::Folder => "Pick the Git folder you want to review. Add more folders and switch between them here.",
+            Stop::Folder => {
+                "Pick the Git folder you want to review, and switch between folders here. Link other folders that Claude can also read."
+            }
             Stop::Comparison => {
                 "This shows what you compare, like your branch against main. Click it to pick another branch or a pull request."
             }
             Stop::Sidebar => "Every changed file is listed here. Mark a file as viewed when you have read it.",
             Stop::Diff => {
-                "Read the changes of each file here. You can switch between unified and split view in the View menu."
+                "Read the changes of each file here. Switch Markdown and images to Preview, and select text to copy it."
             }
-            Stop::Review => "Ask Claude to review your changes. It adds comments to the diff, and it can fix them.",
+            Stop::Review => {
+                "Ask Claude to review your changes. It adds comments to the diff and can fix them. The speech bubble lists all comments."
+            }
+            Stop::Remote => "See how far your branch is ahead of or behind its remote. Click it to push or pull.",
+            Stop::Commit => "Commit your uncommitted changes from here, without leaving the app.",
             Stop::Guide => "Switch to Guide (\u{2318}2) to read the change as a story, chapter by chapter.",
         }
     }
@@ -51,7 +63,8 @@ impl Stop {
     pub fn radius(self) -> f32 {
         match self {
             Stop::Folder => 8.,
-            Stop::Comparison | Stop::Review => 19.,
+            Stop::Comparison | Stop::Review | Stop::Remote => 19.,
+            Stop::Commit => 8.,
             Stop::Sidebar => 20.,
             Stop::Diff => 12.,
             Stop::Guide => 16.,
