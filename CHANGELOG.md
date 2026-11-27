@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - Copy Path and Reveal in Finder are now buttons in each file header, so you no longer need the More menu for them.
 - Markdown Preview now fills the whole width. A changed file shows as one document, like GitHub's rich diff: added blocks are marked green and removed blocks red.
 - The app uses about 100 MB less memory. A diff window now takes about 117 MB instead of 219 MB.
+- Guide runs now show in the Claude area like other runs: their log, the queue, Past Runs, and a status line with the chapter count.
 
 ### Removed
 

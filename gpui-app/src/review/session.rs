@@ -86,6 +86,7 @@ pub struct ReviewSession {
     replacing: HashMap<RunId, Vec<ThreadId>>,
     applied: HashSet<RunId>,
     owners: HashMap<RunId, bool>,
+    guide_chapters: Option<(RunId, usize)>,
     review_failure: Option<String>,
     fix_failure: Option<String>,
     run_events: Option<Task<()>>,
@@ -137,6 +138,7 @@ impl ReviewSession {
             replacing: HashMap::new(),
             applied: HashSet::new(),
             owners: HashMap::new(),
+            guide_chapters: None,
             review_failure: None,
             fix_failure: None,
             run_events: None,
@@ -458,7 +460,6 @@ impl ReviewSession {
             .past_runs(key, PAST_RUN_WINDOW)
             .unwrap_or_default()
             .into_iter()
-            .filter(|summary| summary.kind != RunKind::Guide)
             .take(limit)
             .collect()
     }
@@ -779,11 +780,10 @@ impl ReviewSession {
 
     fn owns(&mut self, engine: &RunEngine, run: RunId) -> bool {
         let session = self.store.session();
-        *self.owners.entry(run).or_insert_with(|| {
-            engine
-                .run(run)
-                .is_some_and(|found| found.session == session && found.kind != RunKind::Guide)
-        })
+        *self
+            .owners
+            .entry(run)
+            .or_insert_with(|| engine.run(run).is_some_and(|found| found.session == session))
     }
 
     fn apply_run_events(&mut self, events: Vec<RunEvent>, cx: &mut Context<Self>) {
@@ -853,7 +853,7 @@ impl ReviewSession {
 
     fn sync_runs(&mut self, engine: &RunEngine) {
         let session = self.store.session();
-        let ours = |run: &Run| run.session == session && run.kind != RunKind::Guide;
+        let ours = |run: &Run| run.session == session;
         let (active, mut queued) = match &self.host.repo {
             Some(repo) => (
                 engine.active(repo).filter(ours),
@@ -875,6 +875,31 @@ impl ReviewSession {
         {
             self.shown_run = engine.run(id);
         }
+        self.count_guide_chapters();
+    }
+
+    fn count_guide_chapters(&mut self) {
+        let Some(run) = self.current.as_ref() else { return };
+        let Some(RunOutcome::Guide(guide)) = run.outcome else {
+            return;
+        };
+        if self.guide_chapters.is_some_and(|(counted, _)| counted == run.id) {
+            return;
+        }
+        let chapters = self
+            .store
+            .store()
+            .load_guide(guide)
+            .ok()
+            .flatten()
+            .map_or(0, |stored| stored.guide.chapters.len());
+        self.guide_chapters = Some((run.id, chapters));
+    }
+
+    /// The chapters of the guide that the current run saved.
+    pub fn guide_chapters(&self) -> Option<usize> {
+        let (run, chapters) = self.guide_chapters?;
+        (self.current.as_ref()?.id == run).then_some(chapters)
     }
 
     pub fn resolve_thread(&mut self, id: ThreadId, cx: &mut Context<Self>) {

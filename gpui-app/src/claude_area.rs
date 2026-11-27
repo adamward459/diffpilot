@@ -1,7 +1,7 @@
 use crate::review::popover::PopoverEvent;
 use crate::review::{ReviewPopover, ReviewSession};
 use crate::runs::now_ms;
-use diffpilot_core::run::{LogEntry, LogKind, Run, RunId, RunOutcome, RunState, StepState};
+use diffpilot_core::run::{LogEntry, LogKind, Run, RunId, RunKind, RunOutcome, RunState, StepState};
 use diffpilot_ui_kit::components::menu::{MenuItem, MenuSection, menu_button};
 use diffpilot_ui_kit::components::popover;
 use diffpilot_ui_kit::components::{Button, Look, glyph_icon, spinner, tag};
@@ -239,6 +239,7 @@ impl ClaudeArea {
         };
         let steps = run.map(|run| run.steps.as_slice()).unwrap_or_default();
         let comments = run.map(comments_of).unwrap_or_default();
+        let writes_comments = run.is_none_or(|run| run.kind != RunKind::Guide);
         let running = run.is_some_and(|run| !run.state.is_finished());
         v_flex()
             .id("claude-area-plan")
@@ -283,12 +284,14 @@ impl ClaudeArea {
                         .child(step.title.clone()),
                 )
             }))
-            .child(heading(format!(
-                "{} · {}",
-                if running { "Comments so far" } else { "Comments" },
-                comments.len()
-            )))
-            .children(comments.into_iter().map(|(text, at_ms)| {
+            .when(writes_comments, |pane| {
+                pane.child(heading(format!(
+                    "{} · {}",
+                    if running { "Comments so far" } else { "Comments" },
+                    comments.len()
+                )))
+            })
+            .children(comments.into_iter().filter(|_| writes_comments).map(|(text, at_ms)| {
                 tag(h_flex().gap(px(8.)).h(px(ROW_HEIGHT)).items_center(), || {
                     format!("claude-area:comment:{text}")
                 })

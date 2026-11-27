@@ -1,7 +1,7 @@
 use crate::claude_area::{ago, comments_of, state_glyph};
 use crate::review::ReviewSession;
 use crate::runs::now_ms;
-use diffpilot_core::run::{LogKind, Run, RunState};
+use diffpilot_core::run::{LogKind, Run, RunKind, RunState};
 use diffpilot_ui_kit::components::{Button, Look, bar_button, glyph_icon, spinner, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::FluentBuilder;
@@ -40,14 +40,13 @@ pub fn status_of(session: &ReviewSession, now: i64) -> Status {
     match run.state {
         RunState::Queued => Status::Working(format!("{title} · waiting for its turn")),
         RunState::Running => Status::Working(format!("{title} · {}", run.activity.as_deref().unwrap_or("starting"))),
-        RunState::Done => Status::Finished(run.state, format!("{title} finished · {}", counts(run))),
+        RunState::Done => Status::Finished(run.state, format!("{title} finished · {}", counts(session, run))),
         RunState::Failed => Status::Finished(run.state, format!("{title} failed")),
         RunState::Stopped => Status::Finished(run.state, format!("{title} stopped")),
     }
 }
 
-fn counts(run: &Run) -> String {
-    let comments = comments_of(run).len();
+fn counts(session: &ReviewSession, run: &Run) -> String {
     let calls = run
         .log
         .iter()
@@ -59,7 +58,11 @@ fn counts(run: &Run) -> String {
         })
         .count();
     let plural = |count: usize, noun: &str| format!("{count} {noun}{}", if count == 1 { "" } else { "s" });
-    format!("{} · {}", plural(comments, "comment"), plural(calls, "tool call"))
+    let made = match run.kind {
+        RunKind::Guide => plural(session.guide_chapters().unwrap_or(0), "chapter"),
+        _ => plural(comments_of(run).len(), "comment"),
+    };
+    format!("{made} · {}", plural(calls, "tool call"))
 }
 
 pub struct Actions<T, L, A> {

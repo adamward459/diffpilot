@@ -1,7 +1,7 @@
 use crate::common::{StubReplier, finding, result};
 use diffpilot::repo_view::Claude;
 use diffpilot::testing::{
-    canned_review, click, fake_claude, fixture, fixture_named, open_repo, open_workspace, press, shows,
+    FakeClaude, canned_review, click, fake_claude, fixture, fixture_named, open_repo, open_workspace, press, shows,
     wait_until_shows,
 };
 use diffpilot_core::policy::EditPermission;
@@ -170,6 +170,74 @@ fn past_runs_lists_the_earlier_run_and_picking_it_shows_its_log(app: &mut TestAp
     click(cx, "claude-area-past-menu:Follow current run");
     wait_until_shows(cx, "claude-area:stop");
     fake.finish();
+}
+
+fn write_guide(app: &mut TestAppContext) -> (FakeClaude, tempfile::TempDir, &'static mut VisualTestContext) {
+    let fake = fake_claude(app);
+    fake.hold();
+    let (dir, repo) = fixture_named("alpha");
+    let cx = open_workspace(app, &repo, Arc::new(Settings::in_memory()));
+    click(cx, "sidebar:row:docs/committed.md");
+    press(cx, "cmd-2");
+    click(cx, "guide-write");
+    fake.wait_for_launches(cx, 1);
+    (fake, dir, cx)
+}
+
+fn save_a_guide(fake: &FakeClaude) {
+    let call = |tool: &str, args: serde_json::Value| {
+        let reply = fake.call_mcp_tool(tool, args);
+        assert_eq!(reply["ok"], true, "{tool}: {reply}");
+    };
+    call(
+        "set_overview",
+        serde_json::json!({ "title": "Adds a staged file", "summary": "It adds a file and edits the base." }),
+    );
+    for (title, files) in [
+        ("The staged file", serde_json::json!(["src/staged.rs"])),
+        ("The small edits", serde_json::json!(["base.txt", "docs/committed.md"])),
+    ] {
+        call(
+            "add_chapter",
+            serde_json::json!({ "title": title, "summary": "Why it exists.", "files": files }),
+        );
+    }
+    call("finish_guide", serde_json::json!({}));
+}
+
+#[gpui::test]
+fn a_guide_run_shows_its_log_in_the_area_and_its_chapters_in_the_status(app: &mut TestAppContext) {
+    let (fake, _dir, cx) = write_guide(app);
+    click(cx, "claude:toggle:0");
+    wait_until_shows(cx, "claude-area:title:Guide");
+    wait_until_shows(cx, "claude-area:log:search:Searched value");
+    assert!(shows(cx, "claude-area:thinking"));
+    assert!(shows(cx, "pill:stop-run:working"), "the pill can stop the guide run");
+
+    save_a_guide(&fake);
+    fake.finish();
+    wait_until_shows(cx, "claude:status:Guide finished · 2 chapters · 3 tool calls");
+    wait_until_shows(cx, "claude:toggle:2");
+    click(cx, "claude:toggle:2");
+    click(cx, "claude-area:past-runs");
+    assert!(shows(cx, "claude-area-past-menu:Writing a guide"));
+}
+
+#[gpui::test]
+fn a_review_queued_behind_a_guide_run_starts_when_the_guide_is_saved(app: &mut TestAppContext) {
+    let (fake, _dir, cx) = write_guide(app);
+    fake.review_with(&canned_review());
+    click(cx, "claude:toggle:0");
+    wait_until_shows(cx, "claude-area:stop");
+    click(cx, "claude-area:queue");
+    click(cx, "review:start");
+    wait_until_shows(cx, "claude-area:queued:1");
+    assert_eq!(fake.launches(), 1, "the review waits for the guide");
+
+    save_a_guide(&fake);
+    fake.finish();
+    fake.wait_for_launches(cx, 2);
+    wait_until_shows(cx, "claude:status:Review finished · 4 comments · 7 tool calls");
 }
 
 #[gpui::test]
