@@ -4,6 +4,7 @@ use crate::folder_menu::{FolderSnapshot, folder_name, snapshot};
 use crate::folder_picker::pick_folders;
 use crate::folder_prs::{FolderPrs, PrList};
 use crate::linked_folders::{LinkedEvent, LinkedFolders, folder_chip};
+use crate::path_hints::{ACTIVE, HintAccept, HintNext, HintPrev, PathHints};
 use crate::remote::rows::{Tone, outcome_tone};
 use crate::repo_view::tilde_path;
 use diffpilot_core::comparison::Comparison;
@@ -16,8 +17,8 @@ use diffpilot_ui_kit::components::{Button, Look, Presence, dialog, filter_field,
 use diffpilot_ui_kit::{Glyph, Theme, text_px, text_size};
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, Entity, EventEmitter, FocusHandle, FontWeight, KeyBinding, SharedString, Subscription,
-    Task, Window, actions, div, px,
+    AnyElement, App, Context, Entity, EventEmitter, FocusHandle, FontWeight, KeyBinding, ScrollHandle, SharedString,
+    Subscription, Task, Window, actions, div, px,
 };
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::{Sizable, h_flex, v_flex};
@@ -31,12 +32,16 @@ const HEIGHT: f32 = 580.;
 const LIST_WIDTH: f32 = 250.;
 const CONTEXT: &str = "OpenFolderDialog";
 
-actions!(diffpilot_open, [ConfirmOpen, CancelOpen]);
+actions!(diffpilot_open, [ConfirmOpen, CancelOpen, RecentNext, RecentPrev]);
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("enter", ConfirmOpen, Some("OpenFolderDialog && !Input")),
         KeyBinding::new("escape", CancelOpen, Some(CONTEXT)),
+        KeyBinding::new("down", RecentNext, Some("OpenFolderDialog && !Input")),
+        KeyBinding::new("up", RecentPrev, Some("OpenFolderDialog && !Input")),
+        KeyBinding::new("down", RecentNext, Some("SheetSearch > Input")),
+        KeyBinding::new("up", RecentPrev, Some("SheetSearch > Input")),
     ]);
 }
 
@@ -69,10 +74,13 @@ pub struct OpenFolderDialog {
     folders: Vec<PathBuf>,
     snapshots: HashMap<PathBuf, FolderSnapshot>,
     selected: Option<PathBuf>,
+    links: HashMap<PathBuf, Vec<PathBuf>>,
     draft: Option<OpenDraft>,
     fallback: Option<Comparison>,
     start_comparison: Option<(PathBuf, Comparison)>,
     search: Entity<InputState>,
+    hints: Entity<PathHints>,
+    list_scroll: ScrollHandle,
     editor: Entity<LinkedFolders>,
     editing_links: bool,
     error: Option<SharedString>,
@@ -103,15 +111,20 @@ impl OpenFolderDialog {
         }
         prs.update(cx, |prs, cx| prs.refresh(&folders, cx));
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search folders, paths, PR titles, or #123"));
+        let hints = cx.new(|_| PathHints::default());
         let editor = cx.new(|cx| LinkedFolders::new(PathBuf::new(), Vec::new(), window, cx));
         let subscriptions = vec![
             cx.observe(&prs, |_, _, cx| cx.notify()),
+            cx.observe(&hints, |_, _, cx| cx.notify()),
             cx.subscribe_in(&search, window, |this, _, event: &InputEvent, window, cx| match event {
                 InputEvent::Change => this.search_changed(cx),
                 InputEvent::PressEnter { .. } => this.submit_search(window, cx),
                 _ => {}
             }),
             cx.subscribe(&editor, |this, _, LinkedEvent::Changed(linked), cx| {
+                if let Some(folder) = this.selected.clone() {
+                    this.links.insert(folder, linked.clone());
+                }
                 if let Some(draft) = &mut this.draft {
                     draft.linked = linked.clone();
                 }
@@ -128,10 +141,13 @@ impl OpenFolderDialog {
             folders: folders.clone(),
             snapshots: HashMap::new(),
             selected: None,
+            links: HashMap::new(),
             draft: None,
             fallback: None,
             start_comparison: start,
             search,
+            hints,
+            list_scroll: ScrollHandle::new(),
             editor,
             editing_links: false,
             error: None,
@@ -200,14 +216,21 @@ impl OpenFolderDialog {
             _ => loaded.comparison.clone(),
         };
         self.draft = Some(OpenDraft {
-            linked: self.settings.linked_folders(&folder),
+            linked: self.linked_for(&folder),
             target: Target::Comparison(comparison),
             folder,
         });
     }
 
+    fn linked_for(&self, folder: &Path) -> Vec<PathBuf> {
+        self.links
+            .get(folder)
+            .cloned()
+            .unwrap_or_else(|| self.settings.linked_folders(folder))
+    }
+
     fn select(&mut self, folder: PathBuf, cx: &mut Context<Self>) {
-        let linked = self.settings.linked_folders(&folder);
+        let linked = self.linked_for(&folder);
         self.editor
             .update(cx, |editor, cx| editor.set_repo(folder.clone(), linked, cx));
         self.selected = Some(folder.clone());
@@ -238,6 +261,8 @@ impl OpenFolderDialog {
 
     fn search_changed(&mut self, cx: &mut Context<Self>) {
         self.error = None;
+        let query = self.query(cx);
+        self.hints.update(cx, |hints, cx| hints.set_text(&query, None, cx));
         let visible = self.visible_folders(cx);
         if self
             .selected
@@ -250,13 +275,43 @@ impl OpenFolderDialog {
         cx.notify();
     }
 
+    fn move_selection(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let visible = self.visible_folders(cx);
+        let at = self
+            .selected
+            .as_ref()
+            .and_then(|selected| visible.iter().position(|folder| folder == selected));
+        let next = match (at, forward) {
+            (Some(at), true) => (at + 1).min(visible.len().saturating_sub(1)),
+            (Some(at), false) => at.saturating_sub(1),
+            (None, _) => 0,
+        };
+        if let Some(folder) = visible.get(next).cloned() {
+            self.list_scroll.scroll_to_item(next);
+            self.select(folder, cx);
+        }
+    }
+
+    fn step_hints(&mut self, forward: bool, cx: &mut Context<Self>) {
+        self.hints.update(cx, |hints, cx| hints.step(forward, cx));
+    }
+
+    fn accept_hint(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = self.hints.read(cx).pick() {
+            self.search.update(cx, |search, cx| search.set_value(text, window, cx));
+        }
+    }
+
     fn submit_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = self.hints.read(cx).highlighted() {
+            self.search.update(cx, |search, cx| search.set_value(text, window, cx));
+        }
         let query = self.query(cx);
         if self.search.read(cx).value().len() != query.len() {
             let clean = query.clone();
             self.search.update(cx, |search, cx| search.set_value(clean, window, cx));
         }
-        if !is_path(&query) {
+        if !linked::is_path(&query) {
             return self.open(cx);
         }
         let path = linked::expand_tilde(&query);
@@ -424,10 +479,6 @@ impl OpenFolderDialog {
     }
 }
 
-fn is_path(query: &str) -> bool {
-    query.starts_with('/') || query.starts_with('~')
-}
-
 pub fn matches_request(query: &str, change: &ChangeRequest) -> bool {
     let query = query.trim().to_lowercase();
     if let Some(digits) = query.strip_prefix('#') {
@@ -438,7 +489,7 @@ pub fn matches_request(query: &str, change: &ChangeRequest) -> bool {
 
 pub fn folder_matches(query: &str, name: &str, requests: &[ChangeRequest]) -> bool {
     let query = query.trim();
-    is_path(query)
+    linked::is_path(query)
         || query.is_empty()
         || name.to_lowercase().contains(&query.to_lowercase())
         || requests.iter().any(|change| matches_request(query, change))
@@ -446,7 +497,7 @@ pub fn folder_matches(query: &str, name: &str, requests: &[ChangeRequest]) -> bo
 
 pub fn matching_requests(query: &str, name: &str, requests: Vec<ChangeRequest>) -> Vec<ChangeRequest> {
     let query = query.trim();
-    if is_path(query) || name.to_lowercase().contains(&query.to_lowercase()) {
+    if linked::is_path(query) || name.to_lowercase().contains(&query.to_lowercase()) {
         return requests;
     }
     requests
@@ -921,8 +972,19 @@ impl Render for OpenFolderDialog {
             (None, true) => div().child("Opens without a checkout. Your working tree stays as it is."),
             (None, false) => div(),
         };
+        let hinting = self.hints.read(cx).is_active();
+        let hint_list = hinting.then(|| {
+            div()
+                .absolute()
+                .top(px(50.))
+                .left(px(16.))
+                .w(px(WIDTH - 32. - 100.))
+                .occlude()
+                .child(self.hints.read(cx).list(&tokens))
+        });
         let content = v_flex()
             .id("open-folder-content")
+            .relative()
             .key_context(CONTEXT)
             .track_focus(&self.focus)
             .size_full()
@@ -930,6 +992,8 @@ impl Render for OpenFolderDialog {
             .gap(px(12.))
             .on_action(cx.listener(|this, _: &ConfirmOpen, _, cx| this.open(cx)))
             .on_action(cx.listener(|this, _: &CancelOpen, _, cx| this.cancel(cx)))
+            .on_action(cx.listener(|this, _: &RecentNext, _, cx| this.move_selection(true, cx)))
+            .on_action(cx.listener(|this, _: &RecentPrev, _, cx| this.move_selection(false, cx)))
             .child(
                 h_flex()
                     .gap(px(8.))
@@ -941,7 +1005,13 @@ impl Render for OpenFolderDialog {
                                 .bordered(false)
                                 .focus_bordered(false)
                                 .small(),
-                        ),
+                        )
+                        .key_context(if hinting { ACTIVE } else { "SheetSearch" })
+                        .on_action(cx.listener(|this, _: &HintNext, _, cx| this.step_hints(true, cx)))
+                        .on_action(cx.listener(|this, _: &HintPrev, _, cx| this.step_hints(false, cx)))
+                        .on_action(cx.listener(|this, _: &HintAccept, window, cx| this.accept_hint(window, cx)))
+                        .on_action(cx.listener(|this, _: &RecentNext, _, cx| this.move_selection(true, cx)))
+                        .on_action(cx.listener(|this, _: &RecentPrev, _, cx| this.move_selection(false, cx))),
                         || "open:search",
                     ))
                     .child(tag(
@@ -968,6 +1038,7 @@ impl Render for OpenFolderDialog {
                             .child(
                                 v_flex()
                                     .id("open-recent-list")
+                                    .track_scroll(&self.list_scroll)
                                     .flex_1()
                                     .min_h_0()
                                     .overflow_y_scroll()
@@ -1007,7 +1078,8 @@ impl Render for OpenFolderDialog {
                             .on_click(cx.listener(|this, _, _, cx| this.open(cx))),
                         || "open-folder-confirm",
                     )),
-            );
+            )
+            .children(hint_list);
         dialog("open-folder", &self.presence)
             .tags("open-folder:backdrop", "open-folder:dialog")
             .size(WIDTH, HEIGHT)
@@ -1065,13 +1137,6 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].number, 2);
         assert_eq!(matching_requests("", "alpha", requests).len(), 2);
-    }
-
-    #[test]
-    fn paths_start_with_a_slash_or_a_tilde() {
-        assert!(is_path("/tmp/x"));
-        assert!(is_path("~/x"));
-        assert!(!is_path("alpha"));
     }
 
     #[test]

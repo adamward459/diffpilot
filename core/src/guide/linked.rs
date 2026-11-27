@@ -37,6 +37,10 @@ pub fn check(repo: &Path, linked: &[PathBuf], input: &str) -> Result<PathBuf, Li
     Ok(folder)
 }
 
+pub fn is_path(text: &str) -> bool {
+    text.starts_with('/') || text.starts_with('~')
+}
+
 pub fn expand_tilde(input: &str) -> PathBuf {
     expand_home(input, dirs::home_dir().as_deref())
 }
@@ -80,6 +84,60 @@ pub fn relink(repo: &Path, linked: &[PathBuf], old: &Path, new: &Path) -> Result
             }
         })
         .collect())
+}
+
+pub struct Completion {
+    pub name: String,
+    pub text: String,
+    pub path: PathBuf,
+}
+
+/// Sub-folders of the typed parent that start with the typed last segment, by name. Hidden ones show only when
+/// the segment starts with a dot.
+pub fn complete(input: &str, limit: usize) -> Vec<Completion> {
+    complete_in(input, dirs::home_dir().as_deref(), limit)
+}
+
+fn complete_in(input: &str, home: Option<&Path>, limit: usize) -> Vec<Completion> {
+    let (parent, segment) = match (input, input.rfind('/')) {
+        ("~", _) => ("~/", ""),
+        (_, Some(slash)) => (&input[..=slash], &input[slash + 1..]),
+        _ => return Vec::new(),
+    };
+    let dir = expand_home(parent, home);
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let prefix = segment.to_lowercase();
+    let mut found: Vec<Completion> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| std::fs::metadata(entry.path()).is_ok_and(|meta| meta.is_dir()))
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let hidden = name.starts_with('.') && !segment.starts_with('.');
+            (!hidden && name.to_lowercase().starts_with(&prefix)).then(|| Completion {
+                text: format!("{parent}{name}/"),
+                path: entry.path(),
+                name,
+            })
+        })
+        .collect();
+    found.sort_by_cached_key(|found| (found.name.to_lowercase(), found.name.clone()));
+    found.truncate(limit);
+    found
+}
+
+/// A short reason a completed folder cannot be linked, or `None` when it can.
+pub fn blocker(repo: &Path, linked: &[PathBuf], folder: &Path) -> Option<&'static str> {
+    match check(repo, linked, &folder.to_string_lossy()) {
+        Ok(_) => None,
+        Err(LinkError::InsideRepo) => {
+            let same = folder.canonicalize().ok() == repo.canonicalize().ok();
+            Some(if same { "This folder" } else { "Inside the repo" })
+        }
+        Err(LinkError::AlreadyLinked) => Some("Already linked"),
+        Err(_) => Some("Not a folder"),
+    }
 }
 
 /// The linked folders a run can still read. A folder that was moved or deleted is left out.
@@ -172,12 +230,92 @@ mod tests {
     }
 
     #[test]
+    fn paths_start_with_a_slash_or_a_tilde() {
+        assert!(is_path("/tmp/x"));
+        assert!(is_path("~/x"));
+        assert!(!is_path("alpha"));
+    }
+
+    #[test]
     fn a_tilde_means_the_home_folder() {
         let home = Path::new("/Users/me");
         assert_eq!(expand_home("~", Some(home)), home);
         assert_eq!(expand_home("~/lib", Some(home)), home.join("lib"));
         assert_eq!(expand_home("~lib", Some(home)), PathBuf::from("~lib"));
         assert_eq!(expand_home("~/lib", None), PathBuf::from("~/lib"));
+    }
+
+    fn tree() -> (tempfile::TempDir, PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        let base = root.path().canonicalize().unwrap();
+        for name in ["beta", "Alpha", "alpine", ".hidden", ".hush", "other"] {
+            std::fs::create_dir_all(base.join(name)).unwrap();
+        }
+        std::fs::write(base.join("alfa.txt"), "x").unwrap();
+        (root, base)
+    }
+
+    fn names(found: &[Completion]) -> Vec<&str> {
+        found.iter().map(|found| found.name.as_str()).collect()
+    }
+
+    #[test]
+    fn completion_lists_matching_folders_by_name_and_skips_files() {
+        let (_root, base) = tree();
+        let typed = format!("{}/al", base.display());
+        let found = complete_in(&typed, None, 6);
+        assert_eq!(names(&found), ["Alpha", "alpine"]);
+        assert_eq!(found[0].text, format!("{}/Alpha/", base.display()));
+        assert_eq!(found[0].path, base.join("Alpha"));
+        let all = complete_in(&format!("{}/", base.display()), None, 6);
+        assert_eq!(names(&all), ["Alpha", "alpine", "beta", "other"]);
+    }
+
+    #[test]
+    fn completion_shows_hidden_folders_only_for_a_dotted_segment() {
+        let (_root, base) = tree();
+        let dotted = complete_in(&format!("{}/.h", base.display()), None, 6);
+        assert_eq!(names(&dotted), [".hidden", ".hush"]);
+        let dot = complete_in(&format!("{}/.", base.display()), None, 6);
+        assert_eq!(dot.len(), 2);
+    }
+
+    #[test]
+    fn completion_stops_at_the_limit_after_sorting() {
+        let (_root, base) = tree();
+        let found = complete_in(&format!("{}/", base.display()), None, 2);
+        assert_eq!(names(&found), ["Alpha", "alpine"]);
+    }
+
+    #[test]
+    fn completion_of_a_missing_parent_or_a_plain_word_is_empty() {
+        let (_root, base) = tree();
+        assert!(complete_in(&format!("{}/nope/x", base.display()), None, 6).is_empty());
+        assert!(complete_in("alp", None, 6).is_empty());
+    }
+
+    #[test]
+    fn completion_keeps_the_tilde_the_user_typed() {
+        let (_root, base) = tree();
+        let found = complete_in("~/be", Some(&base), 6);
+        assert_eq!(names(&found), ["beta"]);
+        assert_eq!(found[0].text, "~/beta/");
+        assert_eq!(
+            names(&complete_in("~", Some(&base), 6)),
+            ["Alpha", "alpine", "beta", "other"]
+        );
+    }
+
+    #[test]
+    fn a_completed_folder_says_why_it_cannot_be_linked() {
+        let (_root, repo, other) = folders();
+        assert_eq!(blocker(&repo, &[], &repo), Some("This folder"));
+        assert_eq!(blocker(&repo, &[], &repo.join("core")), Some("Inside the repo"));
+        assert_eq!(
+            blocker(&repo, std::slice::from_ref(&other), &other),
+            Some("Already linked")
+        );
+        assert_eq!(blocker(&repo, &[], &other), None);
     }
 
     #[test]

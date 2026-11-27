@@ -1,5 +1,6 @@
 use diffpilot::testing::{
     click, fixture_named, open_empty_workspace, open_workspace, pick_next, press, shows, type_text, wait_for_motion,
+    wait_until_shows,
 };
 use diffpilot_core::settings::Settings;
 use gpui::TestAppContext;
@@ -143,4 +144,23 @@ fn no_folder_open_means_no_pill(app: &mut TestAppContext) {
     let cx = open_empty_workspace(app, Arc::new(Settings::in_memory()));
     press(cx, "alt-cmd-l");
     assert!(!shows(cx, "linked-title"));
+}
+
+#[gpui::test]
+fn the_popover_says_why_a_completed_folder_cannot_be_linked(app: &mut TestAppContext) {
+    let (alpha_dir, alpha) = fixture_named("alpha");
+    let alpha = alpha.canonicalize().expect("alpha");
+    let parent = alpha.parent().expect("parent").to_path_buf();
+    let settings = Arc::new(Settings::in_memory());
+    let cx = open_workspace(app, &alpha, settings.clone());
+
+    click(cx, "linked-pill");
+    click(cx, "linked-input");
+    type_text(cx, &format!("{}/al", parent.display()));
+    wait_until_shows(cx, "hint-reason:alpha:This folder");
+    press(cx, "down");
+    press(cx, "enter");
+    assert!(shows(cx, "linked-error"), "Enter on the repo itself is refused");
+    assert!(settings.linked_folders(&alpha).is_empty());
+    drop(alpha_dir);
 }

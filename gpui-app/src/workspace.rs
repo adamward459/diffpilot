@@ -99,6 +99,7 @@ pub fn init(cx: &mut App) {
     crate::diff_pane::bind_keys(cx);
     crate::review::init(cx);
     crate::open_dialog::init(cx);
+    crate::path_hints::init(cx);
     crate::switch_alert::init(cx);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.set_menus(vec![

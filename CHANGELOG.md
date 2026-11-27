@@ -14,6 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - Open Folder is now one sheet. It lists your recent folders with their branch, changed files, and open pull requests, and has a search for folders, paths, pull request titles, or #123. Browse… picks any other folder.
 - On the Open Folder sheet, choose what to compare before you open: a branch and its base, or a pull request. Picking a pull request fills in both branches and opens it without a checkout. Edit… changes the linked folders.
 - The Open Folder sheet shows when you start Diffpilot with no folder open.
+- On the Open Folder sheet, Up and Down move through the recent folders, even while the search has focus, and Enter opens the one you picked.
+- Linked folders you edit on the Open Folder sheet are kept for each folder while the sheet is open. Only the folder you open is saved.
+- Type a path in the linked folder field or the Open Folder search to see up to 6 matching sub-folders. Use Up, Down, Tab, or Enter to complete one. Folders you cannot link say why.
 
 ### Changed
 

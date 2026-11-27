@@ -1,4 +1,5 @@
 use crate::folder_picker::pick_folders;
+use crate::path_hints::{ACTIVE, HintAccept, HintNext, HintPrev, PathHints};
 use crate::repo_view::tilde_path;
 use diffpilot_core::guide::linked::{self, LinkError};
 use diffpilot_ui_kit::components::{Button, Look, glyph_icon, tag};
@@ -35,9 +36,10 @@ pub struct LinkedFolders {
     repo: PathBuf,
     folders: Vec<PathBuf>,
     input: Entity<InputState>,
+    hints: Entity<PathHints>,
     error: Option<(LinkError, String)>,
     refused: Vec<(String, LinkError)>,
-    _input: Subscription,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<LinkedEvent> for LinkedFolders {}
@@ -45,24 +47,23 @@ impl EventEmitter<LinkedEvent> for LinkedFolders {}
 impl LinkedFolders {
     pub fn new(repo: PathBuf, folders: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let input = cx.new(|cx| InputState::new(window, cx).placeholder("Type a path or drop a folder"));
-        let subscription = cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| match event {
-            InputEvent::PressEnter { .. } => this.submit(window, cx),
-            InputEvent::Change => {
-                let typed = this.input.read(cx).value();
-                if this.error.as_ref().is_some_and(|(_, checked)| checked != typed.trim()) {
-                    this.error = None;
-                    cx.notify();
-                }
-            }
-            _ => {}
-        });
+        let hints = cx.new(|_| PathHints::default());
+        let subscriptions = vec![
+            cx.observe(&hints, |_, _, cx| cx.notify()),
+            cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::PressEnter { .. } => this.submit(window, cx),
+                InputEvent::Change => this.typed(cx),
+                _ => {}
+            }),
+        ];
         Self {
             repo,
             folders,
             input,
+            hints,
             error: None,
             refused: Vec::new(),
-            _input: subscription,
+            _subscriptions: subscriptions,
         }
     }
 
@@ -71,6 +72,7 @@ impl LinkedFolders {
         self.folders = folders;
         self.refused.clear();
         self.error = None;
+        self.typed(cx);
         cx.notify();
     }
 
@@ -83,7 +85,31 @@ impl LinkedFolders {
         cx.notify();
     }
 
+    fn typed(&mut self, cx: &mut Context<Self>) {
+        let typed = self.input.read(cx).value();
+        if self.error.as_ref().is_some_and(|(_, checked)| checked != typed.trim()) {
+            self.error = None;
+            cx.notify();
+        }
+        let linking = Some((self.repo.clone(), self.folders.clone()));
+        self.hints
+            .update(cx, |hints, cx| hints.set_text(typed.trim_start(), linking, cx));
+    }
+
+    fn step_hints(&mut self, forward: bool, cx: &mut Context<Self>) {
+        self.hints.update(cx, |hints, cx| hints.step(forward, cx));
+    }
+
+    fn accept_hint(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = self.hints.read(cx).pick() {
+            self.input.update(cx, |input, cx| input.set_value(text, window, cx));
+        }
+    }
+
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = self.hints.read(cx).highlighted() {
+            self.input.update(cx, |input, cx| input.set_value(text, window, cx));
+        }
         let text = self.input.read(cx).value().to_string();
         let trimmed = text.trim().to_string();
         if trimmed.len() != text.len() {
@@ -156,6 +182,7 @@ impl Render for LinkedFolders {
         let tokens = Theme::of(cx);
         let small = diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL);
         let secondary = diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY);
+        let hinting = self.hints.read(cx).is_active();
         let mut section = v_flex()
             .id("linked-folders")
             .w_full()
@@ -166,6 +193,10 @@ impl Render for LinkedFolders {
                     .gap(px(6.))
                     .child(
                         tag(div().flex_1().min_w_0(), || "linked-input")
+                            .when(hinting, |field| field.key_context(ACTIVE))
+                            .on_action(cx.listener(|this, _: &HintNext, _, cx| this.step_hints(true, cx)))
+                            .on_action(cx.listener(|this, _: &HintPrev, _, cx| this.step_hints(false, cx)))
+                            .on_action(cx.listener(|this, _: &HintAccept, window, cx| this.accept_hint(window, cx)))
                             .child(Input::new(&self.input).text_size(secondary)),
                     )
                     .child(tag(
@@ -175,6 +206,7 @@ impl Render for LinkedFolders {
                         || "linked-choose",
                     )),
             )
+            .when(hinting, |section| section.child(self.hints.read(cx).list(&tokens)))
             .when_some(self.error.as_ref().map(|(error, _)| *error), |section, error| {
                 section.child(
                     tag(h_flex(), || "linked-error")

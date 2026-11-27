@@ -14,6 +14,7 @@ pub mod guide;
 mod linked_folders;
 mod open_dialog;
 mod pane;
+mod path_hints;
 pub mod remote;
 pub mod repo_view;
 pub mod review;

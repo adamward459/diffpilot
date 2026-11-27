@@ -219,6 +219,128 @@ fn a_linked_folder_that_cannot_be_linked_says_why(app: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn arrow_keys_move_the_selection_while_the_search_has_focus_and_enter_opens_it(app: &mut TestAppContext) {
+    let (_alpha_dir, alpha) = fixture_named("alpha");
+    let (_beta_dir, beta) = fixture_named("beta");
+    let (_gamma_dir, gamma) = fixture_named("gamma");
+    let settings = Arc::new(Settings::in_memory());
+    known(&settings, &[&alpha, &beta, &gamma]);
+    let cx = open_empty_workspace(app, settings);
+
+    press(cx, "down");
+    press(cx, "down");
+    press(cx, "down");
+    assert!(shows(cx, "open:selected:gamma"), "Down stops at the last folder");
+    press(cx, "up");
+    press(cx, "enter");
+    assert!(shows(cx, "folder-active:beta"), "Up went back one, and Enter opens it");
+}
+
+#[gpui::test]
+fn each_folder_keeps_its_own_linked_folders_and_only_the_opened_one_is_saved(app: &mut TestAppContext) {
+    let (_alpha_dir, alpha) = fixture_named("alpha");
+    let (_beta_dir, beta) = fixture_named("beta");
+    let (_first_dir, first) = shared_folder();
+    let (_second_dir, second) = shared_folder();
+    let settings = Arc::new(Settings::in_memory());
+    known(&settings, &[&alpha, &beta]);
+    let cx = open_empty_workspace(app, settings.clone());
+
+    click(cx, "open:linked-edit");
+    click(cx, "linked-input");
+    type_text(cx, &first.display().to_string());
+    press(cx, "enter");
+    click(cx, "open:folder:beta");
+    click(cx, "open:linked-edit");
+    click(cx, "linked-input");
+    type_text(cx, &second.display().to_string());
+    press(cx, "enter");
+    click(cx, "open:folder:alpha");
+    click(cx, "open-folder-confirm");
+
+    assert!(shows(cx, "folder-active:alpha"));
+    let (alpha, beta) = (alpha.canonicalize().expect("alpha"), beta.canonicalize().expect("beta"));
+    assert_eq!(
+        settings.linked_folders(&alpha),
+        [first],
+        "the draft came back for alpha"
+    );
+    assert!(settings.linked_folders(&beta).is_empty(), "beta's draft is not saved");
+}
+
+#[gpui::test]
+fn a_typed_path_in_the_search_lists_sub_folders_that_tab_and_enter_complete(app: &mut TestAppContext) {
+    let (dir, gamma) = fixture_named("gamma");
+    std::fs::create_dir(dir.path().join("galaxy")).expect("mkdir");
+    std::fs::create_dir(dir.path().join(".gone")).expect("mkdir");
+    let settings = Arc::new(Settings::in_memory());
+    known(&settings, &[&gamma]);
+    let cx = open_empty_workspace(app, settings);
+
+    type_text(cx, &format!("{}/g", dir.path().display()));
+    wait_until_shows(cx, "hint:gamma");
+    assert!(shows(cx, "hint:galaxy"));
+    assert!(
+        !shows(cx, "hint:.gone"),
+        "hidden folders stay out unless a dot is typed"
+    );
+    press(cx, "down");
+    press(cx, "down");
+    press(cx, "tab");
+    wait_until_shows(cx, "hint:gamma");
+    press(cx, "enter");
+    assert!(
+        shows(cx, "folder-active:gamma"),
+        "Tab filled in the path, Enter opened it"
+    );
+}
+
+#[gpui::test]
+fn enter_on_a_highlighted_sub_folder_opens_it(app: &mut TestAppContext) {
+    let (dir, gamma) = fixture_named("gamma");
+    let (_other_dir, other) = fixture_named("other");
+    let settings = Arc::new(Settings::in_memory());
+    known(&settings, &[&other]);
+    let cx = open_empty_workspace(app, settings);
+
+    type_text(cx, &format!("{}/ga", dir.path().display()));
+    wait_until_shows(cx, "hint:gamma");
+    press(cx, "down");
+    press(cx, "enter");
+    assert!(shows(cx, "folder-active:gamma"));
+    drop(gamma);
+}
+
+#[gpui::test]
+fn a_typed_path_in_the_link_field_lists_sub_folders_and_enter_links_the_highlighted_one(app: &mut TestAppContext) {
+    let (_alpha_dir, alpha) = fixture_named("alpha");
+    let shared = tempfile::tempdir().expect("tempdir");
+    let base = shared.path().canonicalize().expect("path");
+    for name in ["alpha-docs", "alpine", "zeta"] {
+        std::fs::create_dir(base.join(name)).expect("mkdir");
+    }
+    let settings = Arc::new(Settings::in_memory());
+    known(&settings, &[&alpha]);
+    let cx = open_empty_workspace(app, settings);
+
+    click(cx, "open:linked-edit");
+    click(cx, "linked-input");
+    type_text(cx, &format!("{}/al", base.display()));
+    wait_until_shows(cx, "hint:alpha-docs");
+    assert!(shows(cx, "hint:alpine"));
+    assert!(!shows(cx, "hint:zeta"), "only matching folders are listed");
+    press(cx, "down");
+    press(cx, "down");
+    press(cx, "tab");
+    wait_until_shows(cx, &format!("hint:{}", "alpine"));
+    press(cx, "enter");
+    assert!(
+        shows(cx, "open:linked-chip:alpine"),
+        "Tab completed alpine, Enter linked it"
+    );
+}
+
+#[gpui::test]
 fn picking_a_known_folder_from_the_menu_skips_the_sheet(app: &mut TestAppContext) {
     let (_alpha_dir, alpha) = fixture_named("alpha");
     let (_beta_dir, beta) = fixture_named("beta");
