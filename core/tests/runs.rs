@@ -666,9 +666,7 @@ fn stopping_a_paused_run_ends_it_and_starts_the_next() {
     let rx = engine.subscribe();
     let first = engine.submit(request(repo.path(), RunKind::MakeChanges)).unwrap();
     let second = engine.submit(request(repo.path(), RunKind::MakeChanges)).unwrap();
-    wait_for("the run to start", WITHIN, || {
-        engine.run(first).unwrap().state == RunState::Running
-    });
+    wait_for("the run to start", WITHIN, || launches(work.path()).len() == 1);
     assert!(!engine.resume(first), "only a paused run continues");
     assert!(engine.pause(first));
     wait_paused(&engine, first);

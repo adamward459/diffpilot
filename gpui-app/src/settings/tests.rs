@@ -10,7 +10,9 @@ use diffpilot_core::review::{Effort, ModelName};
 use diffpilot_core::settings::{AppearanceChoice, appearance_override};
 use diffpilot_core::store::Store;
 use diffpilot_core::viewed::ViewedStore;
-use gpui::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext, point, px};
+use gpui::{
+    AppContext as _, Entity, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point, px,
+};
 use gpui_component::ActiveTheme;
 use gpui_component::Root;
 use std::os::unix::fs::PermissionsExt;
@@ -207,8 +209,33 @@ impl Rig {
         self.settle(cx);
     }
 
+    /// Scrolls the settings body with the wheel until a control inside it is in view, as a user does.
+    fn reveal(&self, cx: &mut VisualTestContext, selector: &'static str) {
+        let (Some(target), Some(body)) = (cx.debug_bounds(selector), cx.debug_bounds("settings:body")) else {
+            return;
+        };
+        if target.left() < body.left() || target.right() > body.right() {
+            return;
+        }
+        let margin = px(24.);
+        let delta = if target.bottom() > body.bottom() {
+            body.bottom() - target.bottom() - margin
+        } else if target.top() < body.top() {
+            body.top() - target.top() + margin
+        } else {
+            return;
+        };
+        cx.simulate_event(ScrollWheelEvent {
+            position: body.center(),
+            delta: ScrollDelta::Pixels(point(px(0.), delta)),
+            ..Default::default()
+        });
+        self.settle(cx);
+    }
+
     fn click(&self, cx: &mut VisualTestContext, selector: &'static str) {
         self.settle(cx);
+        self.reveal(cx, selector);
         let bounds = cx
             .debug_bounds(selector)
             .unwrap_or_else(|| panic!("no element tagged {selector}"));

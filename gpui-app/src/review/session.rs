@@ -405,6 +405,7 @@ impl ReviewSession {
         self.engine = Some(engine.clone());
         let id = engine.submit(request).map_err(|error| error.to_string())?;
         self.submitted.insert(id);
+        self.activity.update(cx, |activity, cx| activity.track(id, cx));
         Ok(id)
     }
 

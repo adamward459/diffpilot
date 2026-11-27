@@ -130,22 +130,33 @@ impl ClaudeActivity {
             .or_else(|| self.engine.as_ref().and_then(|engine| engine.run(id)))
     }
 
+    /// Shows a run right after its submit, before the engine's event for it arrives.
+    pub fn track(&mut self, id: RunId, cx: &mut Context<Self>) {
+        self.known.insert(id);
+        self.refresh(cx);
+    }
+
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.sync();
+        cx.notify();
+    }
+
     pub fn stop(&mut self, id: RunId, cx: &mut Context<Self>) {
         if self.engine.as_ref().is_some_and(|engine| engine.stop(id)) {
-            cx.notify();
+            self.refresh(cx);
         }
     }
 
     /// Ends the claude process of the running run and keeps the run. It holds the repo until it goes on or stops.
     pub fn pause(&mut self, id: RunId, cx: &mut Context<Self>) {
         if self.engine.as_ref().is_some_and(|engine| engine.pause(id)) {
-            cx.notify();
+            self.refresh(cx);
         }
     }
 
     pub fn resume(&mut self, id: RunId, cx: &mut Context<Self>) {
         if self.engine.as_ref().is_some_and(|engine| engine.resume(id)) {
-            cx.notify();
+            self.refresh(cx);
         }
     }
 

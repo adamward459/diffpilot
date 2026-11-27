@@ -231,7 +231,7 @@ fn a_review_queued_behind_a_guide_run_starts_when_the_guide_is_saved(app: &mut T
 fn queue_starts_a_second_review_after_the_first(app: &mut TestAppContext) {
     let fake = fake_claude(app);
     fake.review_with(&result("", vec![finding("base.txt", Some(2), Severity::Nit, "Only")]));
-    fake.finish_after(1.5);
+    fake.hold();
     let (_dir, cx) = open(app, Settings::in_memory());
     start_review(cx);
     fake.wait_for_launches(cx, 1);
@@ -243,6 +243,8 @@ fn queue_starts_a_second_review_after_the_first(app: &mut TestAppContext) {
     wait_until_shows(cx, "claude-area:queued:1");
     assert_eq!(fake.launches(), 1, "the second run waits for the first");
 
+    fake.finish_after(1.5);
+    fake.finish();
     fake.wait_for_launches(cx, 2);
     assert!(
         !shows(cx, "claude:toggle:2"),
