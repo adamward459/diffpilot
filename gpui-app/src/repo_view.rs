@@ -35,6 +35,7 @@ use diffpilot_ui_kit::components::{
     BAR_HEIGHT, Button, CAPSULE_HEIGHT, Crumb, IconSegment, Look, OnSelect, Presence, SwitchItem, bar_button, capsule,
     crumbs, glyph_icon, icon_switch, jump_bar, popover, status_bar, switch_bar, tag,
 };
+use diffpilot_ui_kit::regions::region;
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
 use gpui::{
@@ -1475,7 +1476,10 @@ impl Render for RepoView {
                 } else {
                     slot
                 };
-                let slot = slot.h(px(CLAUDE_AREA_HEIGHT)).flex_none().child(session.area.clone());
+                let slot = region(slot, || "claude-area".into())
+                    .h(px(CLAUDE_AREA_HEIGHT))
+                    .flex_none()
+                    .child(session.area.clone());
                 Some(self.claude_area.animate(
                     "claude-area-motion",
                     div().flex().flex_col().flex_none().child(slot),
@@ -1554,7 +1558,7 @@ impl Render for RepoView {
             )
             .when(self.sidebar.is_mounted(), |this| {
                 let column = {
-                    div()
+                    region(div(), || "sidebar".into())
                         .id("sidebar-column")
                         .relative()
                         .w(width)
@@ -1633,13 +1637,19 @@ impl Render for RepoView {
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .child(toolbar)
+                    .child(region(div().child(toolbar), || "toolbar".into()))
                     .child(jump_bar)
                     .child(
                         h_flex()
                             .flex_1()
                             .min_h_0()
-                            .child(div().flex_1().min_w_0().h_full().child(detail_content))
+                            .child(
+                                region(div(), || "content".into())
+                                    .flex_1()
+                                    .min_w_0()
+                                    .h_full()
+                                    .child(detail_content),
+                            )
                             .children(inspector),
                     )
                     .children(claude_area)
@@ -1661,6 +1671,14 @@ impl RepoView {
 
     pub fn review(&self) -> Entity<ReviewSession> {
         self.current().review.clone()
+    }
+
+    pub fn pill(&self) -> Option<Entity<ReviewPill>> {
+        self.session.as_ref().map(|session| session.pill.clone())
+    }
+
+    pub fn fix_button(&self) -> Option<Entity<FixButton>> {
+        self.session.as_ref().map(|session| session.fix.clone())
     }
 }
 

@@ -43,7 +43,7 @@
   },
   {
     "files": [
-      "gpui-app/tests/review_card.rs"
+      "gpui-app/tests/review_session.rs"
     ],
     "touched": [
       "diffpilot"

@@ -1,3 +1,4 @@
+use crate::common::comment_on_file;
 use diffpilot::testing::{
     FakeClaude, click, fake_claude, fixture, open_repo, press, shows, type_text, wait_until_shows,
 };
@@ -18,13 +19,6 @@ fn open(app: &mut TestAppContext) -> (tempfile::TempDir, &'static mut VisualTest
 
 fn threads_in_run(claude: &FakeClaude) -> String {
     claude.call_mcp_tool("list_threads", json!({})).to_string()
-}
-
-fn comment_on_file(cx: &mut VisualTestContext, path: &str, text: &str) {
-    click(cx, &format!("sidebar:row:{path}"));
-    click(cx, &format!("pane:comment-on-file:{path}"));
-    type_text(cx, text);
-    press(cx, "cmd-enter");
 }
 
 #[gpui::test]

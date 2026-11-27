@@ -1,34 +1,11 @@
+use crate::common::{comment_on_file, open_on as open};
 use diffpilot::testing::{
-    click, fake_claude, fixture, hover, open_repo_in, open_workspace, press, shows, type_text, wait_for_motion,
+    click, fake_claude, fixture, hover, open_workspace, press, shows, type_text, wait_for_motion,
 };
 use diffpilot_core::settings::Settings;
 use diffpilot_core::threads::USER_NAME;
-use diffpilot_core::viewed::ViewedStore;
-use gpui::{TestAppContext, VisualTestContext};
-use std::path::Path;
+use gpui::TestAppContext;
 use std::sync::Arc;
-
-fn open(
-    app: &mut TestAppContext,
-    repo: &Path,
-    store: Arc<diffpilot_core::store::Store>,
-) -> &'static mut VisualTestContext {
-    let (_, cx) = open_repo_in(
-        app,
-        repo,
-        Arc::new(Settings::in_memory()),
-        Arc::new(ViewedStore::in_memory()),
-        store,
-    );
-    cx
-}
-
-fn comment_on_file(cx: &mut VisualTestContext, path: &str, text: &str) {
-    click(cx, &format!("sidebar:row:{path}"));
-    click(cx, &format!("pane:comment-on-file:{path}"));
-    type_text(cx, text);
-    press(cx, "cmd-enter");
-}
 
 #[gpui::test]
 fn a_resolved_comment_is_listed_under_resolved_and_reopening_it_puts_it_back_in_the_diff(app: &mut TestAppContext) {

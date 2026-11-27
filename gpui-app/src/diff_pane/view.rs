@@ -14,7 +14,7 @@ use crate::diff_pane::stage_lines;
 use crate::diff_pane::state::{Geometry, PaneState, ThumbDrag};
 use crate::guide::note::{NoteCard, NoteEvent};
 use crate::guide::text::CodeRef;
-use crate::review::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange};
+use crate::review::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange, card_key};
 use diffpilot_core::changes::FileStatus;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{DiffMode, FileDiff, LineKind};
@@ -28,6 +28,7 @@ use diffpilot_ui_kit::components::{
     BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, glass_panel, glyph_icon, label_switch,
     status_badge, tag, viewed_toggle,
 };
+use diffpilot_ui_kit::regions::region;
 use gpui::{
     AnyView, App, AppContext as _, ClickEvent, Context, DispatchPhase, Div, Entity, EventEmitter, FontWeight, Hsla,
     InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
@@ -282,7 +283,7 @@ impl DiffPane {
         self.sync(cx);
     }
 
-    fn set_preview(&mut self, path: &str, on: bool, cx: &mut Context<Self>) {
+    pub fn set_preview(&mut self, path: &str, on: bool, cx: &mut Context<Self>) {
         if self.state.shows_preview(path) != on {
             self.state.toggle_preview(path);
             self.lines.clear();
@@ -1019,17 +1020,20 @@ impl DiffPane {
         )
     }
 
-    fn add_comment(&mut self, file: usize, (hunk, line): (u32, u32), window: &mut Window, cx: &mut Context<Self>) {
+    fn line_anchor(&self, file: usize, (hunk, line): (u32, u32)) -> Option<ThreadAnchor> {
         let file = &self.state.files[file];
         let diff_line = &file.hunks[hunk as usize].lines[line as usize];
         let (side, number) = match diff_line.kind {
             LineKind::Deleted => (Side::Old, diff_line.old),
             _ => (Side::New, diff_line.new),
         };
-        let (Some(number), Some(review)) = (number, &self.review) else {
+        Some(ThreadAnchor::line(&file.path, side, number?))
+    }
+
+    fn add_comment(&mut self, file: usize, at: (u32, u32), window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(anchor), Some(review)) = (self.line_anchor(file, at), &self.review) else {
             return;
         };
-        let anchor = ThreadAnchor::line(&file.path, side, number);
         let id = review
             .session
             .update(cx, |session, cx| session.create_thread(anchor, cx));
@@ -1669,21 +1673,27 @@ impl DiffPane {
         body
     }
 
-    fn block_row(&self, slot: u32, y: f32, height: f32) -> Option<Div> {
+    fn block_row(&self, slot: u32, y: f32, height: f32, cx: &App) -> Option<Div> {
         let thread = &self.state.blocks[slot as usize];
         let card: AnyView = match thread.id {
             BlockId::Thread(id) => self.card(id)?.clone().into(),
             BlockId::Note(index) => self.notes.get(index as usize)?.view.clone().into(),
         };
+        let key = match (thread.id, &self.review) {
+            (BlockId::Thread(id), Some(review)) => review.session.read(cx).thread(id).map(card_key),
+            _ => None,
+        };
         let frame = ThreadFrame::of(&thread.anchor, self.state.split_width());
         let card_height = height - frame.top - frame.bottom - if frame.rule { 1.0 } else { 0.0 };
         let style = StyleRefinement::default().w_full().h(px(card_height));
-        let mut row = Self::placed(y, height)
-            .overflow_hidden()
-            .pl(px(frame.left))
-            .pr(px(frame.right))
-            .pt(px(frame.top))
-            .pb(px(frame.bottom));
+        let mut row = tag(Self::placed(y, height), || {
+            format!("pane:thread-row:{}", key.unwrap_or_default())
+        })
+        .overflow_hidden()
+        .pl(px(frame.left))
+        .pr(px(frame.right))
+        .pt(px(frame.top))
+        .pb(px(frame.bottom));
         if frame.rule {
             row = row.border_b_1().border_color(self.theme.diff.line);
         }
@@ -1715,23 +1725,26 @@ impl DiffPane {
         let theme = &self.theme;
         let numbers = if hovered.column == Column::Unified { 2.0 } else { 1.0 };
         let left = self.column_span(hovered.column).0 + NUMBER_COLUMN * numbers - 18.0;
-        div()
-            .id(("add-comment", hovered.row))
-            .absolute()
-            .top(px(y + 1.0))
-            .left(px(left))
-            .flex()
-            .items_center()
-            .justify_center()
-            .size(px(18.0))
-            .rounded(px(4.0))
-            .bg(theme.accent)
-            .cursor_pointer()
-            .child(glyph_icon(Glyph::Plus, 12.0, theme.on_accent))
-            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                this.add_comment(hovered.file, (hovered.hunk, hovered.line), window, cx)
-            }))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        let anchor = self.line_anchor(hovered.file, (hovered.hunk, hovered.line));
+        tag(div().id(("add-comment", hovered.row)), || match anchor {
+            Some(ThreadAnchor::Line { path, side, line }) => format!("pane:add-comment:{path}:{side:?}:{line}"),
+            _ => "pane:add-comment".to_string(),
+        })
+        .absolute()
+        .top(px(y + 1.0))
+        .left(px(left))
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(px(18.0))
+        .rounded(px(4.0))
+        .bg(theme.accent)
+        .cursor_pointer()
+        .child(glyph_icon(Glyph::Plus, 12.0, theme.on_accent))
+        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+            this.add_comment(hovered.file, (hovered.hunk, hovered.line), window, cx)
+        }))
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
     }
 
     fn backdrop(&self, y: f32) -> Hsla {
@@ -1782,7 +1795,7 @@ impl Render for DiffPane {
         self.theme = current;
         let theme = self.theme;
         let scroll = self.state.scroll();
-        let mut root = tag(div().id("diff-pane"), || "pane")
+        let mut root = region(tag(div().id("diff-pane"), || "pane"), || "pane".into())
             .key_context(KEY_CONTEXT)
             // On the root, gpui would focus the pane on every click inside it and take focus from a comment box.
             .child(div().size_0().track_focus(&self.focus))
@@ -1885,7 +1898,7 @@ impl Render for DiffPane {
             let file = row.file as usize;
             let element = match row.kind {
                 RowKind::Line { .. } | RowKind::Pair { .. } | RowKind::Gap => continue,
-                RowKind::Block { slot } => match self.block_row(slot, y, height) {
+                RowKind::Block { slot } => match self.block_row(slot, y, height, cx) {
                     Some(thread) => thread,
                     None => continue,
                 },

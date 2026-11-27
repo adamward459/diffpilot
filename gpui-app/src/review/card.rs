@@ -574,7 +574,7 @@ impl ThreadCard {
                 .border_t_1()
                 .border_color(theme.ui.line)
                 .child(
-                    h_flex()
+                    tag(h_flex(), || format!("thread:status:{chip}"))
                         .flex_none()
                         .gap_1()
                         .px_2()
@@ -860,14 +860,17 @@ impl ThreadCard {
                         .child(self.delete_button(cx))
                     })
                     .child(
-                        icon_button(
-                            ("fold", self.id.0 as usize),
-                            if collapsed {
-                                Glyph::ChevronDown
-                            } else {
-                                Glyph::ChevronUp
-                            },
-                            theme.ui.muted,
+                        tag(
+                            icon_button(
+                                ("fold", self.id.0 as usize),
+                                if collapsed {
+                                    Glyph::ChevronDown
+                                } else {
+                                    Glyph::ChevronUp
+                                },
+                                theme.ui.muted,
+                            ),
+                            || format!("thread:fold:{}", self.key),
                         )
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_collapsed(cx))),
                     ),
@@ -1147,7 +1150,7 @@ impl Render for ThreadCard {
             Kind::Plain => self.plain_card(thread, &fonts, window, cx),
         };
         let dismissed = thread.status == ThreadStatus::Dismissed;
-        div()
+        tag(div(), || format!("thread:card:{}", self.key))
             .w_full()
             .font_family(cx.theme().font_family.clone())
             .text_size(diffpilot_ui_kit::text_px(m::TEXT_SIZE))

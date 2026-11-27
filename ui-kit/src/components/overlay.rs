@@ -1,4 +1,5 @@
 use crate::components::{Presence, glass_panel, tag};
+use crate::regions::region;
 use crate::theme::Theme;
 use gpui::prelude::*;
 use gpui::{
@@ -99,8 +100,9 @@ impl RenderOnce for SideSheet {
         let open = self.presence.is_open();
         let (root_tag, panel_tag) = self.tag.unwrap_or(("sheet", "sheet:panel"));
         let (edge, width, inset) = (self.edge, self.width, self.inset);
+        let region_name = format!("dialog:{}", self.id);
         let panel = tag(
-            glass_panel(&theme).id(ElementId::Name(format!("{}-panel", self.id).into())),
+            region(glass_panel(&theme), || region_name).id(ElementId::Name(format!("{}-panel", self.id).into())),
             || panel_tag,
         )
         .when(open, |this| this.occlude())
@@ -209,8 +211,9 @@ impl RenderOnce for Dialog {
         let theme = Theme::of(cx);
         let open = self.presence.is_open();
         let (backdrop_tag, panel_tag) = self.tag.unwrap_or(("dialog", "dialog:panel"));
+        let region_name = format!("dialog:{}", self.id);
         let panel = tag(
-            glass_panel(&theme).id(ElementId::Name(format!("{}-panel", self.id).into())),
+            region(glass_panel(&theme), || region_name).id(ElementId::Name(format!("{}-panel", self.id).into())),
             || panel_tag,
         )
         .w(self.width)

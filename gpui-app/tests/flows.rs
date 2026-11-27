@@ -6,6 +6,7 @@ mod flows {
     mod commit;
     mod comparison;
     mod data;
+    mod diff_comments;
     mod diff_mode;
     mod editor;
     mod file_menu;
@@ -15,11 +16,13 @@ mod flows {
     mod preview;
     mod remote;
     mod review;
+    mod review_pill;
     mod scrollbar;
     mod selection;
     mod settings;
     mod settings_wrap;
     mod sidebar_keys;
+    mod thread_cards;
     mod threads;
     mod viewed;
 }

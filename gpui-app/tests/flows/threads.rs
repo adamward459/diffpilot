@@ -1,32 +1,7 @@
-use diffpilot::testing::{click, fake_claude, fixture, open_repo_in, press, shows, type_text};
-use diffpilot_core::settings::Settings;
+use crate::common::{comment_on_file, open_on as open};
+use diffpilot::testing::{click, fake_claude, fixture, press, shows, type_text};
 use diffpilot_core::threads::USER_NAME;
-use diffpilot_core::viewed::ViewedStore;
-use gpui::{TestAppContext, VisualTestContext};
-use std::path::Path;
-use std::sync::Arc;
-
-fn open(
-    app: &mut TestAppContext,
-    repo: &Path,
-    store: Arc<diffpilot_core::store::Store>,
-) -> &'static mut VisualTestContext {
-    let (_, cx) = open_repo_in(
-        app,
-        repo,
-        Arc::new(Settings::in_memory()),
-        Arc::new(ViewedStore::in_memory()),
-        store,
-    );
-    cx
-}
-
-fn comment_on_file(cx: &mut VisualTestContext, path: &str, text: &str) {
-    click(cx, &format!("sidebar:row:{path}"));
-    click(cx, &format!("pane:comment-on-file:{path}"));
-    type_text(cx, text);
-    press(cx, "cmd-enter");
-}
+use gpui::TestAppContext;
 
 #[gpui::test]
 fn delete_removes_a_thread_for_good(app: &mut TestAppContext) {

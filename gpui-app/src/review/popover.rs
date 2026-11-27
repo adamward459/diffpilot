@@ -193,7 +193,7 @@ impl Render for ReviewPopover {
             )
             .when_some(problem.map(SharedString::from), |col, message| {
                 col.child(
-                    h_flex()
+                    tag(h_flex(), || format!("review:problem:{message}"))
                         .gap_2()
                         .mb(px(12.))
                         .items_start()
@@ -259,8 +259,14 @@ impl Render for ReviewPopover {
                         this.session
                             .update(cx, |session, cx| session.update_setup(|s| s.scope = scope, cx));
                     }))
-                    .child(Radio::new("scope-all").label(format!("All changes ({files} {plural})")))
-                    .child(Radio::new("scope-open").label(format!("Only the open file  {open_name}"))),
+                    .child(tag(
+                        Radio::new("scope-all").label(format!("All changes ({files} {plural})")),
+                        || "review:scope:all",
+                    ))
+                    .child(tag(
+                        Radio::new("scope-open").label(format!("Only the open file  {open_name}")),
+                        || "review:scope:open",
+                    )),
             )
             .child(div().h(px(1.)).bg(theme.ui.line).my(px(12.)))
             .child(

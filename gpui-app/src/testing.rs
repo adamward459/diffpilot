@@ -254,14 +254,19 @@ pub fn open_settings(
 /// What ⌘, needs. The Data section lists the store that runs and threads use.
 pub fn install_settings(cx: &mut TestAppContext, settings: Arc<Settings>) {
     ready(cx);
-    let services = Services {
+    let services = offline_services(engine_store(cx));
+    cx.update(|cx| settings::init(settings, services, cx));
+}
+
+/// Settings services with no GitHub account and no network.
+pub fn offline_services(store: Arc<Store>) -> Services {
+    Services {
         credentials: Credentials::new(Arc::new(MemoryStore::default()), Arc::new(NoGh)),
         http: Arc::new(Offline),
         host: "github.com".into(),
         mcp_server: None,
-        store: engine_store(cx),
-    };
-    cx.update(|cx| settings::init(settings, services, cx));
+        store,
+    }
 }
 
 pub fn show_settings(cx: &mut VisualTestContext, section: Section) {
@@ -396,6 +401,40 @@ pub fn click_below(cx: &mut VisualTestContext, selector: &str, at: (f32, f32), c
         });
     }
     draw(cx);
+}
+
+pub fn hover_below(cx: &mut VisualTestContext, selector: &str, at: (f32, f32)) {
+    let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
+    cx.simulate_mouse_move(below(bounds, at), None, Modifiers::default());
+    draw(cx);
+}
+
+/// Scrolls the wheel down by `dy` points over the tagged element.
+pub fn scroll_down(cx: &mut VisualTestContext, selector: &str, dy: f32) {
+    let position = bounds_of(cx, selector)
+        .unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"))
+        .center();
+    cx.simulate_event(gpui::ScrollWheelEvent {
+        position,
+        delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-dy))),
+        modifiers: Modifiers::default(),
+        touch_phase: gpui::TouchPhase::Moved,
+    });
+    draw(cx);
+}
+
+pub fn advance_clock(cx: &mut VisualTestContext, seconds: u64) {
+    cx.executor().advance_clock(std::time::Duration::from_secs(seconds));
+    draw(cx);
+}
+
+pub fn resize(cx: &mut VisualTestContext, width: f32, height: f32) {
+    cx.simulate_resize(gpui::size(gpui::px(width), gpui::px(height)));
+    draw(cx);
+}
+
+pub fn window_size(cx: &mut VisualTestContext) -> gpui::Size<Pixels> {
+    cx.update(|window, _| window.viewport_size())
 }
 
 /// Presses at `from` and releases at `to`, both measured from the left edge and bottom of the tagged element.
@@ -957,6 +996,58 @@ pub fn demo_guide(repo: &Path, files: &[FileDiff]) -> Guide {
                 "Skim",
                 Attention::Low,
                 &["base.txt", "docs/committed.md"],
+                vec![],
+            ),
+        ],
+        fingerprint: fingerprint(files),
+        file_fingerprints: file_fingerprints(files),
+        head: stale::head(repo),
+        context: vec![],
+    }
+}
+
+/// A two-chapter guide over `files`: the first two files, then the rest, with a note on the first added line of the first one.
+pub fn guide_over(repo: &Path, files: &[FileDiff]) -> Guide {
+    let paths: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
+    let note = files.iter().find_map(|file| {
+        let line = file
+            .hunks
+            .iter()
+            .flat_map(|hunk| &hunk.lines)
+            .find(|line| line.new.is_some())?;
+        Some(Note {
+            path: file.path.clone(),
+            span: Some(Span {
+                side: Side::New,
+                line: line.new?,
+                end_line: None,
+                anchor_text: Some(line.text.clone()),
+            }),
+            text: "Start here: this line sets up the rest of the change.".into(),
+            critical: false,
+        })
+    });
+    Guide {
+        overview: Overview {
+            title: "What this change does".into(),
+            summary: "It reshapes the inbox code and updates the docs and tests that describe it.".into(),
+            before: Some("Each view read its own state, so the same data was loaded in several places.".into()),
+            after: Some("One provider owns the state, and the views read it from there.".into()),
+        },
+        diagrams: vec![],
+        chapters: vec![
+            demo_chapter(
+                "The provider",
+                "Core",
+                Attention::High,
+                &paths[..paths.len().min(2)],
+                note.into_iter().collect(),
+            ),
+            demo_chapter(
+                "Everything else",
+                "Skim",
+                Attention::Low,
+                &paths[paths.len().min(2)..],
                 vec![],
             ),
         ],
