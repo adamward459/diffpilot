@@ -1,4 +1,5 @@
 mod bundle;
+mod cache;
 mod changelog;
 mod checks;
 mod features;
@@ -43,6 +44,9 @@ cargo xtask release VERSION     move the Unreleased notes of CHANGELOG.md into V
                                 as the diffpilot version in gpui-app/Cargo.toml and Cargo.lock
 cargo xtask release-notes VERSION
                                 print the CHANGELOG.md section of VERSION; fail if it is empty
+cargo xtask cache [--max-gb N] [--dry-run]
+                                delete the Cargo build dirs of removed worktrees, then the least recently
+                                used ones until the rest fits in N GB (default 50)
 cargo xtask related             print the commands that match the current changes
 cargo xtask features            print the feature table and the files no feature lists";
 
@@ -64,6 +68,7 @@ fn main() -> ExitCode {
         Some("bundle") => bundle::bundle(rest),
         Some("release") => changelog::release(rest),
         Some("release-notes") => changelog::release_notes(rest),
+        Some("cache") => cache::cache(rest),
         Some("related") => checks::related(),
         Some("features") => checks::features(),
         _ => {

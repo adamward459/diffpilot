@@ -9,4 +9,8 @@ checksum-freshness = true
 xtask = "run -q -p xtask --"
 
 [profile.dev.package."*"]
-debug = "line-tables-only"
+debug = false
+
+[profile.dev]
+# macOS defaults to "unpacked", where rustc keeps the object files of every rebuild of a crate (~100 MB per rebuild of the app).
+split-debuginfo = "off"
