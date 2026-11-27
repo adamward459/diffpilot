@@ -2,6 +2,7 @@ use super::model::{
     MenuItem, MenuRow, MenuSection, SEPARATOR_HEIGHT, Slot, SlotKind, TITLE_HEIGHT, jump, layout, step,
 };
 use crate::components::interaction::DISABLED_OPACITY;
+use crate::components::popover::arrow_frame;
 use crate::components::{
     OVERLAY_DETAIL_TEXT, OVERLAY_PADDING as PADDING, OVERLAY_ROW_HEIGHT as ROW_HEIGHT, OVERLAY_ROW_PADDING,
     OVERLAY_ROW_RADIUS, OVERLAY_TEXT, glass_panel, open_motion,
@@ -30,6 +31,7 @@ pub struct Menu {
     min_width: Pixels,
     max_height: Pixels,
     opens_below: bool,
+    arrow: Option<Rc<Cell<Option<Bounds<Pixels>>>>>,
     bounds: Rc<Cell<Bounds<Pixels>>>,
 }
 
@@ -62,6 +64,7 @@ impl Menu {
             min_width: px(180.),
             max_height: px(520.),
             opens_below: true,
+            arrow: None,
             bounds: Rc::default(),
         }
     }
@@ -73,6 +76,11 @@ impl Menu {
 
     pub fn opens_below(mut self, below: bool) -> Self {
         self.opens_below = below;
+        self
+    }
+
+    pub fn arrow(mut self, trigger: Rc<Cell<Option<Bounds<Pixels>>>>) -> Self {
+        self.arrow = Some(trigger);
         self
     }
 
@@ -440,7 +448,10 @@ impl Render for Menu {
             .on_key_down(cx.listener(Self::key_down))
             .on_mouse_down_out(cx.listener(Self::mouse_down_out))
             .child(open_motion(
-                div().child(panel),
+                match &self.arrow {
+                    Some(trigger) => arrow_frame(panel, self.opens_below, trigger.clone()),
+                    None => div().child(panel),
+                },
                 ElementId::Name(format!("{}:open", self.id).into()),
                 self.opens_below,
             ))

@@ -2,11 +2,12 @@ use super::model::{MenuSection, OnSelect};
 use super::view::Menu;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Corner, DismissEvent, ElementId, Entity, Focusable, IntoElement, Pixels, Point, RenderOnce,
-    SharedString, Window, anchored, deferred, div, px,
+    AnyElement, App, Bounds, Corner, DismissEvent, ElementId, Entity, Focusable, IntoElement, Pixels, Point,
+    RenderOnce, SharedString, Window, anchored, canvas, deferred, div, px,
 };
 use gpui_component::Selectable;
 use gpui_component::popover::Popover;
+use std::cell::Cell;
 use std::rc::Rc;
 
 type Build = Rc<dyn Fn(&mut Window, &mut App) -> Vec<MenuSection>>;
@@ -26,6 +27,7 @@ pub fn menu_button(
         min_width: px(180.),
         build: Rc::new(build),
         on_open_change: None,
+        arrow: false,
     }
 }
 
@@ -37,9 +39,15 @@ pub struct MenuButton {
     min_width: Pixels,
     build: Build,
     on_open_change: Option<OnOpenChange>,
+    arrow: bool,
 }
 
 impl MenuButton {
+    pub fn arrow(mut self) -> Self {
+        self.arrow = true;
+        self
+    }
+
     pub fn anchor(mut self, anchor: Corner) -> Self {
         self.anchor = anchor;
         self
@@ -85,7 +93,15 @@ impl RenderOnce for MenuButton {
         let (id, build, min_width) = (self.id.clone(), self.build.clone(), self.min_width);
         let below = matches!(self.anchor, Corner::TopLeft | Corner::TopRight);
         let content_menu = open_menu.clone();
-        Popover::new(ElementId::Name(format!("{}:popover", self.id).into()))
+        let arrow_bounds = self.arrow.then(|| {
+            window
+                .use_keyed_state(ElementId::Name(format!("{}:trigger", self.id).into()), cx, |_, _| {
+                    Rc::new(Cell::new(None::<Bounds<Pixels>>))
+                })
+                .read(cx)
+                .clone()
+        });
+        let popover = Popover::new(ElementId::Name(format!("{}:popover", self.id).into()))
             .appearance(false)
             .overlay_closable(false)
             .anchor(self.anchor)
@@ -101,28 +117,47 @@ impl RenderOnce for MenuButton {
                     }
                 }
             })
-            .content(move |_, window, cx| {
-                let sections = build(window, cx);
-                if let Some(menu) = content_menu.read(cx).clone() {
-                    menu.update(cx, |menu, cx| menu.set_sections(sections, cx));
-                    return menu;
+            .content({
+                let arrow_bounds = arrow_bounds.clone();
+                move |_, window, cx| {
+                    let sections = build(window, cx);
+                    if let Some(menu) = content_menu.read(cx).clone() {
+                        menu.update(cx, |menu, cx| menu.set_sections(sections, cx));
+                        return menu;
+                    }
+                    let menu = cx.new(|cx| {
+                        let menu = Menu::new(id.clone(), sections, cx)
+                            .min_width(min_width)
+                            .opens_below(below);
+                        match &arrow_bounds {
+                            Some(trigger) => menu.arrow(trigger.clone()),
+                            None => menu,
+                        }
+                    });
+                    menu.focus_handle(cx).focus(window);
+                    let popover = cx.entity();
+                    window
+                        .subscribe(&menu, cx, move |_, _: &DismissEvent, window, cx| {
+                            popover.update(cx, |popover, cx| popover.dismiss(window, cx));
+                            window.refresh();
+                        })
+                        .detach();
+                    content_menu.update(cx, |slot, _| *slot = Some(menu.clone()));
+                    menu
                 }
-                let menu = cx.new(|cx| {
-                    Menu::new(id.clone(), sections, cx)
-                        .min_width(min_width)
-                        .opens_below(below)
-                });
-                menu.focus_handle(cx).focus(window);
-                let popover = cx.entity();
-                window
-                    .subscribe(&menu, cx, move |_, _: &DismissEvent, window, cx| {
-                        popover.update(cx, |popover, cx| popover.dismiss(window, cx));
-                        window.refresh();
-                    })
-                    .detach();
-                content_menu.update(cx, |slot, _| *slot = Some(menu.clone()));
-                menu
-            })
+            });
+        match arrow_bounds {
+            Some(bounds) => div()
+                .relative()
+                .child(popover)
+                .child(
+                    canvas(move |area, _, _| bounds.set(Some(area)), |_, _, _, _| {})
+                        .absolute()
+                        .size_full(),
+                )
+                .into_any_element(),
+            None => popover.into_any_element(),
+        }
     }
 }
 

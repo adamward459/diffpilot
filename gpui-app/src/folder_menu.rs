@@ -247,6 +247,7 @@ impl Render for FolderMenu {
             vec![MenuSection::new(folders), MenuSection::new(vec![add.into()])]
         })
         .min_width(MENU_WIDTH)
+        .arrow()
         .on_open_change(move |open, _, cx| {
             if open {
                 refresh.update(cx, |menu, cx| menu.refresh(cx)).ok();

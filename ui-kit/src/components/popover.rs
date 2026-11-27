@@ -3,7 +3,7 @@ use crate::icons::Glyph;
 use crate::theme::Theme;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Bounds, Context, Corner, ElementId, IntoElement, Pixels, RenderOnce, SharedString,
+    AnyElement, App, Bounds, Context, Corner, Div, ElementId, IntoElement, Pixels, RenderOnce, SharedString,
     TransformationMatrix, Window, canvas, div, point, px, radians, size,
 };
 use gpui_component::popover::{Popover, PopoverState};
@@ -96,6 +96,18 @@ fn frame(
     trigger: Rc<Cell<Option<Bounds<Pixels>>>>,
     cx: &App,
 ) -> AnyElement {
+    let theme = Theme::of(cx);
+    let panel = glass_panel(&theme).child(v_flex().p_3().child(body));
+    open_motion(
+        arrow_frame(panel, below, trigger),
+        ElementId::Name(format!("{id}:open").into()),
+        below,
+    )
+    .into_any_element()
+}
+
+/// Pads `panel` on the arrow side and paints the arrow at the trigger's center.
+pub(crate) fn arrow_frame(panel: impl IntoElement, below: bool, trigger: Rc<Cell<Option<Bounds<Pixels>>>>) -> Div {
     let arrow = canvas(
         |_, _, _| {},
         move |bounds, _, window, cx| {
@@ -109,8 +121,7 @@ fn frame(
     .right_0()
     .h(px(ARROW_HEIGHT + 1.))
     .map(|this| if below { this.top_0() } else { this.bottom_0() });
-    let theme = Theme::of(cx);
-    let framed = div()
+    div()
         .relative()
         .map(|this| {
             if below {
@@ -119,9 +130,8 @@ fn frame(
                 this.pb(px(ARROW_HEIGHT))
             }
         })
-        .child(glass_panel(&theme).child(v_flex().p_3().child(body)))
-        .child(arrow);
-    open_motion(framed, ElementId::Name(format!("{id}:open").into()), below).into_any_element()
+        .child(panel)
+        .child(arrow)
 }
 
 fn paint_arrow(window: &mut Window, bounds: Bounds<Pixels>, trigger: Bounds<Pixels>, below: bool, cx: &App) {

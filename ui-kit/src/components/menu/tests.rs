@@ -74,6 +74,7 @@ fn typing_a_letter_jumps_to_the_next_row_that_starts_with_it() {
 
 struct Harness {
     picked: Rc<RefCell<Vec<String>>>,
+    arrow: bool,
 }
 
 impl Render for Harness {
@@ -89,6 +90,7 @@ impl Render for Harness {
             .w(px(80.))
             .h(px(24.))
             .child("Open");
+        let arrow = self.arrow;
         div().size_full().p(px(20.)).child(
             menu_button("m", trigger, move |_, _| {
                 let branches = (0..5).map(|ix| pick(format!("b{ix}"))).collect();
@@ -105,7 +107,8 @@ impl Render for Harness {
                     MenuSection::new(long),
                 ]
             })
-            .min_width(200.),
+            .min_width(200.)
+            .when(arrow, MenuButton::arrow),
         )
     }
 }
@@ -116,10 +119,17 @@ struct Rig {
 }
 
 fn rig(cx: &mut TestAppContext) -> (Rig, &mut VisualTestContext) {
+    rig_with(cx, false)
+}
+
+fn rig_with(cx: &mut TestAppContext, arrow: bool) -> (Rig, &mut VisualTestContext) {
     cx.update(crate::init);
     let picked = Rc::new(RefCell::new(Vec::new()));
     let handle = cx.add_window(|window, cx| {
-        let harness = cx.new(|_| Harness { picked: picked.clone() });
+        let harness = cx.new(|_| Harness {
+            picked: picked.clone(),
+            arrow,
+        });
         gpui_component::Root::new(harness, window, cx)
     });
     let root = handle.root(cx).unwrap();
@@ -226,4 +236,12 @@ async fn escape_and_a_click_outside_close_without_picking(cx: &mut TestAppContex
     rig.settle(cx);
     rig.click(cx, "m:Item 0");
     assert!(rig.picked().is_empty());
+}
+
+#[gpui::test]
+async fn a_menu_with_an_arrow_opens_and_picks_a_row(cx: &mut TestAppContext) {
+    let (rig, cx) = rig_with(cx, true);
+    rig.click(cx, "open");
+    rig.click(cx, "m:Item 3");
+    assert_eq!(rig.picked(), vec!["Item 3"]);
 }

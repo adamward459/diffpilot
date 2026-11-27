@@ -47,7 +47,8 @@ pub fn comparison_control(
                     sections
                 },
             )
-            .min_width(230.),
+            .min_width(230.)
+            .arrow(),
         )
         .when(!compact, |this| {
             this.child(
@@ -69,7 +70,8 @@ pub fn comparison_control(
                 ),
                 move |_, _| menu_sections(&base_sections, &base_select),
             )
-            .min_width(230.),
+            .min_width(230.)
+            .arrow(),
         )
 }
 
