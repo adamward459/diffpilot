@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ### Added
 
+- Settings now show the app version at the bottom of the section list.
 - The Commit… button in the bottom bar now opens a message box and commits all uncommitted changes.
 - Generate in the commit box asks Claude to write the commit message from your uncommitted changes. You can edit it before you commit, and the run shows in the Claude area.
 - Send to Claude in the comment box (also ⌘⇧↩) posts your comment and asks Claude to fix just that thread.

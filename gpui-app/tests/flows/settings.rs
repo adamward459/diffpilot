@@ -55,6 +55,21 @@ fn settings_open_as_a_dialog_over_the_app_and_a_click_outside_closes_it(app: &mu
     );
 }
 
+#[gpui::test]
+fn settings_show_the_app_version_even_when_search_matches_nothing(app: &mut TestAppContext) {
+    let settings = Arc::new(Settings::in_memory());
+    let cx = open_settings(app, None, settings, Section::General);
+    let version = format!("settings:version:{}", env!("CARGO_PKG_VERSION"));
+    assert!(
+        shows(cx, &version),
+        "the version shows at the bottom of the section list"
+    );
+
+    type_text(cx, "zzzznomatch");
+    assert!(shows(cx, "settings:shows:"), "no section matches the search");
+    assert!(shows(cx, &version), "the version stays when the list is empty");
+}
+
 fn opens_after(app: &mut TestAppContext, steps: impl FnOnce(&mut VisualTestContext)) {
     let (_dir, repo) = fixture_named("alpha");
     let settings = Arc::new(Settings::in_memory());

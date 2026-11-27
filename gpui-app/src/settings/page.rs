@@ -593,7 +593,17 @@ impl Render for SettingsPage {
                             .pl(px(12.))
                             .pr(px(8.))
                             .pt(px(4.))
-                            .children(toc),
+                            .children(toc)
+                            .child(div().flex_1())
+                            .child(tag(
+                                div()
+                                    .px(px(10.))
+                                    .pb(px(16.))
+                                    .text_size(px(12.))
+                                    .text_color(t.ui.muted)
+                                    .child(format!("Version {}", env!("CARGO_PKG_VERSION"))),
+                                || format!("settings:version:{}", env!("CARGO_PKG_VERSION")),
+                            )),
                     )
                     .child(tag(
                         div()
