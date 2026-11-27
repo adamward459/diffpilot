@@ -1,4 +1,4 @@
-use crate::diff_pane::highlight::{Piece, Span, chunk_pieces, pieces};
+use crate::diff_pane::highlight::{Piece, Span, chunk_pieces, display_len, pieces, source_offset};
 use crate::diff_pane::layout::{CODE_PADDING, LINE, NUMBER_COLUMN, RIBBON, SPLIT_DIVIDER, wrap_ranges};
 use crate::diff_pane::word::{pair_lines, word_ranges};
 use diffpilot_core::diff::{DiffLine, Hunk, LineKind};
@@ -77,6 +77,13 @@ pub struct LineRequest<'a> {
     pub y: f32,
     pub height: f32,
     pub column: Column,
+    pub selected: Option<Range<usize>>,
+}
+
+pub struct Mark {
+    pub chunk: usize,
+    pub x: Pixels,
+    pub width: Pixels,
 }
 
 pub struct PaintLine {
@@ -86,6 +93,7 @@ pub struct PaintLine {
     pub kind: LineKind,
     pub numbers: [Option<ShapedLine>; 2],
     pub chunks: Vec<(usize, ShapedLine)>,
+    pub marks: Vec<Mark>,
 }
 
 pub struct PaintFiller {
@@ -143,6 +151,7 @@ impl LineCache {
             y,
             height,
             column,
+            selected,
         } = request;
         let line = &hunk.lines[key.line as usize];
         let prepared = self.map.entry(key).or_insert_with(|| {
@@ -155,6 +164,7 @@ impl LineCache {
         });
         prepared.last_used = self.frame;
         let mut chunks = Vec::new();
+        let mut marks = Vec::new();
         for index in 0..prepared.ranges.len() {
             let top = y + index as f32 * LINE;
             if top + LINE <= 0.0 || top >= viewport {
@@ -165,6 +175,20 @@ impl LineCache {
                 prepared.chunks[index] = Some(shaped);
             }
             if let Some(shaped) = &prepared.chunks[index] {
+                let range = &prepared.ranges[index];
+                let marked = selected
+                    .as_ref()
+                    .map(|selected| selected.start.max(range.start)..selected.end.min(range.end))
+                    .filter(|marked| marked.start < marked.end);
+                if let Some(marked) = marked {
+                    let before = |end: usize| display_len(&line.text[range.start..end]);
+                    let x = shaped.x_for_index(before(marked.start));
+                    marks.push(Mark {
+                        chunk: index,
+                        x,
+                        width: shaped.x_for_index(before(marked.end)) - x,
+                    });
+                }
                 chunks.push((index, shaped.clone()));
             }
         }
@@ -180,7 +204,18 @@ impl LineCache {
             kind: line.kind,
             numbers,
             chunks,
+            marks,
         }
+    }
+
+    /// The byte of the line under `x`, measured from the left edge of its code. `None` before the line is painted.
+    pub fn byte_at(&self, key: LineKey, text: &str, chunk: usize, x: Pixels) -> Option<usize> {
+        let prepared = self.map.get(&key)?;
+        let chunk = chunk.min(prepared.ranges.len() - 1);
+        let range = &prepared.ranges[chunk];
+        let shaped = prepared.chunks[chunk].as_ref()?;
+        let within = &text[range.clone()];
+        Some(range.start + source_offset(within, shaped.closest_index_for_x(x)))
     }
 }
 
@@ -358,6 +393,13 @@ pub fn paint(frame: &Frame, bounds: Bounds<Pixels>, window: &mut Window, cx: &mu
             );
             window.with_content_mask(Some(ContentMask { bounds: clip }), |window| {
                 let left = code + px(CODE_PADDING - frame.scroll_x);
+                for mark in &line.marks {
+                    let origin = point(left + mark.x, top + px(mark.chunk as f32 * LINE));
+                    window.paint_quad(fill(
+                        Bounds::new(origin, size(mark.width, line_height)),
+                        theme.accent.opacity(0.40),
+                    ));
+                }
                 for (index, shaped) in &line.chunks {
                     shaped
                         .paint(point(left, top + px(*index as f32 * LINE)), line_height, window, cx)

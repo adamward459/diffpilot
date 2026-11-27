@@ -353,13 +353,62 @@ pub fn hover(cx: &mut VisualTestContext, selector: &str) {
     draw(cx);
 }
 
-pub fn drag_below(cx: &mut VisualTestContext, selector: &str, from: f32, to: f32) {
+fn below(bounds: Bounds<Pixels>, (dx, dy): (f32, f32)) -> gpui::Point<Pixels> {
+    gpui::point(bounds.left() + gpui::px(dx), bounds.bottom() + gpui::px(dy))
+}
+
+/// Clicks `count` times at `(dx, dy)` from the left edge and bottom of the tagged element.
+pub fn click_below(cx: &mut VisualTestContext, selector: &str, at: (f32, f32), count: usize) {
     let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
-    let at = |dy: f32| gpui::point(bounds.center().x, bounds.bottom() + gpui::px(dy));
-    cx.simulate_mouse_down(at(from), MouseButton::Left, Modifiers::default());
-    cx.simulate_mouse_move(at(to), MouseButton::Left, Modifiers::default());
-    cx.simulate_mouse_up(at(to), MouseButton::Left, Modifiers::default());
+    let position = below(bounds, at);
+    cx.simulate_mouse_move(position, None, Modifiers::default());
     draw(cx);
+    for click_count in 1..=count {
+        cx.simulate_event(gpui::MouseDownEvent {
+            position,
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count,
+            first_mouse: false,
+        });
+        cx.simulate_event(gpui::MouseUpEvent {
+            position,
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count,
+        });
+    }
+    draw(cx);
+}
+
+/// Presses at `from` and releases at `to`, both measured from the left edge and bottom of the tagged element.
+pub fn drag_below(cx: &mut VisualTestContext, selector: &str, from: (f32, f32), to: (f32, f32)) {
+    let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
+    let (from, to) = (below(bounds, from), below(bounds, to));
+    cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::default());
+    cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
+    cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    draw(cx);
+}
+
+pub fn git_output(dir: &Path, args: &[&str]) -> String {
+    let binary = diffpilot_core::git::binary().expect("git");
+    let output = Command::new(binary)
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .expect("run git");
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+pub fn wait_until(cx: &mut VisualTestContext, what: &str, mut done: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !done() {
+        assert!(std::time::Instant::now() < deadline, "{what} did not happen");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        draw(cx);
+    }
 }
 
 pub fn center_x(cx: &mut VisualTestContext, selector: &str) -> f32 {

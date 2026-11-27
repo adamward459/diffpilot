@@ -1,7 +1,7 @@
 mod runs;
 mod theme_data;
 
-pub use runs::{Piece, chunk_pieces, pieces};
+pub use runs::{Piece, chunk_pieces, display_len, pieces, source_offset};
 
 use diffpilot_core::diff::{FileDiff, LineKind};
 use diffpilot_core::threads::Side;

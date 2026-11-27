@@ -1,13 +1,16 @@
 use crate::diff_pane::chrome;
 use crate::diff_pane::highlight::{self, FileTokens};
 use crate::diff_pane::layout::{
-    FILE_HEADER, HUD, HUNK, LINE, NOTICE, NUMBER_COLUMN, SPLIT_DIVIDER, Sticky, ThreadFrame, column_width,
+    CODE_PADDING, FILE_HEADER, HUD, HUNK, LINE, NOTICE, NUMBER_COLUMN, RIBBON, SPLIT_DIVIDER, Sticky, ThreadFrame,
+    column_width,
 };
 use crate::diff_pane::lines::{
     self, CODE_SIZE, Column, Fonts, Frame, LineCache, LineKey, LineRequest, PaintFiller, Style, Thumb,
 };
 use crate::diff_pane::preview::{self, ImageMode, PreviewCard, PreviewEvent};
-use crate::diff_pane::rows::{BlockId, BlockSlot, Notice, Row, RowKind};
+use crate::diff_pane::rows::{BlockId, BlockSlot, Notice, RowKind};
+use crate::diff_pane::selection::{Extent, Selection, Spot, column_line, word_at};
+use crate::diff_pane::stage_lines;
 use crate::diff_pane::state::{Geometry, PaneState};
 use crate::guide::note::{NoteCard, NoteEvent};
 use crate::guide::text::CodeRef;
@@ -16,6 +19,7 @@ use diffpilot_core::changes::FileStatus;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{DiffMode, FileDiff, LineKind};
 use diffpilot_core::file_kind::file_kind;
+use diffpilot_core::stage::Action;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use diffpilot_ui_kit::Glyph;
 use diffpilot_ui_kit::Theme;
@@ -30,7 +34,7 @@ use gpui::{
     ParentElement as _, Pixels, Render, ScrollWheelEvent, SharedString, Stateful, StatefulInteractiveElement as _,
     StyleRefinement, Styled as _, Subscription, Window, canvas, div, font, px,
 };
-use gpui::{ClipboardItem, Point};
+use gpui::{ClipboardItem, FocusHandle, Point, actions};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -38,6 +42,16 @@ use std::sync::Arc;
 use std::time::Instant;
 
 const MAX_RUNNING_HIGHLIGHTS: usize = 3;
+const KEY_CONTEXT: &str = "DiffPane";
+
+actions!(diff_pane, [CopySelection, ClearSelection]);
+
+pub fn bind_keys(cx: &mut App) {
+    cx.bind_keys([
+        gpui::KeyBinding::new("cmd-c", CopySelection, Some(KEY_CONTEXT)),
+        gpui::KeyBinding::new("escape", ClearSelection, Some(KEY_CONTEXT)),
+    ]);
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DiffPaneEvent {
@@ -52,6 +66,8 @@ pub enum DiffPaneEvent {
     ShownMode(DiffMode),
     OpenRef(CodeRef),
     RevealInFinder(String),
+    /// A stage, unstage or discard changed the repository, so the diff is stale.
+    Changed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,36 +136,6 @@ struct Hovered {
     line: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Selection {
-    file: usize,
-    column: Column,
-    anchor: (u32, u32),
-    head: (u32, u32),
-    dragging: bool,
-    moved: bool,
-}
-
-impl Selection {
-    fn line(self, row: Row) -> Option<(u32, u32)> {
-        if row.file as usize != self.file {
-            return None;
-        }
-        let at = column_line(row.kind, self.column)?;
-        let (first, last) = (self.anchor.min(self.head), self.anchor.max(self.head));
-        (first..=last).contains(&at).then_some(at)
-    }
-}
-
-fn column_line(kind: RowKind, column: Column) -> Option<(u32, u32)> {
-    match (kind, column) {
-        (RowKind::Line { hunk, line }, Column::Unified) => Some((hunk, line)),
-        (RowKind::Pair { hunk, left, .. }, Column::Left) => Some((hunk, left?)),
-        (RowKind::Pair { hunk, right, .. }, Column::Right) => Some((hunk, right?)),
-        _ => None,
-    }
-}
-
 struct Card {
     view: Entity<ThreadCard>,
     _resized: Subscription,
@@ -194,6 +180,9 @@ pub struct DiffPane {
     last_scroll: Option<Instant>,
     line_menu: Option<LineMenu>,
     selection: Option<Selection>,
+    confirming: bool,
+    stage_error: Option<String>,
+    focus: FocusHandle,
     preview_source: Option<PreviewSource>,
     previews: HashMap<String, Preview>,
     pub probe: Probe,
@@ -257,6 +246,9 @@ impl DiffPane {
             last_scroll: None,
             line_menu: None,
             selection: None,
+            confirming: false,
+            stage_error: None,
+            focus: cx.focus_handle(),
             preview_source: None,
             previews: HashMap::new(),
             probe: Probe::default(),
@@ -661,21 +653,80 @@ impl DiffPane {
         }
     }
 
-    fn start_selection(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+    fn code_left(&self, column: Column) -> f32 {
+        let numbers = if column == Column::Unified { 2.0 } else { 1.0 };
+        self.column_span(column).0 + NUMBER_COLUMN * numbers + RIBBON + CODE_PADDING
+    }
+
+    fn line_key(&self, file: usize, column: Column, (hunk, line): (u32, u32)) -> LineKey {
+        let kind = self.state.files[file].hunks[hunk as usize].lines[line as usize].kind;
+        let tokens = tokens_of(self.highlights.get(file));
+        LineKey {
+            file: file as u32,
+            hunk,
+            line,
+            side: side_of(tokens, column, kind, hunk, line),
+        }
+    }
+
+    fn spot_at(&self, file: usize, column: Column, at: (u32, u32), row: usize, x: Pixels, y: Pixels) -> Spot {
+        let text = &self.state.files[file].hunks[at.0 as usize].lines[at.1 as usize].text;
+        let within = (self.state.scroll() + f32::from(y) - self.state.tops.top(row)).max(0.0);
+        let x = x - px(self.code_left(column) - self.state.scroll_x());
+        let key = self.line_key(file, column, at);
+        let byte = self.lines.byte_at(key, text, (within / LINE) as usize, x).unwrap_or(0);
+        Spot::at(at.0, at.1, byte)
+    }
+
+    fn start_selection(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let (x, y) = (event.position.x - self.origin.0, event.position.y - self.origin.1);
-        let cleared = self.selection.take().is_some_and(|selection| selection.moved);
-        if !self.under_sticky(y) {
-            self.selection = self.line_at(x, y).map(|hovered| Selection {
-                file: hovered.file,
-                column: hovered.column,
-                anchor: (hovered.hunk, hovered.line),
-                head: (hovered.hunk, hovered.line),
+        let cleared = self.selection.take().is_some();
+        self.confirming = false;
+        self.stage_error = None;
+        self.selection = self.selection_at(event.click_count, x, y);
+        if self.selection.is_some() {
+            window.focus(&self.focus);
+        }
+        if cleared || self.selection.is_some() {
+            cx.notify();
+        }
+    }
+
+    fn selection_at(&self, click_count: usize, x: Pixels, y: Pixels) -> Option<Selection> {
+        if self.under_sticky(y) {
+            let sticky = self.state.position()?.sticky?;
+            let hunk = sticky.hunk.filter(|_| f32::from(y) >= sticky.push + FILE_HEADER)?;
+            return Some(Selection::hunk(sticky.file as usize, hunk));
+        }
+        let row = self.state.tops.row_at(self.state.scroll() + f32::from(y))?;
+        if let RowKind::Hunk { hunk } = self.state.rows.rows[row].kind {
+            return Some(Selection::hunk(self.state.rows.rows[row].file as usize, hunk));
+        }
+        let hovered = self.line_at(x, y)?;
+        let (file, column, at) = (hovered.file, hovered.column, (hovered.hunk, hovered.line));
+        let numbers = if column == Column::Unified { 2.0 } else { 1.0 };
+        if f32::from(x) - self.column_span(column).0 < NUMBER_COLUMN * numbers + RIBBON {
+            return Some(Selection {
                 dragging: true,
-                moved: false,
+                ..Selection::line(file, column, at)
             });
         }
-        if cleared {
-            cx.notify();
+        let spot = self.spot_at(file, column, at, row, x, y);
+        match click_count {
+            1 => Some(Selection::caret(file, column, spot)),
+            2 => {
+                let text = &self.state.files[file].hunks[at.0 as usize].lines[at.1 as usize].text;
+                let word = word_at(text, spot.byte);
+                if word.is_empty() {
+                    return Some(Selection::line(file, column, at));
+                }
+                Some(Selection {
+                    head: Spot::at(at.0, at.1, word.end),
+                    dragging: false,
+                    ..Selection::caret(file, column, Spot::at(at.0, at.1, word.start))
+                })
+            }
+            _ => Some(Selection::line(file, column, at)),
         }
     }
 
@@ -687,17 +738,20 @@ impl DiffPane {
             self.end_selection(cx);
             return;
         }
-        let y = self.state.scroll() + f32::from(event.position.y - self.origin.1);
-        let Some(row) = self.state.tops.row_at(y).map(|index| self.state.rows.rows[index]) else {
+        let (x, y) = (event.position.x - self.origin.0, event.position.y - self.origin.1);
+        let Some(index) = self.state.tops.row_at(self.state.scroll() + f32::from(y)) else {
             return;
         };
-        let head = column_line(row.kind, selection.column).filter(|_| row.file as usize == selection.file);
-        if let Some(head) = head.filter(|head| *head != selection.head) {
-            self.selection = Some(Selection {
-                head,
-                moved: true,
-                ..selection
-            });
+        let row = self.state.rows.rows[index];
+        let Some(at) = column_line(row.kind, selection.column).filter(|_| row.file as usize == selection.file) else {
+            return;
+        };
+        let head = match selection.extent {
+            Extent::Chars => self.spot_at(selection.file, selection.column, at, index, x, y),
+            _ => Spot::at(at.0, at.1, 0),
+        };
+        if head != selection.head {
+            self.selection = Some(Selection { head, ..selection });
             cx.notify();
         }
     }
@@ -706,19 +760,65 @@ impl DiffPane {
         let Some(selection) = self.selection.filter(|selection| selection.dragging) else {
             return;
         };
-        self.selection = selection.moved.then_some(Selection {
-            dragging: false,
-            ..selection
+        self.selection = Some(if selection.is_caret() {
+            Selection::line(
+                selection.file,
+                selection.column,
+                (selection.anchor.hunk, selection.anchor.line),
+            )
+        } else {
+            Selection {
+                dragging: false,
+                ..selection
+            }
         });
         cx.notify();
     }
 
-    fn selected_lines(&self, selection: Selection) -> Vec<(u32, u32)> {
-        let rows = self.state.rows.file_range(selection.file).unwrap_or_default();
-        self.state.rows.rows[rows]
-            .iter()
-            .filter_map(|row| selection.line(*row))
-            .collect()
+    fn selection_text(&self, selection: Selection) -> String {
+        let file = &self.state.files[selection.file];
+        match selection.extent {
+            Extent::Hunk => hunk_patch(&file.hunks[selection.anchor.hunk as usize]),
+            _ => selection.text(file),
+        }
+    }
+
+    fn copy_selection(&mut self, cx: &mut Context<Self>) {
+        if let Some(selection) = self
+            .selection
+            .filter(|selection| !selection.dragging && !selection.is_caret())
+        {
+            cx.write_to_clipboard(ClipboardItem::new_string(self.selection_text(selection)));
+        }
+    }
+
+    fn act_on_selection(&mut self, action: Action, cx: &mut Context<Self>) {
+        let (Some(selection), Some(source)) = (self.selection, self.preview_source.clone()) else {
+            return;
+        };
+        self.confirming = false;
+        let file = self.state.files[selection.file].clone();
+        let selected = selection.lines(&file);
+        let task =
+            cx.background_spawn(
+                async move { stage_lines::run(&source.repo, &source.comparison, action, &file, &selected) },
+            );
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => {
+                        this.selection = None;
+                        this.stage_error = None;
+                        cx.emit(DiffPaneEvent::Changed);
+                    }
+                    Err(message) => this.stage_error = Some(message),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn hud(&self) -> Div {
@@ -737,20 +837,25 @@ impl DiffPane {
     }
 
     fn selection_hud(&self, selection: Selection, y: f32, cx: &mut Context<Self>) -> Stateful<Div> {
-        let lines = self.selected_lines(selection);
+        let file = &self.state.files[selection.file];
+        let lines = selection.lines(file);
         let (Some(&first), Some(&last)) = (lines.first(), lines.last()) else {
             return div().id("selection-hud");
         };
-        let file = &self.state.files[selection.file];
-        let text = lines
+        let changed = lines
             .iter()
-            .map(|&(hunk, line)| file.hunks[hunk as usize].lines[line as usize].text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
+            .filter(|&&(hunk, line)| file.hunks[hunk as usize].lines[line as usize].kind != LineKind::Context)
+            .count();
         let open = self.open_line(selection.file, first);
         let can_comment = self.review.is_some() && {
             let line = &file.hunks[last.0 as usize].lines[last.1 as usize];
             line.new.is_some() || line.kind == LineKind::Deleted
+        };
+        let blocked = match &self.preview_source {
+            Some(source) if source.comparison.includes_uncommitted() => {
+                (changed == 0).then_some("Select a changed line first")
+            }
+            _ => Some("This comparison has no uncommitted changes"),
         };
         let button = |id: &'static str, glyph: Glyph, label: &'static str| {
             Button::new(id)
@@ -759,20 +864,88 @@ impl DiffPane {
                 .icon(glyph, 12.0)
                 .h(px(26.0))
         };
+        let stage_button = |id: &'static str, glyph: Glyph, label: &'static str, tip: &'static str| {
+            button(id, glyph, label)
+                .disabled(blocked.is_some())
+                .tooltip(blocked.unwrap_or(tip))
+        };
         let (left, width) = self.column_span(selection.column);
         let right = self.state.geometry().width - left - width;
         let count = lines.len();
-        tag(self.hud().id("selection-hud"), || {
+        let mut bar = tag(self.hud().id("selection-hud"), || {
             format!("pane:selection-hud:{}:{count}", file.path)
         })
         .absolute()
         .top(px(y))
         .right(px(right + 8.0))
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
+        if let Some(message) = &self.stage_error {
+            bar = bar.child(
+                div()
+                    .px(px(6.0))
+                    .text_size(px(11.5))
+                    .text_color(self.theme.danger)
+                    .child(message.clone()),
+            );
+        }
+        if self.confirming {
+            let noun = if changed == 1 { "line" } else { "lines" };
+            return bar
+                .child(
+                    div()
+                        .px(px(6.0))
+                        .text_size(px(12.0))
+                        .child(format!("Discard {changed} changed {noun}?")),
+                )
+                .child(tag(
+                    button("selection-discard-confirm", Glyph::Undo2, "Discard").on_click(
+                        cx.listener(|this, _: &ClickEvent, _, cx| this.act_on_selection(Action::Discard, cx)),
+                    ),
+                    || "pane:selection-discard-confirm".to_string(),
+                ))
+                .child(tag(
+                    button("selection-discard-cancel", Glyph::X, "Cancel").on_click(cx.listener(
+                        |this, _: &ClickEvent, _, cx| {
+                            this.confirming = false;
+                            cx.notify();
+                        },
+                    )),
+                    || "pane:selection-discard-cancel".to_string(),
+                ));
+        }
+        bar.child(tag(
+            stage_button("selection-stage", Glyph::Plus, "Stage", "Stage the selected lines")
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.act_on_selection(Action::Stage, cx))),
+            || "pane:selection-stage".to_string(),
+        ))
         .child(tag(
-            button("selection-copy", Glyph::Copy, "Copy").on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))
+            stage_button(
+                "selection-unstage",
+                Glyph::Undo2,
+                "Unstage",
+                "Unstage the selected lines",
+            )
+            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.act_on_selection(Action::Unstage, cx))),
+            || "pane:selection-unstage".to_string(),
+        ))
+        .child(tag(
+            stage_button(
+                "selection-discard",
+                Glyph::X,
+                "Discard\u{2026}",
+                "Discard the selected changes",
+            )
+            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                this.confirming = true;
+                this.stage_error = None;
+                cx.notify();
             })),
+            || "pane:selection-discard".to_string(),
+        ))
+        .child(self.hud_separator())
+        .child(tag(
+            button("selection-copy", Glyph::Copy, "Copy")
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.copy_selection(cx))),
             || "pane:selection-copy".to_string(),
         ))
         .child(tag(
@@ -1045,6 +1218,7 @@ impl DiffPane {
         self.lines.begin_frame(&style);
         let scroll = self.state.scroll();
         let viewport = geometry.height;
+        let selection = self.selection;
         let mut painted = Vec::new();
         let mut fillers = Vec::new();
         for index in self.state.visible_rows() {
@@ -1063,12 +1237,12 @@ impl DiffPane {
                     }
                     continue;
                 };
-                let tokens = match self.highlights.get(row.file as usize) {
-                    Some(Highlight::Ready(tokens)) => Some(tokens),
-                    _ => None,
-                };
-                let differs = tokens.is_some_and(|tokens| tokens.old_context_differs(hunk as usize, line as usize));
-                let side = column.side(file.hunks[hunk as usize].lines[line as usize].kind, differs);
+                let tokens = tokens_of(self.highlights.get(row.file as usize));
+                let diff_line = &file.hunks[hunk as usize].lines[line as usize];
+                let side = side_of(tokens, column, diff_line.kind, hunk, line);
+                let selected = selection
+                    .filter(|selection| selection.file == row.file as usize && selection.column == column)
+                    .and_then(|selection| selection.chars_in(hunk, line, diff_line.text.len()));
                 let spans = tokens.map_or(&[][..], |tokens| tokens.line_on(side, hunk as usize, line as usize));
                 let request = LineRequest {
                     key: LineKey {
@@ -1082,6 +1256,7 @@ impl DiffPane {
                     y,
                     height,
                     column,
+                    selected,
                 };
                 painted.push(self.lines.line(&style, window, request, viewport));
             }
@@ -1383,61 +1558,10 @@ impl DiffPane {
         .anchor(gpui::Corner::TopRight)
     }
 
-    fn hunk_bar(&self, file: usize, hunk: usize, glass: Option<Hsla>, cx: &mut Context<Self>) -> Div {
+    fn hunk_bar(&self, file: usize, hunk: usize, glass: Option<Hsla>) -> Div {
         let theme = &self.theme;
         let source = &self.state.files[file].hunks[hunk];
-        let header = source.header.clone();
-        let patch = hunk_patch(source);
-        let key = file * 4096 + hunk;
-        let button = |id: &'static str, glyph: Glyph, label: &'static str| {
-            Button::new((id, key))
-                .label(label)
-                .look(Look::Ghost)
-                .icon(glyph, 12.0)
-                .h(px(26.0))
-        };
-        let file_diff = &self.state.files[file];
-        let (open_path, open_line) = (file_diff.path.clone(), source.first_new_line());
-        let separator = || self.hud_separator();
-        let hud = tag(self.hud().id(("hunk-hud", key)), || {
-            format!("pane:hunk-hud:{}:{hunk}", file_diff.path)
-        })
-        .invisible()
-        .group_hover("hunk-bar", |style| style.visible())
-        .absolute()
-        .right(px(8.0))
-        .top(px((HUNK - HUD) / 2.0))
-        .child(button("hunk-stage", Glyph::Check, "Stage Hunk").disabled(true))
-        .child(button("hunk-revert", Glyph::Undo2, "Revert\u{2026}").disabled(true))
-        .child(separator())
-        .child(
-            button("hunk-open", Glyph::ExternalLink, "Open in Editor")
-                .disabled(file_diff.status == FileStatus::Deleted)
-                .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                    cx.emit(DiffPaneEvent::OpenInEditor {
-                        path: open_path.clone(),
-                        line: open_line,
-                    })
-                })),
-        )
-        .child(tag(
-            button("hunk-copy", Glyph::Copy, "Copy").on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(patch.clone()))
-            })),
-            || format!("pane:hunk-copy:{}:{hunk}", file_diff.path),
-        ))
-        .child(separator())
-        .child(
-            Button::new(("hunk-ask", key))
-                .label("Ask Claude")
-                .look(Look::Ghost)
-                .icon_color(Glyph::Sparkles, 12.0, theme.ui.claude)
-                .h(px(26.0))
-                .disabled(true),
-        );
-        let bar = tag(div(), || format!("pane:hunk:{}:{hunk}", file_diff.path))
-            .group("hunk-bar")
-            .relative()
+        let bar = tag(div(), || format!("pane:hunk:{}:{hunk}", self.state.files[file].path))
             .flex()
             .items_center()
             .h(px(HUNK))
@@ -1448,8 +1572,7 @@ impl DiffPane {
             .font(self.fonts.mono.clone())
             .text_size(px(11.5))
             .text_color(theme.diff.muted)
-            .child(div().min_w_0().overflow_hidden().child(header))
-            .child(hud);
+            .child(div().min_w_0().overflow_hidden().child(source.header.clone()));
         match glass {
             Some(glass) => bar.border_b_1().border_color(theme.diff.line).bg(glass),
             None => bar.border_y_1().border_color(theme.diff.line).bg(theme.diff.hunk),
@@ -1591,7 +1714,7 @@ impl DiffPane {
         let glass = |center: f32| Some(self.theme.pinned_glass(self.backdrop(sticky.push + center)));
         group = group.child(self.file_header(file, glass(FILE_HEADER / 2.0), cx));
         if let Some(hunk) = sticky.hunk {
-            group = group.child(self.hunk_bar(file, hunk as usize, glass(FILE_HEADER + HUNK / 2.0), cx));
+            group = group.child(self.hunk_bar(file, hunk as usize, glass(FILE_HEADER + HUNK / 2.0)));
         }
         group
     }
@@ -1610,6 +1733,16 @@ impl Render for DiffPane {
         let scroll = self.state.scroll();
         let mut root = div()
             .id("diff-pane")
+            .key_context(KEY_CONTEXT)
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &CopySelection, _, cx| this.copy_selection(cx)))
+            .on_action(cx.listener(|this, _: &ClearSelection, _, cx| {
+                if this.selection.take().is_some() {
+                    this.confirming = false;
+                    this.stage_error = None;
+                    cx.notify();
+                }
+            }))
             .relative()
             .size_full()
             .overflow_hidden()
@@ -1634,11 +1767,11 @@ impl Render for DiffPane {
             )
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
                     if event.modifiers.platform {
                         this.open_from_gutter(event, cx);
                     } else {
-                        this.start_selection(event, cx);
+                        this.start_selection(event, window, cx);
                     }
                 }),
             )
@@ -1692,35 +1825,43 @@ impl Render for DiffPane {
                     None => continue,
                 },
                 RowKind::FileHeader => Self::placed(y, height).child(self.file_header(file, None, cx)),
-                RowKind::Hunk { hunk } => Self::placed(y, height).child(self.hunk_bar(file, hunk as usize, None, cx)),
+                RowKind::Hunk { hunk } => Self::placed(y, height).child(self.hunk_bar(file, hunk as usize, None)),
                 RowKind::Notice(notice) => Self::placed(y, height).child(self.notice(file, notice, cx)),
                 RowKind::Preview => Self::placed(y, height).child(self.preview_row(file, height)),
             };
             root = root.child(element);
         }
-        if let Some(selection) = self.selection.filter(|selection| selection.moved) {
+        if let Some(selection) = self.selection.filter(|selection| !selection.is_caret()) {
             let (left, width) = self.column_span(selection.column);
             let mut first = None;
             for index in self.state.visible_rows() {
-                if selection.line(self.state.rows.rows[index]).is_none() {
+                let row = self.state.rows.rows[index];
+                if !selection.covers(row) {
                     continue;
                 }
                 let y = self.state.tops.top(index) - scroll;
-                first.get_or_insert(y);
+                first.get_or_insert((y, matches!(row.kind, RowKind::Hunk { .. })));
+                if selection.extent == Extent::Chars {
+                    continue;
+                }
                 root = root.child(
                     Self::placed(y, self.state.tops.height(index))
                         .left(px(left))
                         .w(px(width))
-                        .bg(theme.accent.opacity(0.16)),
+                        .bg(theme.accent.opacity(0.24)),
                 );
             }
-            if let Some(y) = first.filter(|_| !selection.dragging) {
+            if let Some((y, on_header)) = first.filter(|_| !selection.dragging) {
                 let sticky = self.state.position().and_then(|position| position.sticky);
                 let floor = sticky.map_or(0.0, |sticky| {
                     sticky.push + FILE_HEADER + sticky.hunk.map_or(0.0, |_| HUNK)
                 });
-                let hud = self.selection_hud(selection, (y - HUD - 4.0).max(floor + 4.0), cx);
-                hud_layer = Some(hud);
+                let top = if on_header {
+                    y + (HUNK - HUD) / 2.0
+                } else {
+                    y - HUD - 4.0
+                };
+                hud_layer = Some(self.selection_hud(selection, top.max(floor + 4.0), cx));
             }
         }
         if let Some(hovered) = self
@@ -1749,6 +1890,18 @@ impl Render for DiffPane {
         }
         root
     }
+}
+
+fn tokens_of(highlight: Option<&Highlight>) -> Option<&Arc<FileTokens>> {
+    match highlight {
+        Some(Highlight::Ready(tokens)) => Some(tokens),
+        _ => None,
+    }
+}
+
+fn side_of(tokens: Option<&Arc<FileTokens>>, column: Column, kind: LineKind, hunk: u32, line: u32) -> Side {
+    let differs = tokens.is_some_and(|tokens| tokens.old_context_differs(hunk as usize, line as usize));
+    column.side(kind, differs)
 }
 
 fn hunk_patch(hunk: &diffpilot_core::diff::Hunk) -> String {

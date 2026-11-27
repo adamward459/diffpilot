@@ -76,6 +76,7 @@ pub fn init(cx: &mut App) {
         gpui::KeyBinding::new("[", PreviousChapter, Some("!Input")),
     ]);
     crate::sidebar::bind_keys(cx);
+    crate::diff_pane::bind_keys(cx);
     crate::review::init(cx);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.set_menus(vec![

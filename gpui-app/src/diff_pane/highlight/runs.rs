@@ -84,6 +84,24 @@ pub fn chunk_pieces(text: &str, range: Range<usize>, pieces: &[Piece]) -> (Strin
     (display, out)
 }
 
+/// How many bytes `text` takes once its tabs are widened.
+pub fn display_len(text: &str) -> usize {
+    text.len() + text.bytes().filter(|&byte| byte == b'\t').count() * (TAB.len() - 1)
+}
+
+/// The byte of `text` nearest to byte `display` of the widened text. A tab counts as one character.
+pub fn source_offset(text: &str, display: usize) -> usize {
+    let mut shown = 0;
+    for (index, ch) in text.char_indices() {
+        let width = if ch == '\t' { TAB.len() } else { ch.len_utf8() };
+        if display <= shown || (display - shown) * 2 < width {
+            return index;
+        }
+        shown += width;
+    }
+    text.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,5 +291,17 @@ mod tests {
         let (display, out) = chunk_pieces("", 0..0, &[]);
         assert!(display.is_empty());
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn display_and_source_offsets_agree_across_tabs() {
+        let text = "\tab\tc";
+        assert_eq!(display_len(text), 11);
+        assert_eq!(display_len(&text[..1]), 4);
+        for (display, source) in [(0, 0), (4, 1), (6, 3), (10, 4), (11, 5), (99, 5)] {
+            assert_eq!(source_offset(text, display), source, "display {display}");
+        }
+        assert_eq!(source_offset(text, 1), 0);
+        assert_eq!(source_offset(text, 3), 1);
     }
 }

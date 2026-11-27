@@ -553,6 +553,7 @@ impl RepoView {
                     DiffPaneEvent::ShownMode(_) => cx.notify(),
                     DiffPaneEvent::OpenRef(code) => this.open_ref(code, window, cx),
                     DiffPaneEvent::RevealInFinder(path) => cx.reveal_path(&this.repo.join(path)),
+                    DiffPaneEvent::Changed => this.start_load(window, cx),
                 },
             ),
         ];
