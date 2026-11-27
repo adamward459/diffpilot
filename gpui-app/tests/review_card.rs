@@ -117,6 +117,23 @@ async fn typing_in_a_draft_and_pressing_command_return_posts_and_asks_claude(cx:
 }
 
 #[gpui::test]
+async fn cancel_on_a_draft_deletes_it_instead_of_keeping_a_resolved_empty_thread(cx: &mut TestAppContext) {
+    let (f, card, cx) = card(cx, |f, cx| {
+        f.session.update(cx, |session, cx| {
+            session.create_thread(
+                ThreadAnchor::line("src/a.ts", diffpilot_core::threads::Side::New, 2),
+                cx,
+            )
+        })
+    });
+    let id = card.read_with(cx, |card, _| card.thread_id());
+    diffpilot::testing::click(cx, "thread:cancel:src/a.ts:2");
+    let session = f.session.read_with(cx, |session, _| session.session_id());
+    let stored = f.store.load_threads(session).unwrap().value;
+    assert!(stored.iter().all(|thread| thread.id != id), "{stored:?}");
+}
+
+#[gpui::test]
 async fn an_addressed_thread_gets_a_status_band_and_reopening_takes_it_away(cx: &mut TestAppContext) {
     let (f, card, cx) = card(cx, |f, cx| {
         let id = f.user_thread(cx);

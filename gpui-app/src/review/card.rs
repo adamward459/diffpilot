@@ -443,6 +443,11 @@ impl ThreadCard {
         self.session.update(cx, |session, cx| session.resolve_thread(id, cx));
     }
 
+    fn delete(&mut self, cx: &mut Context<Self>) {
+        let id = self.id;
+        self.session.update(cx, |session, cx| session.remove_thread(id, cx));
+    }
+
     fn reopen(&mut self, cx: &mut Context<Self>) {
         let id = self.id;
         self.session.update(cx, |session, cx| session.reopen_thread(id, cx));
@@ -481,6 +486,11 @@ impl ThreadCard {
         tag(Button::new((key, self.id.0 as usize)).label(label), || {
             format!("thread:{key}:{}", self.key)
         })
+    }
+
+    fn delete_button(&self, cx: &Context<Self>) -> Button {
+        self.button("Delete", "delete")
+            .on_click(cx.listener(|this, _, _, cx| this.delete(cx)))
     }
 
     fn ask_button(&self, busy: bool) -> Button {
@@ -677,7 +687,7 @@ impl ThreadCard {
                         .when(draft, |row| {
                             row.child(
                                 self.button("Cancel", "cancel")
-                                    .on_click(cx.listener(|this, _, _, cx| this.resolve(cx))),
+                                    .on_click(cx.listener(|this, _, _, cx| this.delete(cx))),
                             )
                         })
                         .when(has_text && !mention, |row| {
@@ -756,6 +766,7 @@ impl ThreadCard {
                             self.button("Resolve", "resolve")
                                 .on_click(cx.listener(|this, _, _, cx| this.resolve(cx))),
                         )
+                        .child(self.delete_button(cx))
                     })
                     .child(
                         icon_button(
@@ -851,7 +862,8 @@ impl ThreadCard {
                         .child(
                             self.button("Resolve", "resolve")
                                 .on_click(cx.listener(|this, _, _, cx| this.resolve(cx))),
-                        ),
+                        )
+                        .child(self.delete_button(cx)),
                 );
         card_shell(&theme, theme.ui.claude_border)
             .child(header)
@@ -926,6 +938,7 @@ impl ThreadCard {
                             self.button("Resolve", "resolve")
                                 .on_click(cx.listener(|this, _, _, cx| this.resolve(cx))),
                         )
+                        .child(self.delete_button(cx))
                     }),
             );
         card_shell(&theme, if claude { theme.ui.claude_border } else { theme.ui.line })

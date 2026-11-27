@@ -41,6 +41,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - Comment on file in a file header now opens a comment on that file.
 - The menu bar and shortcuts (Settings…, Open Folder…, ⌘, and the rest) no longer stop working after you hide the sidebar, open the Guide, or close a menu.
 - The Swipe and Onion Skin sliders on a changed image now follow the mouse until you let go, even when the pointer leaves the slider.
+- You can delete a comment thread again: each thread card has a Delete button. Cancel on a new comment now deletes it instead of keeping an empty resolved thread.
 
 ### Added
 

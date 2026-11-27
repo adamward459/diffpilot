@@ -17,5 +17,6 @@ mod flows {
     mod selection;
     mod settings;
     mod sidebar_keys;
+    mod threads;
     mod viewed;
 }
