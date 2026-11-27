@@ -118,6 +118,7 @@ fn precommit() -> Result {
         git(&add)?;
     }
     check_bin_paths()?;
+    check_paint_paths()?;
     flow_input::check()?;
     changelog::check()
 }
@@ -136,6 +137,31 @@ fn check_bin_paths() -> Result {
     Err(format!(
         "{}: read std::env::var(\"CARGO_BIN_EXE_<name>\") at run time instead of {pattern}<name>\")",
         hits.split_whitespace().collect::<Vec<_>>().join(", ")
+    )
+    .into())
+}
+
+// One path in a frame makes gpui's Metal renderer keep two window-sized path textures (one 4x MSAA): ~100 MB.
+const PATH_PAINTERS: &[&str] = &["gpui-app/src/guide/diagram/paint.rs"];
+
+fn check_paint_paths() -> Result {
+    let out = Command::new("git")
+        .args(["grep", "-l", "-F", "paint_path(", "--", "*.rs", ":!xtask"])
+        .current_dir(root())
+        .output()?;
+    let hits: Vec<_> = String::from_utf8(out.stdout)?
+        .lines()
+        .filter(|file| !PATH_PAINTERS.contains(file))
+        .map(str::to_owned)
+        .collect();
+    if hits.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "{}: window.paint_path costs ~100 MB of GPU memory per window. Draw icons as SVG glyphs \
+         (add a file to ui-kit/assets/icons and a Glyph, then use glyph_icon) and shapes with div borders. \
+         If paths are the only way, add the file to PATH_PAINTERS in xtask/src/main.rs.",
+        hits.join(", ")
     )
     .into())
 }
