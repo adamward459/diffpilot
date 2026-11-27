@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-27
+
 ### Added
 
 - A short app tour shows the main parts of the window the first time you open a folder. It dims the window and points at each part. Start it again from Help, Show Tour.
@@ -105,5 +107,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - The sidebar filter matches each word on its own, in any order, so a query like `diff pane` finds `diff_pane/view.rs`.
 - Quitting diffpilot now stops the Claude reviews, replies, and fixes that are still running. After a crash, the next launch stops the ones that were left behind.
 
-[Unreleased]: https://github.com/adamward459/diffpilot/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/adamward459/diffpilot/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/adamward459/diffpilot/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/adamward459/diffpilot/releases/tag/v0.1.0
