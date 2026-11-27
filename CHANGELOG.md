@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-27
+
 ### Added
 
 - Settings now show the app version at the bottom of the section list.
@@ -78,4 +80,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - The sidebar filter matches each word on its own, in any order, so a query like `diff pane` finds `diff_pane/view.rs`.
 - Quitting diffpilot now stops the Claude reviews, replies, and fixes that are still running. After a crash, the next launch stops the ones that were left behind.
 
-[Unreleased]: https://github.com/adamward459/diffpilot/commits/main
+[Unreleased]: https://github.com/adamward459/diffpilot/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/adamward459/diffpilot/releases/tag/v0.1.0
