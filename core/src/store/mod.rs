@@ -3,12 +3,14 @@
 //! The schema follows diffity's `review_sessions`, `threads` and `comments` tables (MIT, see
 //! THIRD_PARTY_NOTICES). A session is one review: repo + branch + base.
 
+mod data;
 mod guides;
 mod rows;
 mod runs;
 mod schema;
 mod viewed;
 
+pub use data::{BranchData, DataScope, RepoData};
 pub use guides::{GuideSummary, StoredGuide};
 pub use rows::{NewComment, NewThread, Written};
 

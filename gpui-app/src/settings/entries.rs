@@ -1,5 +1,5 @@
 use super::page::{Section, SettingsPage};
-use super::{accounts, claude_tab, general};
+use super::{accounts, claude_tab, data_tab, general};
 use diffpilot_ui_kit::Theme;
 use gpui::prelude::*;
 use gpui::{AnyElement, Context};
@@ -68,7 +68,18 @@ pub const ENTRIES: &[Entry] = &[
         keywords: "github token sign in sign out gh keychain account import",
         render: accounts_entry,
     },
+    Entry {
+        section: Section::Data,
+        title: "Stored data",
+        detail: "Threads, comments, runs, guides and viewed marks kept for each repo and branch.",
+        keywords: "delete clear remove storage database reset review history",
+        render: data_entry,
+    },
 ];
+
+fn data_entry(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) -> AnyElement {
+    data_tab::render(page, t, cx).into_any_element()
+}
 
 fn claude(page: &SettingsPage, t: &Theme, cx: &mut Context<SettingsPage>) -> AnyElement {
     claude_tab::render(page, t, cx).into_any_element()

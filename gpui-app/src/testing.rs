@@ -244,18 +244,29 @@ pub fn open_settings(
     settings: Arc<Settings>,
     section: Section,
 ) -> &'static mut VisualTestContext {
+    install_settings(cx, settings.clone());
+    let store = engine_store(cx);
+    let vcx = open_window(cx, folder, settings, store);
+    show_settings(vcx, section);
+    vcx
+}
+
+/// What ⌘, needs. The Data section lists the store that runs and threads use.
+pub fn install_settings(cx: &mut TestAppContext, settings: Arc<Settings>) {
     ready(cx);
     let services = Services {
         credentials: Credentials::new(Arc::new(MemoryStore::default()), Arc::new(NoGh)),
         http: Arc::new(Offline),
         host: "github.com".into(),
         mcp_server: None,
+        store: engine_store(cx),
     };
-    cx.update(|cx| settings::init(settings.clone(), services, cx));
-    let vcx = open_window(cx, folder, settings);
-    press(vcx, "cmd-,");
-    click(vcx, &format!("toc:{}", section.title()));
-    vcx
+    cx.update(|cx| settings::init(settings, services, cx));
+}
+
+pub fn show_settings(cx: &mut VisualTestContext, section: Section) {
+    press(cx, "cmd-,");
+    click(cx, &format!("toc:{}", section.title()));
 }
 
 pub fn open_workspace(
@@ -264,20 +275,18 @@ pub fn open_workspace(
     settings: Arc<Settings>,
 ) -> &'static mut VisualTestContext {
     ready(cx);
-    open_window(cx, Some(folder), settings)
+    let store = engine_store(cx);
+    open_window(cx, Some(folder), settings, store)
 }
 
 fn open_window(
     cx: &mut TestAppContext,
     folder: Option<&Path>,
     settings: Arc<Settings>,
+    review_store: Arc<Store>,
 ) -> &'static mut VisualTestContext {
     let folder = folder.map(Path::to_path_buf);
     let handle = cx.add_window(|window, cx| {
-        let review_store = cx.try_global::<Runs>().map_or_else(
-            || Arc::new(Store::open_in_memory().expect("an in-memory store opens")),
-            |runs| runs.engine().store().clone(),
-        );
         let workspace = cx.new(|cx| {
             Workspace::new(
                 settings,
@@ -769,6 +778,7 @@ pub fn install_github(cx: &mut TestAppContext, http: Arc<dyn Http>) {
         http,
         host: "github.com".into(),
         mcp_server: None,
+        store: Arc::new(Store::open_in_memory().expect("an in-memory store opens")),
     };
     cx.update(|cx| settings::init(Arc::new(Settings::in_memory()), services, cx));
 }

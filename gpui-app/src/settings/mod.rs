@@ -4,6 +4,7 @@
 mod accounts;
 mod appearance;
 mod claude_tab;
+mod data_tab;
 mod entries;
 mod general;
 mod page;

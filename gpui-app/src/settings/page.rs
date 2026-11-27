@@ -1,3 +1,4 @@
+use super::data_tab::Project;
 use super::entries::{self, ENTRIES};
 use super::{CloseSettings, KEY_CONTEXT, general};
 use diffpilot_core::connection::{self, ClaudeStatus, McpState};
@@ -7,6 +8,7 @@ use diffpilot_core::github::client::AuthStatus;
 use diffpilot_core::github::http::{Http, UreqHttp};
 use diffpilot_core::github::{Github, GithubError};
 use diffpilot_core::settings::Settings;
+use diffpilot_core::store::{DataScope, Store};
 use diffpilot_ui_kit::components::{filter_field, glyph_icon, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::prelude::*;
@@ -16,6 +18,7 @@ use gpui::{
 };
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::{ActiveTheme, Sizable};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -27,16 +30,18 @@ pub enum Section {
     Claude,
     Accounts,
     KeyBindings,
+    Data,
 }
 
 impl Section {
-    pub const ALL: [Section; 6] = [
+    pub const ALL: [Section; 7] = [
         Section::General,
         Section::Appearance,
         Section::Diff,
         Section::Claude,
         Section::Accounts,
         Section::KeyBindings,
+        Section::Data,
     ];
 
     pub fn title(self) -> &'static str {
@@ -47,6 +52,7 @@ impl Section {
             Self::Claude => "Claude",
             Self::Accounts => "Accounts",
             Self::KeyBindings => "Key Bindings",
+            Self::Data => "Data",
         }
     }
 
@@ -58,6 +64,7 @@ impl Section {
             Self::Claude => Glyph::Sparkles,
             Self::Accounts => Glyph::Users,
             Self::KeyBindings => Glyph::Keyboard,
+            Self::Data => Glyph::Database,
         }
     }
 
@@ -112,15 +119,17 @@ pub struct Services {
     pub http: Arc<dyn Http>,
     pub host: String,
     pub mcp_server: Option<PathBuf>,
+    pub store: Arc<Store>,
 }
 
 impl Services {
-    pub fn system() -> Self {
+    pub fn system(store: Arc<Store>) -> Self {
         Self {
             credentials: Credentials::system(),
             http: Arc::new(UreqHttp::new()),
             host: "github.com".into(),
             mcp_server: None,
+            store,
         }
     }
 
@@ -131,7 +140,7 @@ impl Services {
 
 pub struct SettingsPage {
     pub(super) settings: Arc<Settings>,
-    services: Services,
+    pub(super) services: Services,
     pub(super) search: Entity<InputState>,
     pub(super) scroll: ScrollHandle,
     scroll_target: Option<Section>,
@@ -144,6 +153,10 @@ pub struct SettingsPage {
     pub(super) token: Entity<InputState>,
     pub(super) custom_editor: Entity<InputState>,
     pub(super) detected_editor: Editor,
+    pub(super) data: Load<Vec<Project>>,
+    pub(super) data_open: HashSet<String>,
+    pub(super) data_confirm: Option<DataScope>,
+    pub(super) data_op: Op,
     claude_epoch: u64,
     _subscriptions: Vec<Subscription>,
 }
@@ -206,6 +219,10 @@ impl SettingsPage {
             token,
             custom_editor,
             detected_editor: editor::detect(),
+            data: Load::Idle,
+            data_open: HashSet::new(),
+            data_confirm: None,
+            data_op: Op::Idle,
             claude_epoch: 0,
             _subscriptions: subscriptions,
         };
@@ -213,6 +230,7 @@ impl SettingsPage {
             .detach();
         this.refresh_claude(cx);
         this.refresh_github(cx);
+        this.refresh_data(cx);
         this.focus_search(window, cx);
         this
     }
@@ -447,6 +465,7 @@ impl SettingsPage {
 
 pub enum PageEvent {
     Close,
+    DataDeleted(DataScope),
 }
 
 impl EventEmitter<PageEvent> for SettingsPage {}

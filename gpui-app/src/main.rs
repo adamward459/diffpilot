@@ -41,7 +41,7 @@ fn main() {
         let settings = Arc::new(settings);
         let review_store = Arc::new(open_review_store(scripted));
         let viewed_store = Arc::new(ViewedStore::from_env(review_store.clone()));
-        settings::init(settings.clone(), settings::Services::system(), cx);
+        settings::init(settings.clone(), settings::Services::system(review_store.clone()), cx);
         if !scripted && let Some(dir) = app_support_dir().map(|dir| dir.join("claude-processes")) {
             std::thread::spawn(move || {
                 process_groups::reap_orphans(&dir);

@@ -306,11 +306,19 @@ pub const FEATURES: &[Feature] = &[
     },
     Feature {
         name: "settings",
-        paths: &["core/src/settings.rs", "gpui-app/src/settings/**"],
+        paths: &[
+            "core/src/settings.rs",
+            "core/src/store/data.rs",
+            "gpui-app/src/settings/**",
+        ],
         tests: &[
             Lib {
                 package: CORE,
                 module: "settings::",
+            },
+            Lib {
+                package: CORE,
+                module: "store::data::",
             },
             Lib {
                 package: APP,

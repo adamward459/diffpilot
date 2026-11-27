@@ -139,6 +139,7 @@ fn closed_rig<'a>(cx: &'a mut TestAppContext, options: &Options) -> (Rig, &'a mu
         http: Arc::new(FakeHttp::default()),
         host: "github.com".into(),
         mcp_server: Some(PathBuf::from(MCP_SERVER)),
+        store: Arc::new(Store::open_in_memory().unwrap()),
     };
     cx.update(|cx| {
         gpui_component::init(cx);

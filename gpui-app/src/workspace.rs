@@ -5,7 +5,7 @@ use crate::repo_view::{Nav, RepoView};
 use crate::settings::{self, OpenSettings, PageEvent, Section, SettingsPage};
 use diffpilot_core::diff::DiffMode;
 use diffpilot_core::settings::Settings;
-use diffpilot_core::store::Store;
+use diffpilot_core::store::{DataScope, Store};
 use diffpilot_core::viewed::ViewedStore;
 use diffpilot_ui_kit::Glyph;
 use gpui::prelude::*;
@@ -15,7 +15,7 @@ use gpui::{
 };
 use gpui_component::button::Button;
 use gpui_component::{ActiveTheme, Icon, Sizable, StyledExt, h_flex, v_flex};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 const MAX_LIVE_VIEWS: usize = 4;
@@ -177,16 +177,7 @@ impl Workspace {
                 self.views.insert(0, view);
             }
             None => {
-                let settings = self.settings.clone();
-                let viewed_store = self.viewed_store.clone();
-                let review_store = self.review_store.clone();
-                let menu = self.menu.clone();
-                let path = folder.clone();
-                let view = cx.new(|cx| {
-                    let mut view = RepoView::new(path, settings, viewed_store, review_store, window, cx);
-                    view.set_title(menu, cx);
-                    view
-                });
+                let view = self.new_view(&folder, window, cx);
                 self.views.insert(0, (folder.clone(), view));
                 self.evict_extra_views(cx);
             }
@@ -196,6 +187,30 @@ impl Workspace {
         }
         let folders = self.settings.folders();
         self.menu.update(cx, |menu, cx| menu.set_folders(folders, &folder, cx));
+        cx.notify();
+    }
+
+    fn new_view(&self, folder: &Path, window: &mut Window, cx: &mut Context<Self>) -> Entity<RepoView> {
+        let settings = self.settings.clone();
+        let viewed_store = self.viewed_store.clone();
+        let review_store = self.review_store.clone();
+        let menu = self.menu.clone();
+        let path = folder.to_path_buf();
+        cx.new(|cx| {
+            let mut view = RepoView::new(path, settings, viewed_store, review_store, window, cx);
+            view.set_title(menu, cx);
+            view
+        })
+    }
+
+    /// A view caches its session id and threads, so after their rows are deleted it starts over from the store.
+    fn rebuild_views(&mut self, scope: &DataScope, window: &mut Window, cx: &mut Context<Self>) {
+        for index in 0..self.views.len() {
+            let folder = self.views[index].0.clone();
+            if scope.touches_folder(&folder) {
+                self.views[index].1 = self.new_view(&folder, window, cx);
+            }
+        }
         cx.notify();
     }
 
@@ -252,6 +267,7 @@ impl Workspace {
         let page = cx.new(|cx| SettingsPage::new(settings, services, section.unwrap_or(Section::General), window, cx));
         let closing = cx.subscribe_in(&page, window, |this, _, event: &PageEvent, window, cx| match event {
             PageEvent::Close => this.close_settings(window, cx),
+            PageEvent::DataDeleted(scope) => this.rebuild_views(scope, window, cx),
         });
         self.settings_page = Some((page, closing));
         cx.notify();

@@ -53,6 +53,7 @@ glyphs! {
     Columns2 => "columns-2",
     Contrast => "contrast",
     Copy => "copy",
+    Database => "database",
     Ellipsis => "ellipsis",
     Eye => "eye",
     ExternalLink => "external-link",

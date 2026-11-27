@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - Drag over lines in the diff to select them. A floating bar lets you copy the code, open the first line in your editor, or comment on the last line.
 - Link folders outside the repo to a guide by path. Claude reads them for context and can list code there that the change may break.
 - Edit your own comments. Edit puts the text back in the comment box, and Save keeps the new text.
+- A Data tab in Settings lists the threads, runs, guides, and viewed marks stored for each repo and branch. Delete them per branch, per repo, or all at once.
 
 ### Changed
 

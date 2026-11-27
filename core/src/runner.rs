@@ -16,7 +16,7 @@ use crate::review::{ReviewModel, ReviewRequest};
 use crate::run::{Progress, Run, RunId, RunKind, RunOutcome, RunState, RunSummary};
 use crate::settings::app_support_dir;
 use crate::snapshot::{self, SnapshotError, UndoReport, Until};
-use crate::store::{GuideId, SessionId, SessionKey, Store, StoreError, now_ms};
+use crate::store::{DataScope, GuideId, SessionId, SessionKey, Store, StoreError, now_ms};
 use crate::stream::{self, LineBuffer, StreamEvent};
 use crate::threads::ThreadId;
 use std::collections::hash_map::Entry;
@@ -373,6 +373,23 @@ impl RunEngine {
             self.inner.finish(id, &Ending::Stopped);
         }
         queued
+    }
+
+    /// Stops every running or queued run of a review the scope covers, so none writes to rows about to be deleted.
+    pub fn stop_runs(&self, scope: &DataScope) {
+        let ids: Vec<RunId> = {
+            let state = self.inner.state.lock().unwrap();
+            state
+                .live
+                .values()
+                .filter(|live| matches!(live.run.state, RunState::Running | RunState::Queued))
+                .filter(|live| scope.covers(&live.request.session.repo, &live.request.session.branch))
+                .map(|live| live.run.id)
+                .collect()
+        };
+        for id in ids {
+            self.stop(id);
+        }
     }
 
     /// The run now going in `repo`, if any.

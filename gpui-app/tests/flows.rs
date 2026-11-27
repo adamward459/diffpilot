@@ -4,6 +4,7 @@ mod flows {
     mod claude_area;
     mod commit;
     mod comparison;
+    mod data;
     mod diff_mode;
     mod editor;
     mod file_menu;
