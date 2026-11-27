@@ -8,8 +8,8 @@ use gpui::{App, Bounds, ContentMask, Font, Hsla, Pixels, ShapedLine, TextRun, Wi
 use std::collections::HashMap;
 use std::ops::Range;
 
-pub const CODE_SIZE: f32 = 12.0;
-pub const NUMBER_SIZE: f32 = 11.0;
+pub const CODE_SIZE: f32 = 13.0;
+pub const NUMBER_SIZE: f32 = 12.0;
 const NUMBER_PADDING: f32 = 6.0;
 const MAX_UNWRAPPED_BYTES: usize = 4096;
 const MAX_CACHED_LINES: usize = 3000;

@@ -30,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 - The toolbar is regrouped. What you compare sits next to the folder name. Ask Claude and the comments button share one pill on the right, next to push and pull.
 - Every list and panel that scrolls shows a scrollbar while you scroll, like the diff: the Guide, the inspector, comments, settings, menus, checks, Claude's plan and log, and the Open Folder lists. Drag it to move fast.
+- Diff text, Markdown previews, and the file list use larger text: code is 13 px, preview body text is 14 px, and file names are 13 px.
 
 ### Fixed
 

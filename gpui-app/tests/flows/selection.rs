@@ -1,4 +1,4 @@
-use diffpilot::diff_pane::layout::GUTTER;
+use diffpilot::diff_pane::layout::{GUTTER, LINE};
 use diffpilot::testing::{
     click, click_below, clipboard, drag_below, fixture, git, git_output, open_repo, press, wait_until,
     wait_until_shows, write,
@@ -49,7 +49,7 @@ fn dragging_over_the_numbers_selects_lines_to_copy_and_open_the_first_one(app: &
     );
 }
 
-const CELL: f32 = 7.2;
+const CELL: f32 = 7.8;
 const SECOND_ROW: f32 = 30.0;
 
 fn open_edit(app: &mut TestAppContext) -> (tempfile::TempDir, &'static mut gpui::VisualTestContext) {
@@ -110,7 +110,7 @@ fn dragging_over_code_can_span_lines(app: &mut TestAppContext) {
         cx,
         "pane:hunk:base.txt:0",
         (code(12.0), SECOND_ROW),
-        (code(2.0), SECOND_ROW + 18.0),
+        (code(2.0), SECOND_ROW + LINE),
     );
     press(cx, "cmd-c");
     assert_eq!(clipboard(cx).as_deref(), Some("beta;\nmo"));

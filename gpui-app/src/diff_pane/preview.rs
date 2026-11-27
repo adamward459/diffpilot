@@ -32,10 +32,10 @@ const IMAGE_PAD: f32 = 8.0;
 const FALLBACK_BOX: f32 = 120.0;
 const LABEL: f32 = 22.0;
 const META: f32 = 24.0;
-const TEXT: f32 = diffpilot_ui_kit::text_size::BODY;
-const LINE: f32 = 20.0;
-const CODE: f32 = 12.0;
-const CODE_LINE: f32 = 18.0;
+const TEXT: f32 = diffpilot_ui_kit::text_size::TITLE;
+const LINE: f32 = 22.0;
+const CODE: f32 = 13.0;
+const CODE_LINE: f32 = 20.0;
 const BLOCK_GAP: f32 = 10.0;
 const MARK_INSET: f32 = 12.0;
 const MODE_GAP: f32 = 12.0;
@@ -732,10 +732,10 @@ fn block_view(block: &Block, theme: &Theme, fonts: &Fonts) -> AnyElement {
     match block {
         Block::Heading { level, text } => {
             let (size, line) = match level {
-                1 => (22.0, 28.0),
-                2 => (18.0, 24.0),
-                3 => (16.0, 22.0),
-                _ => (14.0, 20.0),
+                1 => (24.0, 30.0),
+                2 => (20.0, 26.0),
+                3 => (17.0, 24.0),
+                _ => (15.0, 22.0),
             };
             let color = if *level == 6 { theme.diff.muted } else { theme.diff.text };
             rich(text, theme, fonts, size, line, color, FontWeight::SEMIBOLD)
@@ -817,8 +817,8 @@ fn table(head: &[Rich], rows: &[Vec<Rich>], theme: &Theme, fonts: &Fonts) -> Any
                         cell,
                         theme,
                         fonts,
-                        diffpilot_ui_kit::text_size::SECONDARY,
-                        18.0,
+                        diffpilot_ui_kit::text_size::BODY,
+                        20.0,
                         theme.diff.text,
                         weight,
                     ))
