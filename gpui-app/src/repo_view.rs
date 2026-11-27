@@ -1353,24 +1353,19 @@ impl RepoView {
             ),
             _ => None,
         };
-        let pill = self.session.as_ref().map(|session| {
-            anchor(capsule(&tokens, CAPSULE_HEIGHT), Stop::Review)
-                .id("toolbar-claude-slot")
-                .px(px(6.))
-                .child(session.pill.clone())
-                .child(session.fix.clone())
-        });
-        let comments = self.session.as_ref().map(|session| {
+        let claude = self.session.as_ref().map(|session| {
             let open = open_count(session.review.read(cx));
             let icon = Icon::new(Glyph::MessageSquare)
                 .size(px(16.))
                 .text_color(tokens.ui.text2);
             let (hover, press) = (tokens.hover, tokens.press);
-            tag(
-                capsule(&tokens, CAPSULE_HEIGHT)
+            let comments = tag(
+                h_flex()
                     .id("toolbar-comments")
-                    .px(px(12.))
+                    .h_full()
+                    .px(px(10.))
                     .gap(px(6.))
+                    .rounded_full()
                     .cursor_pointer()
                     .when(self.comments_open(cx), |this| this.bg(press))
                     .hover(move |style| style.bg(hover))
@@ -1389,7 +1384,16 @@ impl RepoView {
                         )
                     })),
                 || "toolbar:comments",
-            )
+            );
+            anchor(capsule(&tokens, CAPSULE_HEIGHT), Stop::Review)
+                .id("toolbar-claude-slot")
+                .pl(px(6.))
+                .pr(px(2.))
+                .gap(px(4.))
+                .child(session.pill.clone())
+                .child(session.fix.clone())
+                .child(div().w(px(1.)).h(px(16.)).bg(tokens.ui.line))
+                .child(comments)
         });
         let activity = self
             .remote
@@ -1439,10 +1443,9 @@ impl RepoView {
                     }),
                 ),
         )
-        .children(pill)
-        .children(comments)
         .children(control)
         .child(div().flex_1())
+        .children(claude)
         .children(activity)
         .child(inspector)
         .into_any_element()
