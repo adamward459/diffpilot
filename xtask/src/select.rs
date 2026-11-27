@@ -180,9 +180,9 @@ mod tests {
 
     #[test]
     fn a_ui_kit_module_without_a_re_export_selects_its_app_users() {
-        let names = names("ui-kit/src/menu.rs");
+        let names = names("ui-kit/src/components/menu/view.rs");
         assert!(names.contains("app-shell"), "{names:?}");
-        assert!(!names.contains("guide"), "{names:?}");
+        assert!(!names.contains("claude-runs"), "{names:?}");
     }
 
     #[test]
