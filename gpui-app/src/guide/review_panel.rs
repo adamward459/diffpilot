@@ -1,10 +1,9 @@
 use crate::folder_menu::folder_name;
 use crate::guide::diagram::chapter_map;
 use crate::guide::diagram::focus::Focus;
-use crate::guide::inspector::{GuideInspector, InspectorEvent};
+use crate::guide::inspector::GuideInspector;
 use crate::guide::path::{self, Counts};
 use crate::guide::session::{GuideSession, Step};
-use crate::guide::text::CodeRef;
 use diffpilot_core::guide::{Note, StopKind};
 use diffpilot_ui_kit::components::{Ease, POP_DURATION, Transition, glyph_icon, icon_button, pop_scale, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
@@ -205,6 +204,7 @@ pub fn review_panel(
         return None;
     };
     let current = session.current_stop();
+    let open_file = session.open_file().map(str::to_string);
     let done = session.reviewed().clone();
     let reviewed = |note: usize| done.contains(&(written, note));
     let all_done = stops.all_done(reviewed);
@@ -311,24 +311,33 @@ pub fn review_panel(
             .gap_x(px(6.))
             .child("Not on the path:");
         for path in off {
-            let open = cx.entity();
-            let target = CodeRef {
-                path: path.clone(),
-                line: None,
-            };
+            let open = guide.clone();
+            let shown = open_file.as_deref() == Some(path.as_str());
             let name = path.rsplit('/').next().unwrap_or(&path).to_string();
             let id = path.clone();
+            let target = path.clone();
             files = files.child(
                 tag(
                     div().id(SharedString::from(format!("guide-off-path-{id}"))),
-                    move || format!("guide-off-path:{path}"),
+                    move || match shown {
+                        true => format!("guide-off-path-open:{path}"),
+                        false => format!("guide-off-path:{path}"),
+                    },
                 )
+                .px(px(4.))
+                .rounded(px(4.))
+                .border_1()
                 .cursor_pointer()
                 .font_family("Menlo")
                 .text_color(tokens.ui.claude)
-                .hover(|style| style.underline())
+                .map(|file| match shown {
+                    true => file.bg(tokens.ui.claude_bg).border_color(tokens.ui.claude_border),
+                    false => file
+                        .border_color(gpui::transparent_black())
+                        .hover(|style| style.underline()),
+                })
                 .child(SharedString::from(name))
-                .on_click(move |_, _, cx| open.update(cx, |_, cx| cx.emit(InspectorEvent::Open(target.clone())))),
+                .on_click(move |_, _, cx| open.update(cx, |guide, cx| guide.show_file(&target, cx))),
             );
         }
         top = top.child(

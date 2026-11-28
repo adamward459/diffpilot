@@ -505,11 +505,7 @@ impl RepoView {
                 window,
                 |this, _, event: &NavigatorEvent, window, cx| match event {
                     NavigatorEvent::Go(step) => this.go_to(*step, window, cx),
-                    NavigatorEvent::Reveal(path) => {
-                        if let Some(session) = &this.session {
-                            session.pane.update(cx, |pane, cx| pane.reveal(path, cx));
-                        }
-                    }
+                    NavigatorEvent::Reveal(path) => this.reveal_at(path, Side::New, None, window, cx),
                 },
             ),
             cx.subscribe_in(
@@ -981,11 +977,11 @@ impl RepoView {
         let Some(session) = &self.session else { return };
         let (filter, notes, linked) = if self.chapter_open(cx) {
             let guide = session.guide.read(cx);
-            (
-                guide.chapter().map(|chapter| chapter.files.clone()),
-                guide.pane_notes(),
-                guide.linked_stop(),
-            )
+            let files = match guide.open_file() {
+                Some(file) => Some(vec![file.to_string()]),
+                None => guide.chapter().map(|chapter| chapter.files.clone()),
+            };
+            (files, guide.pane_notes(), guide.linked_stop())
         } else {
             (None, Vec::new(), None)
         };
@@ -998,6 +994,13 @@ impl RepoView {
 
     fn reveal_stop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = &self.session else { return };
+        if let Some(file) = session.guide.read(cx).open_file().map(str::to_string) {
+            session.pane.update(cx, |pane, cx| {
+                pane.expand(&file, cx);
+                pane.reveal(&file, cx);
+            });
+            return;
+        }
         let current = session
             .guide
             .read(cx)
@@ -1028,8 +1031,12 @@ impl RepoView {
             .chapters
             .iter()
             .position(|chapter| chapter.files.iter().any(|file| file == path));
+        let leaves_file = guide.open_file().is_some_and(|file| file != path);
         let (pane, guide) = (session.pane.clone(), session.guide.clone());
-        if self.nav == Nav::Guide
+        if self.nav == Nav::Guide && here && leaves_file {
+            guide.update(cx, |guide, cx| guide.close_file(cx));
+            self.sync_guide(window, cx);
+        } else if self.nav == Nav::Guide
             && !here
             && let Some(index) = target
         {

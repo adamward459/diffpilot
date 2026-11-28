@@ -1316,6 +1316,12 @@ impl DiffPane {
         cx.notify();
     }
 
+    pub fn expand(&mut self, path: &str, cx: &mut Context<Self>) {
+        if self.state.collapsed.contains(path) {
+            self.toggle_collapsed(path, cx);
+        }
+    }
+
     fn toggle_collapsed(&mut self, path: &str, cx: &mut Context<Self>) {
         self.state.toggle_collapsed(path);
         self.sync(cx);

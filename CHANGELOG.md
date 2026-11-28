@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 ### Fixed
 
 - The guide overview no longer shows the Before and After text, chapter summaries, or other text one letter per line when the summary at the top runs over several lines.
+- In a guide chapter, clicking a file under "Not on the path" now shows that file on its own and marks it as the current item. Before, the click often did nothing. Click a stop to go back to the path.
 
 ## [0.2.1] - 2026-11-28
 
