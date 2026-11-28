@@ -5,7 +5,7 @@ use diffpilot::runs::Runs;
 use diffpilot::testing::{self, demo_guide, fixture, open_repo_in_workspace};
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::FileDiff;
-use diffpilot_core::guide::{Diagram, DiagramKind, Guide, Note, Span, StopKind};
+use diffpilot_core::guide::{ChapterFile, Diagram, DiagramKind, Guide, Note, Span, StopKind};
 use diffpilot_core::mcp::McpBridge;
 use diffpilot_core::review::ReviewModel;
 use diffpilot_core::run::RunKind;
@@ -54,7 +54,14 @@ echo '{{"type":"result","subtype":"success","is_error":false,"num_turns":1,"resu
 }
 
 fn open(cx: &mut TestAppContext, with_runs: bool) -> (World, &'static mut VisualTestContext) {
-    let repo = fixture();
+    open_in(cx, fixture(), with_runs)
+}
+
+fn open_in(
+    cx: &mut TestAppContext,
+    repo: tempfile::TempDir,
+    with_runs: bool,
+) -> (World, &'static mut VisualTestContext) {
     let work = tempfile::tempdir().unwrap();
     let store = Arc::new(Store::open_in_memory().unwrap());
     if with_runs {
@@ -1222,4 +1229,64 @@ fn a_linked_stop_whose_lines_changed_shows_the_file_with_a_moved_note(app: &mut 
     assert!(testing::shows(cx, "pane:linked-moved"));
     assert!(testing::shows(cx, "pane:linked-line:5"));
     assert!(testing::shows(cx, "pane:stop-card:2"));
+}
+
+const VOICE_FILES: [(&str, usize); 8] = [
+    ("shared/src/api-contract/upload.ts", 40),
+    ("shared/src/api-contract/common.ts", 12),
+    ("shared/src/models/error.ts", 8),
+    ("shared/src/constant.ts", 70),
+    ("shared/src/models/user-upload.ts", 200),
+    ("shared/src/models/upload-sentence.ts", 10),
+    ("shared/src/models/quota.ts", 6),
+    ("shared/src/models/ai-usage-total.ts", 6),
+];
+
+#[gpui::test]
+fn an_off_path_file_opens_on_its_own_from_the_start_or_the_end_of_a_long_chapter(app: &mut TestAppContext) {
+    let repo = fixture();
+    for (path, lines) in VOICE_FILES {
+        testing::write(
+            repo.path(),
+            path,
+            &format!("export const x = 1; // {path}\n").repeat(lines),
+        );
+    }
+    testing::git(repo.path(), &["add", "shared"]);
+    let (world, cx) = open_in(app, repo, false);
+    cx.simulate_resize(gpui::size(gpui::px(1300.), gpui::px(1100.)));
+    store_guide_with(&world, cx, |guide| {
+        read_stops(guide);
+        let chapter = &mut guide.chapters[0];
+        chapter.files = VOICE_FILES
+            .iter()
+            .map(|(path, _)| ChapterFile {
+                path: (*path).into(),
+                spans: vec![],
+            })
+            .collect();
+        let stops = [
+            ("shared/src/constant.ts", 56),
+            ("shared/src/models/user-upload.ts", 176),
+        ];
+        for (note, (path, line)) in chapter.notes.iter_mut().zip(stops) {
+            note.path = path.into();
+            let span = note.span.as_mut().unwrap();
+            span.line = line;
+            span.anchor_text = None;
+        }
+    });
+    show_guide(&world, cx);
+    click(cx, "guide-start-reading");
+    assert_eq!(top_file(&world, cx).1.as_deref(), Some("shared/src/constant.ts"));
+
+    testing::click(cx, "guide-off-path:shared/src/models/quota.ts");
+    assert_eq!(top_file(&world, cx), (0.0, Some("shared/src/models/quota.ts".into())));
+
+    testing::click(cx, "guide-off-path:shared/src/api-contract/upload.ts");
+    assert_eq!(
+        top_file(&world, cx),
+        (0.0, Some("shared/src/api-contract/upload.ts".into()))
+    );
+    assert_eq!(pane_paths(&world, cx), ["shared/src/api-contract/upload.ts"]);
 }
