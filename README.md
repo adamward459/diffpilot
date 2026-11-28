@@ -100,9 +100,10 @@ These environment variables help with testing:
 ## Release
 
 1. Write each change under `## [Unreleased]` in `CHANGELOG.md` as you make it. Keep each line at 250 characters or less.
-2. Run the **Release** workflow on `main`, from the Actions tab or with `gh workflow run release.yml -f version=X.Y.Z`.
+2. On a clean `main`, run `cargo xtask release X.Y.Z`. It moves the Unreleased notes into `## [X.Y.Z] - <date>`, updates the compare links, sets the version in `gpui-app/Cargo.toml` and `Cargo.lock`, commits `chore(release): vX.Y.Z`, and tags `vX.Y.Z`.
+3. Push the commit and the tag: `git push origin main vX.Y.Z`.
 
-The workflow moves the Unreleased notes into `## [X.Y.Z] - <date>`, updates the compare links, and sets the version in `gpui-app/Cargo.toml` and `Cargo.lock` (`cargo xtask release X.Y.Z`). It builds a universal `diffpilot.app` (`cargo xtask bundle --universal --zip`). Only after the build passes does it push the `chore(release): vX.Y.Z` commit and the `vX.Y.Z` tag to `main`, and then it publishes `diffpilot-macos.zip` with that version's changelog section as the release notes. To build the same app locally, run `cargo xtask bundle --universal`.
+The tag starts the **Release** workflow. It checks that the tag is on `main` and matches the app version, builds a universal `diffpilot.app` (`cargo xtask bundle --universal --zip`), and publishes `diffpilot-macos.zip` with that version's changelog section as the release notes. To build the same app locally, run `cargo xtask bundle --universal`.
 
 ## Acknowledgements
 

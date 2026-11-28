@@ -40,8 +40,9 @@ cargo xtask pr-screenshots [feature...]
 cargo xtask bundle [--universal] [--zip]
                                 build diffpilot.app (arm64 + x86_64 with --universal) into
                                 target/bundle/ and print its path; --zip also writes diffpilot-macos.zip
-cargo xtask release VERSION     move the Unreleased notes of CHANGELOG.md into VERSION and set it
-                                as the diffpilot version in gpui-app/Cargo.toml and Cargo.lock
+cargo xtask release VERSION     on a clean main, move the Unreleased notes of CHANGELOG.md into VERSION,
+                                set it as the diffpilot version in gpui-app/Cargo.toml and Cargo.lock,
+                                then commit and tag vVERSION; pushing the tag publishes the release
 cargo xtask release-notes VERSION
                                 print the CHANGELOG.md section of VERSION; fail if it is empty
 cargo xtask cache [--max-gb N] [--dry-run]
