@@ -308,31 +308,33 @@ impl Render for GuideNavigator {
                         let name = path.rsplit('/').next().unwrap_or(path).to_string();
                         let target = path.clone();
                         let viewed = guide.viewed().contains(path);
+                        let label = path.clone();
                         list = list.child(
-                            h_flex()
-                                .id(("guide-file-row", index * 1000 + position))
-                                .w_full()
-                                .h(px(ROW_HEIGHT))
-                                .pl(px(40.))
-                                .pr(px(10.))
-                                .gap(px(6.))
-                                .rounded(px(8.))
-                                .cursor_pointer()
-                                .hover(|style| style.bg(tokens.hover))
-                                .text_color(if viewed {
-                                    tokens.chrome.secondary
-                                } else {
-                                    tokens.chrome.label
-                                })
-                                .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                                    cx.emit(NavigatorEvent::Reveal(target.clone()))
-                                }))
-                                .child(
-                                    Icon::new(Glyph::for_file(&name))
-                                        .size(px(13.))
-                                        .text_color(tokens.tint(file_kind(&name).tint())),
-                                )
-                                .child(div().min_w_0().truncate().child(SharedString::from(name))),
+                            tag(h_flex().id(("guide-file-row", index * 1000 + position)), move || {
+                                format!("guide-file-row:{label}")
+                            })
+                            .w_full()
+                            .h(px(ROW_HEIGHT))
+                            .pl(px(40.))
+                            .pr(px(10.))
+                            .gap(px(6.))
+                            .rounded(px(8.))
+                            .cursor_pointer()
+                            .hover(|style| style.bg(tokens.hover))
+                            .text_color(if viewed {
+                                tokens.chrome.secondary
+                            } else {
+                                tokens.chrome.label
+                            })
+                            .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                                cx.emit(NavigatorEvent::Reveal(target.clone()))
+                            }))
+                            .child(
+                                Icon::new(Glyph::for_file(&name))
+                                    .size(px(13.))
+                                    .text_color(tokens.tint(file_kind(&name).tint())),
+                            )
+                            .child(div().min_w_0().truncate().child(SharedString::from(name))),
                         );
                     }
                 }

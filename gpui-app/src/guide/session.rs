@@ -62,6 +62,8 @@ pub struct GuideSession {
     run: GuideRun,
     step: Step,
     stop: Option<usize>,
+    /// A chapter file the reader opened on its own. While it is open, no stop is current.
+    file: Option<String>,
     reviewed: BTreeSet<(usize, usize)>,
     viewed: HashSet<String>,
     activity: Entity<ClaudeActivity>,
@@ -124,6 +126,7 @@ impl GuideSession {
             run: GuideRun::Idle,
             step: Step::Overview,
             stop: None,
+            file: None,
             reviewed: BTreeSet::new(),
             viewed: HashSet::new(),
             activity,
@@ -158,6 +161,7 @@ impl GuideSession {
         self.stored = self.store.current_guide(self.session).ok().flatten();
         self.reload_reviewed();
         self.stop = None;
+        self.file = None;
         self.recompute(cx);
     }
 
@@ -254,7 +258,28 @@ impl GuideSession {
 
     /// The current stop, as an index into the open chapter's stored notes.
     pub fn current_stop(&self) -> Option<usize> {
-        self.stop
+        self.stop.filter(|_| self.file.is_none())
+    }
+
+    pub fn open_file(&self) -> Option<&str> {
+        self.file.as_deref()
+    }
+
+    pub fn show_file(&mut self, path: &str, cx: &mut Context<Self>) {
+        if self
+            .chapter()
+            .is_some_and(|chapter| chapter.files.iter().any(|file| file == path))
+        {
+            self.file = Some(path.to_string());
+            cx.emit(GuideEvent::Moved);
+            cx.notify();
+        }
+    }
+
+    pub fn close_file(&mut self, cx: &mut Context<Self>) {
+        if self.file.take().is_some() {
+            self.announce(cx);
+        }
     }
 
     pub fn reviewed(&self) -> &BTreeSet<(usize, usize)> {
@@ -360,6 +385,7 @@ impl GuideSession {
         };
         if step != self.step {
             self.step = step;
+            self.file = None;
             self.stop = self.entry_stop();
             cx.emit(if reveal && self.stop.is_some() {
                 GuideEvent::Moved
@@ -371,8 +397,9 @@ impl GuideSession {
     }
 
     pub fn go_stop(&mut self, note: usize, cx: &mut Context<Self>) {
-        if self.path().is_some_and(|(_, stops)| stops.contains(note)) && self.stop != Some(note) {
+        if self.path().is_some_and(|(_, stops)| stops.contains(note)) && self.current_stop() != Some(note) {
             self.stop = Some(note);
+            self.file = None;
             cx.emit(GuideEvent::Moved);
             cx.notify();
         }
@@ -404,7 +431,7 @@ impl GuideSession {
 
     /// Marks the current stop reviewed and moves to the next open one. When none is open, the cursor stays.
     pub fn looks_good(&mut self, cx: &mut Context<Self>) {
-        let (Some((index, stops)), Some(note), Some(stored)) = (self.path(), self.stop, &self.stored) else {
+        let (Some((index, stops)), Some(note), Some(stored)) = (self.path(), self.current_stop(), &self.stored) else {
             return;
         };
         self.store.set_stop_reviewed(stored.id, index, note, true).ok();
@@ -482,7 +509,7 @@ impl GuideSession {
                     number: stops.number(position).unwrap_or(0),
                     total: stops.len(),
                     node,
-                    current: self.stop == Some(position),
+                    current: self.current_stop() == Some(position),
                 }
             })
             .collect()
@@ -490,7 +517,7 @@ impl GuideSession {
 
     /// The current stop when it points into a linked folder. The pane shows it as a read-only excerpt.
     pub fn linked_stop(&self) -> Option<LinkedStop> {
-        let ((index, stops), stored, position) = (self.path()?, self.stored.as_ref()?, self.stop?);
+        let ((index, stops), stored, position) = (self.path()?, self.stored.as_ref()?, self.current_stop()?);
         let chapter = &stored.guide.chapters[index];
         let note = chapter.notes.get(position)?;
         let folder = note.folder.clone()?;
@@ -588,6 +615,11 @@ impl GuideSession {
             .is_none_or(|note| !self.path().is_some_and(|(_, stops)| stops.contains(note)))
         {
             self.stop = self.entry_stop();
+        }
+        if let Some(file) = &self.file
+            && !self.chapter().is_some_and(|chapter| chapter.files.contains(file))
+        {
+            self.file = None;
         }
         self.announce(cx);
     }

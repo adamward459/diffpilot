@@ -1004,16 +1004,60 @@ fn the_overview_counts_the_stops_and_start_review_opens_the_first_open_one(app: 
 #[gpui::test]
 fn a_chapter_file_that_no_stop_points_at_is_listed_as_not_on_the_path(app: &mut TestAppContext) {
     let (world, cx) = open(app, false);
-    let guide = open_path_chapter(&world, cx);
+    open_path_chapter(&world, cx);
     assert!(testing::shows(cx, "guide-not-on-path"));
     assert!(testing::shows(cx, "guide-off-path:docs/committed.md"));
     assert!(
         !testing::shows(cx, "guide-off-path:src/staged.rs"),
         "the stops point at this file"
     );
+}
+
+fn top_file(world: &World, cx: &mut VisualTestContext) -> (f32, Option<String>) {
+    let pane = world.view.read_with(cx, |view, _| view.pane());
+    pane.read_with(cx, |pane, _| {
+        let state = pane.state();
+        let row = state.tops.row_at(state.scroll());
+        let file = row.map(|row| state.files[state.rows.rows[row].file as usize].path.clone());
+        (state.scroll(), file)
+    })
+}
+
+fn collapsed(world: &World, cx: &mut VisualTestContext, path: &str) -> bool {
+    let pane = world.view.read_with(cx, |view, _| view.pane());
+    pane.read_with(cx, |pane, _| pane.state().collapsed.contains(path))
+}
+
+#[gpui::test]
+fn a_click_on_a_file_off_the_path_shows_that_file_on_its_own(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let guide = open_path_chapter(&world, cx);
+    assert_eq!(stop(&guide, cx), Some(0));
+
     testing::click(cx, "guide-off-path:docs/committed.md");
-    assert_eq!(guide.read_with(cx, |guide, _| guide.step()), Step::Chapter(0));
+    assert!(testing::shows(cx, "guide-off-path-open:docs/committed.md"));
+    assert_eq!(stop(&guide, cx), None, "no stop row stays current");
+    assert_eq!(pane_paths(&world, cx), ["docs/committed.md"]);
+    assert_eq!(top_file(&world, cx), (0.0, Some("docs/committed.md".into())));
+
+    testing::click(cx, "pane:viewed:docs/committed.md");
+    assert!(collapsed(&world, cx, "docs/committed.md"));
+    testing::click(cx, "guide-off-path-open:docs/committed.md");
+    assert!(
+        !collapsed(&world, cx, "docs/committed.md"),
+        "a second click opens the file again"
+    );
+    assert_eq!(top_file(&world, cx), (0.0, Some("docs/committed.md".into())));
+
+    testing::click(cx, "guide-file-row:src/staged.rs");
     assert_eq!(pane_paths(&world, cx), ["src/staged.rs", "docs/committed.md"]);
+    assert_eq!(top_file(&world, cx).1.as_deref(), Some("src/staged.rs"));
+
+    testing::click(cx, "guide-off-path:docs/committed.md");
+    testing::click(cx, "guide-stop-row:2");
+    assert_eq!(stop(&guide, cx), Some(1));
+    assert_eq!(pane_paths(&world, cx), ["src/staged.rs", "docs/committed.md"]);
+    assert!(testing::shows(cx, "pane:stop-card:2"));
 }
 
 const READER: &str = "use std::fmt;\n\nstruct Reader {\n    path: String,\n}\n\nimpl Reader {\n    fn read(&self) -> String {\n        std::fs::read_to_string(&self.path).unwrap()\n    }\n}\n";
