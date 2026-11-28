@@ -1,7 +1,7 @@
 use diffpilot::diff_pane::layout::{GUTTER, LINE};
 use diffpilot::testing::{
-    click, click_below, clipboard, drag_below, fixture, git, git_output, open_repo, press, wait_until,
-    wait_until_shows, write,
+    click, click_below, clipboard, drag_below, fixture, git, git_output, open_repo, press, right_click,
+    right_click_below, shows, wait_until, wait_until_shows, write,
 };
 use diffpilot_core::editor::Editor;
 use diffpilot_core::settings::Settings;
@@ -32,11 +32,13 @@ fn dragging_over_the_numbers_selects_lines_to_copy_and_open_the_first_one(app: &
     wait_until_shows(cx, "pane:hunk:docs/notes.txt:0");
 
     drag_below(cx, "pane:hunk:docs/notes.txt:0", (10.0, 10.0), (10.0, 30.0));
-    wait_until_shows(cx, "pane:selection-hud:docs/notes.txt:2");
-    click(cx, "pane:selection-copy");
+    wait_until_shows(cx, "pane:selection:docs/notes.txt:2");
+    right_click_below(cx, "pane:hunk:docs/notes.txt:0", (10.0, 10.0));
+    click(cx, "line-menu:Copy");
     assert_eq!(clipboard(cx).as_deref(), Some("one\ntwo"));
 
-    click(cx, "pane:selection-open");
+    right_click_below(cx, "pane:hunk:docs/notes.txt:0", (10.0, 30.0));
+    click(cx, "line-menu:Open in Editor at Line 1");
     let deadline = Instant::now() + Duration::from_secs(10);
     while !record.exists() {
         assert!(Instant::now() < deadline, "the editor never started");
@@ -49,7 +51,7 @@ fn dragging_over_the_numbers_selects_lines_to_copy_and_open_the_first_one(app: &
     );
 }
 
-const CELL: f32 = 7.8;
+const CELL: f32 = 7.5;
 const SECOND_ROW: f32 = 30.0;
 
 fn open_edit(app: &mut TestAppContext) -> (tempfile::TempDir, &'static mut gpui::VisualTestContext) {
@@ -72,18 +74,27 @@ fn code(column: f32) -> f32 {
 }
 
 #[gpui::test]
-fn clicking_a_line_selects_it_and_shows_the_action_bar(app: &mut TestAppContext) {
+fn clicking_a_line_selects_it_and_right_clicking_opens_its_actions(app: &mut TestAppContext) {
     let (_dir, cx) = open_edit(app);
     click_below(cx, "pane:hunk:base.txt:0", (code(3.0), SECOND_ROW), 1);
-    wait_until_shows(cx, "pane:selection-hud:base.txt:1");
+    wait_until_shows(cx, "pane:selection:base.txt:1");
+    assert!(!shows(cx, "line-menu:Stage"), "a left click shows no actions");
+
+    right_click_below(cx, "pane:hunk:base.txt:0", (code(3.0), SECOND_ROW + LINE));
+    wait_until_shows(cx, "line-menu:Stage");
+    assert!(
+        shows(cx, "pane:selection:base.txt:1"),
+        "a right click selects the line under it"
+    );
 }
 
 #[gpui::test]
 fn clicking_a_hunk_header_selects_the_hunk_and_copies_its_patch(app: &mut TestAppContext) {
     let (_dir, cx) = open_edit(app);
     click(cx, "pane:hunk:base.txt:0");
-    wait_until_shows(cx, "pane:selection-hud:base.txt:3");
-    click(cx, "pane:selection-copy");
+    wait_until_shows(cx, "pane:selection:base.txt:3");
+    right_click(cx, "pane:hunk:base.txt:0");
+    click(cx, "line-menu:Copy");
     assert_eq!(
         clipboard(cx).as_deref(),
         Some("@@ -1 +1,3 @@\n base\n+let alpha = beta;\n+more")
@@ -129,13 +140,13 @@ fn staging_and_unstaging_act_on_the_selected_line_only(app: &mut TestAppContext)
     let (dir, cx) = open_edit(app);
     let staged = || git_output(dir.path(), &["diff", "--cached", "--", "base.txt"]);
 
-    click_below(cx, "pane:hunk:base.txt:0", (code(3.0), SECOND_ROW), 1);
-    click(cx, "pane:selection-stage");
+    right_click_below(cx, "pane:hunk:base.txt:0", (code(3.0), SECOND_ROW));
+    click(cx, "line-menu:Stage");
     wait_until(cx, "staging the line", || staged().contains("+let alpha = beta;"));
     assert!(!staged().contains("+more"), "only the selected line is staged");
 
-    click_below(cx, "pane:hunk:base.txt:0", (code(3.0), SECOND_ROW), 1);
-    click(cx, "pane:selection-unstage");
+    right_click_below(cx, "pane:hunk:base.txt:0", (code(3.0), SECOND_ROW));
+    click(cx, "line-menu:Unstage");
     wait_until(cx, "unstaging the line", || staged().is_empty());
 }
 
@@ -144,8 +155,8 @@ fn discarding_asks_first_and_then_removes_the_selected_line(app: &mut TestAppCon
     let (dir, cx) = open_edit(app);
     let file = dir.path().join("base.txt");
 
-    click_below(cx, "pane:hunk:base.txt:0", (code(3.0), SECOND_ROW), 1);
-    click(cx, "pane:selection-discard");
+    right_click_below(cx, "pane:hunk:base.txt:0", (code(3.0), SECOND_ROW));
+    click(cx, "line-menu:Discard\u{2026}");
     click(cx, "pane:selection-discard-cancel");
     assert_eq!(
         std::fs::read_to_string(&file).expect("read"),
@@ -153,7 +164,8 @@ fn discarding_asks_first_and_then_removes_the_selected_line(app: &mut TestAppCon
         "cancel keeps the line"
     );
 
-    click(cx, "pane:selection-discard");
+    right_click_below(cx, "pane:hunk:base.txt:0", (code(3.0), SECOND_ROW));
+    click(cx, "line-menu:Discard\u{2026}");
     click(cx, "pane:selection-discard-confirm");
     wait_until(cx, "discarding the line", || {
         std::fs::read_to_string(&file).is_ok_and(|text| text == "base\nmore\n")

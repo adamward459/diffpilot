@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Code text in the diff is now 12.5 px instead of 13 px.
+- Selecting lines in the diff no longer shows a floating action bar. Right-click a line or a selection to stage, unstage, discard, copy, open in your editor, or comment.
+
 ## [0.2.0] - 2026-11-28
 
 ### Added
