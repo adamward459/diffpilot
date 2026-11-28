@@ -174,6 +174,10 @@ mod tests {
             span: None,
             text: "text".into(),
             critical,
+            kind: Default::default(),
+            check: None,
+            node: None,
+            folder: None,
         }
     }
 

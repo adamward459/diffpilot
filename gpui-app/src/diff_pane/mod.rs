@@ -2,6 +2,7 @@ mod chrome;
 pub mod highlight;
 pub mod layout;
 mod lines;
+mod linked;
 mod markdown;
 mod preview;
 pub mod rows;
@@ -15,4 +16,5 @@ mod word;
 #[cfg(test)]
 mod testing;
 
-pub use view::{DiffPane, DiffPaneEvent, PaneNote, Probe, bind_keys};
+pub use linked::LinkedStop;
+pub use view::{DiffPane, DiffPaneEvent, PaneNote, Probe, StopDone, bind_keys};

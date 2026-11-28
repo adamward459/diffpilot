@@ -20,6 +20,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - Select text in a Markdown preview by dragging, double-clicking a word, or triple-clicking a block, and copy it with ⌘C.
 - The app tour has new stops for push and pull and for Commit, and its text covers linked folders, previews, and the comments button.
 - The Open Folder sheet says "1 needs you" on a folder with a pull request waiting for your review, and marks that pull request with a Review requested pill. Team requests are not counted yet.
+- Each Guide chapter has a review path: stops in the order to read them. A stop card shows why it matters, what to check, and a band marks its lines in the diff. A critical stop is marked Take care.
+- Move along the review path with ] and [. Press v, or click Looks good, to mark a stop reviewed and go to the next one. Comment and Skip for now are on the card too.
+- The review panel lists the stops of the open chapter with the chapter map above. The map lights the current stop's box, shows reviewed/total on each box, and a click on a box jumps to its first stop.
+- A stop can point into a linked folder. It opens a read-only excerpt of that file with the lines marked, because there is nothing to diff.
+- The Guide overview says "Review in N stops" and has a Start review button. The chapter list shows reviewed/total with a small progress bar for each chapter.
+- The review path moves with soft motion: the card rises in, the band lights up line by line, the map pulses, and a reviewed check pops. It stops when Reduce Motion is on in macOS.
 
 ### Changed
 
@@ -32,6 +38,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - The toolbar is regrouped. What you compare sits next to the folder name. Ask Claude and the comments button share one pill on the right, next to push and pull.
 - Every list and panel that scrolls shows a scrollbar while you scroll, like the diff: the Guide, the inspector, comments, settings, menus, checks, Claude's plan and log, and the Open Folder lists. Drag it to move fast.
 - Diff text, Markdown previews, and the file list use larger text: code is 13 px, preview body text is 14 px, and file names are 13 px.
+
+### Removed
+
+- The step-by-step player under guide diagrams is gone. Each chapter now has a review path instead.
 
 ### Fixed
 

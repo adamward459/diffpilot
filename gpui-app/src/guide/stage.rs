@@ -1,5 +1,6 @@
 use crate::folder_menu::folder_name;
 use crate::guide::diagram::diagram_card;
+use crate::guide::path::{self, Counts};
 use crate::guide::rich::{self, Body, OnRef};
 use crate::guide::session::{GuideEvent, GuideRun, GuideSession, Step};
 use crate::guide::text::{CodeRef, Inline};
@@ -252,6 +253,7 @@ impl GuideStage {
             title = title.child(chip_label(tokens, label, ChipTone::Amber));
         }
         let guide_entity = self.guide.clone();
+        let counts = guide.counts(chapter);
         h_flex()
             .id(("guide-overview-chapter", index))
             .w_full()
@@ -281,15 +283,32 @@ impl GuideStage {
                         div().child((index + 1).to_string()).into_any_element()
                     }),
             )
-            .child(v_flex().flex_1().w_0().min_w_0().gap(px(2.)).child(title).child(
-                tag(div().w_full().min_w_0(), || format!("guide-chapter-summary:{index}")).child(rich::element(
-                    ("guide-overview-summary", index),
-                    &Inline::parse(&chapter.summary),
-                    Body::new(tokens, diffpilot_ui_kit::text_size::SECONDARY, 18.).colored(tokens.ui.muted),
-                    None,
-                    cx,
-                )),
-            ))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .w_0()
+                    .min_w_0()
+                    .gap(px(2.))
+                    .child(title)
+                    .child(
+                        tag(div().w_full().min_w_0(), || format!("guide-chapter-summary:{index}")).child(
+                            rich::element(
+                                ("guide-overview-summary", index),
+                                &Inline::parse(&chapter.summary),
+                                Body::new(tokens, diffpilot_ui_kit::text_size::SECONDARY, 18.).colored(tokens.ui.muted),
+                                None,
+                                cx,
+                            ),
+                        ),
+                    )
+                    .children(counts.as_ref().map(|counts| {
+                        tag(div(), || format!("guide-chapter-stops:{index}"))
+                            .mt(px(2.))
+                            .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
+                            .text_color(tokens.ui.text2)
+                            .child(SharedString::from(counts.line()))
+                    })),
+            )
             .child(
                 tag(h_flex(), || format!("guide-chapter-stat:{index}"))
                     .gap(px(5.))
@@ -308,7 +327,84 @@ impl GuideStage {
                             .child(format!("\u{2212}{}", chapter.deletions)),
                     ),
             )
+            .children(counts.map(|_| {
+                let review = self.guide.clone();
+                tag(
+                    Button::new(("guide-chapter-review", index))
+                        .label("Review")
+                        .ml(px(8.))
+                        .on_click(move |_, _, cx| {
+                            cx.stop_propagation();
+                            review.update(cx, |guide, cx| guide.go(Step::Chapter(index), cx))
+                        }),
+                    move || format!("guide-chapter-review:{index}"),
+                )
+            }))
             .into_any_element()
+    }
+
+    fn review_banner(&self, tokens: &Theme, cx: &App) -> Option<AnyElement> {
+        let guide = self.guide.read(cx);
+        let mut counts = Counts::default();
+        let mut open = 0;
+        for chapter in &guide.reading().chapters {
+            if let Some(chapter_counts) = guide.counts(chapter) {
+                counts.add(chapter_counts);
+            }
+            if let Some((done, total)) = guide.progress(chapter) {
+                open += total - done;
+            }
+        }
+        if counts.total() == 0 {
+            return None;
+        }
+        let start = guide.first_open().map(|_| {
+            let review = self.guide.clone();
+            tag(
+                Button::new("guide-review-start")
+                    .look(Look::Claude)
+                    .regular()
+                    .icon(Glyph::Play, 12.)
+                    .label("Start review")
+                    .on_click(move |_, _, cx| review.update(cx, |guide, cx| guide.start_review(cx))),
+                || "guide-review-start",
+            )
+        });
+        let headline = match (open, counts.total()) {
+            (0, _) => "Every stop is reviewed".to_string(),
+            (_, total) => format!("Review in {}", path::stop_count(total)),
+        };
+        Some(
+            tag(h_flex(), || "guide-review-banner")
+                .w_full()
+                .gap(px(14.))
+                .px(px(16.))
+                .py(px(14.))
+                .rounded(px(12.))
+                .border_1()
+                .border_color(tokens.ui.claude_border)
+                .bg(tokens.ui.claude_bg)
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap(px(3.))
+                        .child(
+                            tag(div(), || "guide-review-headline")
+                                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(SharedString::from(headline)),
+                        )
+                        .child(
+                            tag(div(), || "guide-review-counts")
+                                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
+                                .text_color(tokens.ui.text2)
+                                .child(SharedString::from(counts.sentence())),
+                        ),
+                )
+                .children(start)
+                .into_any_element(),
+        )
     }
 
     fn overview(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -404,6 +500,7 @@ impl GuideStage {
             );
         }
         article = article.children(diagrams);
+        article = article.children(self.review_banner(&tokens, cx));
         let count = guide.reading().guided();
         article = article.child(
             h_flex()

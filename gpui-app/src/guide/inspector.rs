@@ -1,4 +1,5 @@
 use crate::guide::diagram::diagram_card;
+use crate::guide::review_panel::review_panel;
 use crate::guide::rich::{self, Body, OnRef};
 use crate::guide::session::{GuideEvent, GuideSession, Step};
 use crate::guide::text::{CodeRef, Inline};
@@ -70,12 +71,16 @@ impl Render for GuideInspector {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Theme::of(cx);
         let step_key = format!("{:?}", self.guide.read(cx).step());
+        let guide_entity = self.guide.clone();
+        let mut panel = review_panel(&guide_entity, &step_key, window, cx);
+        let map = panel.as_ref().and_then(|panel| panel.map);
         let diagrams: Vec<AnyElement> = self
             .guide
             .read(cx)
             .chapter_diagrams()
             .iter()
             .enumerate()
+            .filter(|(index, _)| Some(*index) != map)
             .map(|(index, diagram)| {
                 diagram_card(
                     &format!("guide-chapter-diagram-{step_key}-{index}"),
@@ -130,6 +135,9 @@ impl Render for GuideInspector {
                         .on_click(move |_, _, cx| next_guide.update(cx, |guide, cx| guide.next(cx))),
                 ),
         );
+        if let Some(panel) = &mut panel {
+            column = column.child(std::mem::replace(&mut panel.top, div().into_any_element()));
+        }
         let mut chips = h_flex().gap(px(6.));
         if let Some(phase) = &chapter.phase {
             chips = chips.child(chip_label(&tokens, phase.clone(), ChipTone::Blue));
@@ -279,17 +287,24 @@ impl Render for GuideInspector {
                 || "guide-next-chapter",
             ));
         }
-        actions = actions.child(tag(
-            Button::new("guide-mark-continue")
-                .regular()
-                .label(if last {
-                    "Mark Viewed"
-                } else {
-                    "Mark Viewed and Continue"
-                })
-                .on_click(move |_, _, cx| mark.update(cx, |_, cx| cx.emit(InspectorEvent::MarkViewedAndContinue))),
-            || "guide-mark-continue",
-        ));
+        match panel {
+            Some(panel) => actions = actions.child(panel.footer),
+            None => {
+                actions = actions.child(tag(
+                    Button::new("guide-mark-continue")
+                        .regular()
+                        .label(if last {
+                            "Mark Viewed"
+                        } else {
+                            "Mark Viewed and Continue"
+                        })
+                        .on_click(move |_, _, cx| {
+                            mark.update(cx, |_, cx| cx.emit(InspectorEvent::MarkViewedAndContinue))
+                        }),
+                    || "guide-mark-continue",
+                ));
+            }
+        }
         column = column.child(actions);
         scroll_y(
             &self.scroll,

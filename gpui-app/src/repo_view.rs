@@ -3,6 +3,7 @@ use crate::claude_area::{ClaudeArea, ClaudeAreaEvent, HEIGHT as CLAUDE_AREA_HEIG
 use crate::claude_status::{Actions, status_row};
 use crate::commit_popover::{CommitEvent, CommitPopover};
 use crate::comparison_control::comparison_control;
+use crate::diff_pane::StopDone;
 use crate::diff_pane::layout::SPLIT_MIN_WIDTH;
 use crate::folder_menu::FolderMenu;
 use crate::guide::chrome::{chapter_bar, overview_bar};
@@ -29,6 +30,7 @@ use diffpilot_core::run::RunState;
 use diffpilot_core::runner::RunEvent;
 use diffpilot_core::settings::{self, Settings};
 use diffpilot_core::store::Store;
+use diffpilot_core::threads::Side;
 use diffpilot_core::tree;
 use diffpilot_core::viewed::{ViewedFiles, ViewedKey, ViewedStore};
 use diffpilot_core::watcher::{self, WatchGuard};
@@ -491,8 +493,11 @@ impl RepoView {
                     }
                 },
             ),
-            cx.subscribe_in(&guide, window, |this, _, _: &GuideEvent, window, cx| {
+            cx.subscribe_in(&guide, window, |this, _, event: &GuideEvent, window, cx| {
                 this.sync_guide(window, cx);
+                if *event == GuideEvent::Moved {
+                    this.reveal_stop(window, cx);
+                }
                 cx.notify();
             }),
             cx.subscribe_in(
@@ -580,6 +585,10 @@ impl RepoView {
                     DiffPaneEvent::FirstPaint => Bench::mark_now(cx, Mark::FirstDiffPaint),
                     DiffPaneEvent::ShownMode(_) | DiffPaneEvent::ThreadSteps => cx.notify(),
                     DiffPaneEvent::OpenRef(code) => this.open_ref(code, window, cx),
+                    DiffPaneEvent::StopDone(done) => match done {
+                        StopDone::LooksGood => this.looks_good(cx),
+                        StopDone::Skip => this.step_chapter(1, cx),
+                    },
                     DiffPaneEvent::RevealInFinder(path) => cx.reveal_path(&this.repo.join(path)),
                     DiffPaneEvent::Changed => this.start_load(window, cx),
                 },
@@ -937,15 +946,27 @@ impl RepoView {
             && !matches!(guide.run(), GuideRun::Writing { .. })
     }
 
+    /// Steps to the next or previous stop of the open chapter, or to the next or previous chapter when it has none.
     pub fn step_chapter(&mut self, delta: isize, cx: &mut Context<Self>) {
         if !self.chapter_open(cx) {
             return;
         }
         if let Some(session) = &self.session {
-            session.guide.update(cx, |guide, cx| match delta {
-                1.. => guide.next(cx),
-                _ => guide.previous(cx),
+            session.guide.update(cx, |guide, cx| match (delta, guide.has_stops()) {
+                (1.., true) => guide.next_stop(cx),
+                (1.., false) => guide.next(cx),
+                (_, true) => guide.previous_stop(cx),
+                (_, false) => guide.previous(cx),
             });
+        }
+    }
+
+    pub fn looks_good(&mut self, cx: &mut Context<Self>) {
+        if !self.chapter_open(cx) {
+            return;
+        }
+        if let Some(session) = &self.session {
+            session.guide.update(cx, |guide, cx| guide.looks_good(cx));
         }
     }
 
@@ -958,16 +979,34 @@ impl RepoView {
 
     fn sync_guide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = &self.session else { return };
-        let (filter, notes) = if self.chapter_open(cx) {
+        let (filter, notes, linked) = if self.chapter_open(cx) {
             let guide = session.guide.read(cx);
-            (guide.chapter().map(|chapter| chapter.files.clone()), guide.pane_notes())
+            (
+                guide.chapter().map(|chapter| chapter.files.clone()),
+                guide.pane_notes(),
+                guide.linked_stop(),
+            )
         } else {
-            (None, Vec::new())
+            (None, Vec::new(), None)
         };
         session.pane.update(cx, |pane, cx| {
             pane.set_filter(filter, cx);
             pane.set_notes(notes, window, cx);
+            pane.set_linked(linked, window, cx);
         });
+    }
+
+    fn reveal_stop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = &self.session else { return };
+        let current = session
+            .guide
+            .read(cx)
+            .pane_notes()
+            .into_iter()
+            .find(|note| note.current);
+        if let Some(note) = current {
+            self.reveal_at(&note.path, note.side, note.line, window, cx);
+        }
     }
 
     /// Jumps to a `[[path#L12]]` ref: into the chapter that holds the file when the open one does not.
@@ -975,29 +1014,33 @@ impl RepoView {
         if std::path::Path::new(&code.path).is_absolute() {
             return self.open_in_editor(&code.path, code.line, cx);
         }
+        self.reveal_at(&code.path, code.side(), code.line, window, cx);
+    }
+
+    fn reveal_at(&mut self, path: &str, side: Side, line: Option<u32>, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = &self.session else { return };
         let guide = session.guide.read(cx);
         let here = guide
             .chapter()
-            .is_some_and(|chapter| chapter.files.contains(&code.path));
+            .is_some_and(|chapter| chapter.files.iter().any(|file| file == path));
         let target = guide
             .reading()
             .chapters
             .iter()
-            .position(|chapter| chapter.files.contains(&code.path));
-        let pane = session.pane.clone();
+            .position(|chapter| chapter.files.iter().any(|file| file == path));
+        let (pane, guide) = (session.pane.clone(), session.guide.clone());
         if self.nav == Nav::Guide
             && !here
             && let Some(index) = target
         {
-            self.go_to(Step::Chapter(index), window, cx);
+            guide.update(cx, |guide, cx| guide.jump(Step::Chapter(index), cx));
+            self.sync_guide(window, cx);
         } else if self.nav == Nav::Guide && target.is_none() {
             return;
         }
-        let side = code.side();
-        pane.update(cx, |pane, cx| match code.line {
-            Some(line) => pane.reveal_line(&code.path, side, line, cx),
-            None => pane.reveal(&code.path, cx),
+        pane.update(cx, |pane, cx| match line {
+            Some(line) => pane.reveal_line(path, side, line, cx),
+            None => pane.reveal(path, cx),
         });
     }
 
@@ -1512,15 +1555,20 @@ impl Render for RepoView {
             None => div().into_any_element(),
         };
         let inspector = match &self.session {
-            Some(session) if chapter_open && self.inspector.is_mounted() => Some(self.inspector.animate(
-                "inspector-motion",
-                h_flex().flex_none().h_full().child(session.inspector.clone()),
-                |this, open| {
-                    this.w(px(INSPECTOR_WIDTH * open))
-                        .opacity(open)
-                        .when(open < 1., |this| this.overflow_hidden())
-                },
-            )),
+            Some(session) if chapter_open && self.inspector.is_mounted() => Some(
+                self.inspector.animate(
+                    "inspector-motion",
+                    region(h_flex(), || "inspector".into())
+                        .flex_none()
+                        .h_full()
+                        .child(session.inspector.clone()),
+                    |this, open| {
+                        this.w(px(INSPECTOR_WIDTH * open))
+                            .opacity(open)
+                            .when(open < 1., |this| this.overflow_hidden())
+                    },
+                ),
+            ),
             _ => None,
         };
         let selected_nav = match self.nav {

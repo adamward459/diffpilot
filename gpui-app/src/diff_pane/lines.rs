@@ -1,12 +1,14 @@
+use crate::diff_pane::PaneNote;
 use crate::diff_pane::highlight::{Piece, Span, chunk_pieces, display_len, pieces, source_offset};
 use crate::diff_pane::layout::{CODE_PADDING, LINE, NUMBER_COLUMN, RIBBON, SPLIT_DIVIDER, wrap_ranges};
 use crate::diff_pane::word::{pair_lines, word_ranges};
 use diffpilot_core::diff::{DiffLine, Hunk, LineKind};
+use diffpilot_core::guide::StopKind;
 use diffpilot_core::threads::Side;
 use diffpilot_ui_kit::Theme;
 use gpui::{App, Bounds, ContentMask, Font, Hsla, Pixels, ShapedLine, TextRun, Window, fill, point, px, size};
 use std::collections::HashMap;
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 
 pub const CODE_SIZE: f32 = 13.0;
 pub const NUMBER_SIZE: f32 = 12.0;
@@ -86,7 +88,73 @@ pub struct Mark {
     pub width: Pixels,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BandColors {
+    pub tint: Hsla,
+    pub bar: Hsla,
+    /// How much of the band is lit, from 0 to 1. The row's own fill gives way as it grows.
+    pub lit: f32,
+}
+
+impl BandColors {
+    pub fn lit(self, lit: f32) -> Self {
+        Self {
+            tint: self.tint.opacity(lit),
+            bar: self.bar.opacity(lit),
+            lit,
+        }
+    }
+}
+
+/// The lines of the current stop, tinted in the diff.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Band {
+    pub path: String,
+    side: Side,
+    lines: RangeInclusive<u32>,
+    kind: StopKind,
+    critical: bool,
+}
+
+impl Band {
+    pub fn of(note: &PaneNote) -> Option<Self> {
+        let line = note.line?;
+        Some(Self {
+            path: note.path.clone(),
+            side: note.side,
+            lines: line..=note.end_line.unwrap_or(line),
+            kind: note.kind,
+            critical: note.critical,
+        })
+    }
+
+    /// How many lines down the band `line` sits, or `None` when the band does not cover it.
+    pub fn offset(&self, line: &DiffLine) -> Option<usize> {
+        let number = match self.side {
+            Side::Old => line.old,
+            Side::New => line.new,
+        }?;
+        self.lines
+            .contains(&number)
+            .then(|| (number - self.lines.start()) as usize)
+    }
+
+    pub fn line_count(&self) -> usize {
+        (self.lines.end() - self.lines.start() + 1) as usize
+    }
+
+    pub fn colors(&self, theme: &Theme) -> BandColors {
+        let (tint, bar) = match (self.critical, self.kind) {
+            (true, _) => (theme.danger.opacity(0.14), theme.danger),
+            (false, StopKind::Skim) => (theme.diff.text.opacity(0.06), theme.ui.muted),
+            (false, _) => (theme.ui.claude.opacity(0.14), theme.ui.claude),
+        };
+        BandColors { tint, bar, lit: 1.0 }
+    }
+}
+
 pub struct PaintLine {
+    pub band: Option<BandColors>,
     pub y: f32,
     pub height: f32,
     pub column: Column,
@@ -199,6 +267,7 @@ impl LineCache {
             Column::Right => [prepared.new.clone(), None],
         };
         PaintLine {
+            band: None,
             y,
             height,
             column,
@@ -297,6 +366,7 @@ fn shape_chunk(style: &Style, window: &mut Window, line: &DiffLine, range: &Rang
         .shape_line(display.into(), px(CODE_SIZE), &runs, None)
 }
 
+const BAND_BAR: f32 = 3.0;
 const THUMB_WIDTH: f32 = 6.0;
 const THUMB_WIDE: f32 = 10.0;
 const THUMB_INSET: f32 = 3.0;
@@ -362,9 +432,16 @@ pub fn paint(frame: &Frame, bounds: Bounds<Pixels>, window: &mut Window, cx: &mu
                 LineKind::Context => (None, None, None),
             };
             if let Some(color) = background {
+                let color = color.opacity(1.0 - line.band.map_or(0.0, |band| band.lit));
                 window.paint_quad(fill(
                     Bounds::new(point(slot.left, top), size(slot.width, height)),
                     color,
+                ));
+            }
+            if let Some(band) = line.band {
+                window.paint_quad(fill(
+                    Bounds::new(point(slot.left, top), size(slot.width, height)),
+                    band.tint,
                 ));
             }
             if let Some(color) = number {
@@ -376,6 +453,12 @@ pub fn paint(frame: &Frame, bounds: Bounds<Pixels>, window: &mut Window, cx: &mu
             if let Some(color) = ribbon {
                 let origin = point(slot.left + slot.gutter(), top);
                 window.paint_quad(fill(Bounds::new(origin, size(px(RIBBON), height)), color));
+            }
+            if let Some(band) = line.band {
+                window.paint_quad(fill(
+                    Bounds::new(point(slot.left, top), size(px(BAND_BAR), height)),
+                    band.bar,
+                ));
             }
             if line.column == Column::Left {
                 paint_divider(frame, bounds, top, height, window);
@@ -430,6 +513,60 @@ fn hex(color: u32) -> Hsla {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pane_note(line: Option<u32>, end_line: Option<u32>, side: Side) -> PaneNote {
+        PaneNote {
+            path: "a.rs".into(),
+            side,
+            line,
+            end_line,
+            text: String::new(),
+            critical: false,
+            kind: StopKind::Check,
+            check: None,
+            number: 1,
+            total: 1,
+            node: None,
+            current: true,
+        }
+    }
+
+    fn diff_line(kind: LineKind, old: Option<u32>, new: Option<u32>) -> DiffLine {
+        crate::diff_pane::testing::line(kind, old, new, "")
+    }
+
+    #[test]
+    fn a_band_covers_the_span_on_its_side_only() {
+        let band = Band::of(&pane_note(Some(4), Some(6), Side::New)).unwrap();
+        let added = |new| diff_line(LineKind::Added, None, Some(new));
+        assert_eq!(band.offset(&added(3)), None);
+        assert_eq!((band.offset(&added(4)), band.offset(&added(6))), (Some(0), Some(2)));
+        assert_eq!(band.offset(&added(7)), None);
+        assert_eq!(band.line_count(), 3);
+        assert_eq!(band.offset(&diff_line(LineKind::Deleted, Some(5), None)), None);
+        assert_eq!(band.offset(&diff_line(LineKind::Context, Some(1), Some(5))), Some(1));
+
+        let old = Band::of(&pane_note(Some(5), None, Side::Old)).unwrap();
+        assert_eq!(old.offset(&diff_line(LineKind::Deleted, Some(5), None)), Some(0));
+        assert_eq!(old.offset(&added(5)), None);
+    }
+
+    #[test]
+    fn a_note_without_a_line_has_no_band() {
+        assert!(Band::of(&pane_note(None, None, Side::New)).is_none());
+    }
+
+    #[test]
+    fn a_critical_stop_is_tinted_in_the_danger_color_and_a_skim_stop_stays_neutral() {
+        let theme = Theme::new(false);
+        let mut note = pane_note(Some(1), None, Side::New);
+        let check = Band::of(&note).unwrap().colors(&theme);
+        assert_eq!(check.bar, theme.ui.claude);
+        note.kind = StopKind::Skim;
+        assert_eq!(Band::of(&note).unwrap().colors(&theme).bar, theme.ui.muted);
+        note.critical = true;
+        assert_eq!(Band::of(&note).unwrap().colors(&theme).bar, theme.danger);
+    }
 
     #[test]
     fn a_context_line_is_shaped_once_unless_the_old_side_colors_it_differently() {

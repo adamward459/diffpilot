@@ -1,17 +1,15 @@
-use super::focus::{flow_focus, next_step, previous_step};
 use super::paint::{Drawing, Palette, TextMeasure};
 use diffpilot_core::guide::layout::{Layout, layout};
 use diffpilot_core::guide::{Diagram, DiagramKind};
+use diffpilot_ui_kit::Theme;
 use diffpilot_ui_kit::components::scroll_y;
-use diffpilot_ui_kit::components::{ChipTone, chip_label, icon_button, segmented_control, tag};
-use diffpilot_ui_kit::{Glyph, Theme};
+use diffpilot_ui_kit::components::{ChipTone, chip_label, segmented_control, tag};
 use gpui::ScrollHandle;
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString, Styled as _,
-    Window, canvas, div, font, px,
+    AnyElement, App, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
+    Styled as _, Window, canvas, div, font, px,
 };
-use gpui_component::{ActiveTheme, h_flex, v_flex};
+use gpui_component::{ActiveTheme, h_flex};
 use std::rc::Rc;
 
 const MAX_HEIGHT: f32 = 340.0;
@@ -24,7 +22,7 @@ enum View {
     Source,
 }
 
-enum Parsed {
+pub(super) enum Parsed {
     Drawn(Rc<Layout>),
     SourceOnly(&'static str),
 }
@@ -36,12 +34,11 @@ struct Key {
     size: f32,
 }
 
-struct CardState {
-    scroll: ScrollHandle,
+pub(super) struct CardState {
+    pub(super) scroll: ScrollHandle,
     view: View,
-    step: Option<usize>,
     key: Option<Key>,
-    parsed: Parsed,
+    pub(super) parsed: Parsed,
 }
 
 impl CardState {
@@ -49,7 +46,6 @@ impl CardState {
         Self {
             scroll: ScrollHandle::new(),
             view: View::Diagram,
-            step: None,
             key: None,
             parsed: Parsed::SourceOnly(PARSE_NOTE),
         }
@@ -58,9 +54,6 @@ impl CardState {
     fn refresh(&mut self, diagram: &Diagram, key: Key, measure: &TextMeasure) {
         if self.key.as_ref() == Some(&key) {
             return;
-        }
-        if self.key.as_ref().is_none_or(|old| old.source != key.source) {
-            self.step = None;
         }
         self.parsed = match diagram.graph() {
             Ok(graph) => match layout(&graph, measure) {
@@ -119,28 +112,35 @@ fn source_block(theme: &Theme, diagram: &Diagram) -> impl IntoElement {
         .child(SharedString::from(diagram.source.clone()))
 }
 
-/// A card that draws one guide diagram, with a Diagram and Source switch and, for a flowchart, a walkthrough.
-/// `id` must be unique among the cards on screen, since the card keeps its own view and step under it.
-pub fn diagram_card(id: &str, diagram: &Diagram, window: &mut Window, cx: &mut App) -> AnyElement {
-    let theme = Theme::of(cx);
+/// The card state for `id`, with the diagram parsed and laid out for the current font.
+pub(super) fn card_state(id: &str, diagram: &Diagram, window: &mut Window, cx: &mut App) -> (Entity<CardState>, f32) {
     let family = cx.theme().font_family.clone();
     let font_size = f32::from(cx.theme().font_size);
     let state = window.use_keyed_state(SharedString::from(format!("{id}-state")), cx, |_, _| CardState::new());
     let measure = TextMeasure::new(window, family.clone(), font_size);
     let key = Key {
         source: diagram.source.clone(),
-        family: family.clone(),
+        family,
         size: font_size,
     };
     state.update(cx, |state, _| state.refresh(diagram, key, &measure));
+    (state, font_size)
+}
 
-    let (view, step, parsed) = {
+/// A card that draws one guide diagram, with a Diagram and Source switch.
+/// `id` must be unique among the cards on screen, since the card keeps its own view under it.
+pub fn diagram_card(id: &str, diagram: &Diagram, window: &mut Window, cx: &mut App) -> AnyElement {
+    let theme = Theme::of(cx);
+    let family = cx.theme().font_family.clone();
+    let (state, font_size) = card_state(id, diagram, window, cx);
+
+    let (view, parsed) = {
         let state = state.read(cx);
         let parsed = match &state.parsed {
             Parsed::Drawn(layout) => Ok(layout.clone()),
             Parsed::SourceOnly(note) => Err(*note),
         };
-        (state.view, state.step, parsed)
+        (state.view, parsed)
     };
     let drawn = parsed.as_ref().ok();
     let kind = match &parsed {
@@ -189,15 +189,11 @@ pub fn diagram_card(id: &str, diagram: &Diagram, window: &mut Window, cx: &mut A
     match (parsed, view) {
         (Ok(layout), View::Diagram) => {
             let (width, height) = layout.size();
-            let steps: Vec<String> = diagram.flow.iter().map(|step| step.node.clone()).collect();
-            let focus = match &*layout {
-                Layout::Flow(_) => flow_focus(&steps, step),
-                Layout::Sequence(_) => None,
-            };
             let drawing = Drawing {
                 layout,
                 palette: Palette::of(&theme),
-                focus,
+                focus: None,
+                phase: None,
                 font: font(family),
                 font_size,
             };
@@ -221,9 +217,6 @@ pub fn diagram_card(id: &str, diagram: &Diagram, window: &mut Window, cx: &mut A
                 .w_full()
                 .max_h(px(MAX_HEIGHT)),
             );
-            if matches!(diagram.kind, DiagramKind::Flowchart) && !steps.is_empty() {
-                card = card.child(stepper(id, &theme, diagram, step, &state));
-            }
         }
         (parsed, _) => {
             if let Err(note) = parsed {
@@ -238,73 +231,4 @@ pub fn diagram_card(id: &str, diagram: &Diagram, window: &mut Window, cx: &mut A
         }
     }
     card.into_any_element()
-}
-
-fn stepper(
-    id: &str,
-    theme: &Theme,
-    diagram: &Diagram,
-    step: Option<usize>,
-    state: &gpui::Entity<CardState>,
-) -> AnyElement {
-    let total = diagram.flow.len();
-    let label = match step {
-        Some(at) => format!("{} / {total}", at + 1),
-        None => match total {
-            1 => "1 step".to_string(),
-            total => format!("{total} steps"),
-        },
-    };
-    let (previous, next) = (state.clone(), state.clone());
-    let controls = h_flex()
-        .gap(px(4.))
-        .child(tag(
-            icon_button(
-                SharedString::from(format!("{id}-previous")),
-                Glyph::ChevronLeft,
-                theme.ui.text2,
-            )
-            .on_click(move |_, _, cx| {
-                previous.update(cx, |state, cx| {
-                    state.step = previous_step(state.step);
-                    cx.notify();
-                })
-            }),
-            || "guide-diagram-previous",
-        ))
-        .child(
-            div()
-                .min_w(px(40.))
-                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
-                .text_color(theme.ui.text2)
-                .flex()
-                .justify_center()
-                .child(SharedString::from(label)),
-        )
-        .child(tag(
-            icon_button(
-                SharedString::from(format!("{id}-next")),
-                Glyph::ChevronRight,
-                theme.ui.text2,
-            )
-            .on_click(move |_, _, cx| {
-                next.update(cx, |state, cx| {
-                    state.step = Some(next_step(state.step, total));
-                    cx.notify();
-                })
-            }),
-            || "guide-diagram-next",
-        ));
-    v_flex()
-        .gap(px(6.))
-        .child(controls)
-        .when_some(step.and_then(|at| diagram.flow.get(at)), |column, current| {
-            column.child(
-                tag(div().id("guide-diagram-step-text"), || "guide-diagram-step-text")
-                    .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
-                    .text_color(theme.ui.text2)
-                    .child(SharedString::from(current.text.clone())),
-            )
-        })
-        .into_any_element()
 }

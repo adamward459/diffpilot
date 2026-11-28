@@ -7,7 +7,9 @@ use diffpilot_core::diff::FileDiff;
 use diffpilot_core::github::auth::{Credentials, GhCli, MemoryStore};
 use diffpilot_core::github::http::{Http, HttpError, Method, Request, Response};
 use diffpilot_core::guide::stale::{self, file_fingerprints};
-use diffpilot_core::guide::{Attention, Chapter, ChapterFile, Guide, Note, Overview, Span, fingerprint};
+use diffpilot_core::guide::{
+    Attention, Chapter, ChapterFile, Diagram, DiagramKind, Guide, Note, Overview, Span, StopKind, fingerprint,
+};
 use diffpilot_core::mcp::McpBridge;
 use diffpilot_core::review::{Finding, ReviewResult, Severity};
 use diffpilot_core::runner::{EngineConfig, McpLaunch, RunEngine};
@@ -1076,6 +1078,10 @@ fn demo_note(line: u32, critical: bool, text: &str) -> Note {
         }),
         text: text.into(),
         critical,
+        kind: Default::default(),
+        check: None,
+        node: None,
+        folder: None,
     }
 }
 
@@ -1118,15 +1124,18 @@ pub fn demo_guide(repo: &Path, files: &[FileDiff]) -> Guide {
     }
 }
 
-/// A two-chapter guide over `files`: the first two files, then the rest, with a note on the first added line of the first one.
+/// A two-chapter guide over `files`: the first two files, then the rest. The first chapter has a flowchart and a
+/// review path: stops in the first two files and one in a linked folder.
 pub fn guide_over(repo: &Path, files: &[FileDiff]) -> Guide {
     let paths: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
-    let note = files.iter().find_map(|file| {
-        let line = file
+    let stop = |file: &FileDiff, at: usize, kind: StopKind, critical: bool, node: &str, text: &str| {
+        let lines: Vec<_> = file
             .hunks
             .iter()
             .flat_map(|hunk| &hunk.lines)
-            .find(|line| line.new.is_some())?;
+            .filter(|line| line.new.is_some())
+            .collect();
+        let line = lines.get(at).or(lines.first())?;
         Some(Note {
             path: file.path.clone(),
             span: Some(Span {
@@ -1135,10 +1144,81 @@ pub fn guide_over(repo: &Path, files: &[FileDiff]) -> Guide {
                 end_line: None,
                 anchor_text: Some(line.text.clone()),
             }),
-            text: "Start here: this line sets up the rest of the change.".into(),
-            critical: false,
+            text: text.into(),
+            critical,
+            kind,
+            check: (kind == StopKind::Check).then(|| "Every view still reads from the provider.".into()),
+            node: Some(node.into()),
+            folder: None,
         })
-    });
+    };
+    let mut notes: Vec<Note> = [
+        files.first().and_then(|file| {
+            stop(
+                file,
+                0,
+                StopKind::Read,
+                false,
+                "A",
+                "Start here: this line sets up the rest of the change. The provider owns the state now.",
+            )
+        }),
+        files.first().and_then(|file| {
+            stop(
+                file,
+                2,
+                StopKind::Check,
+                true,
+                "B",
+                "The cache is filled here. A stale entry would show old data.",
+            )
+        }),
+        files.get(1).and_then(|file| {
+            stop(
+                file,
+                0,
+                StopKind::Skim,
+                false,
+                "C",
+                "The view reads the provider. Nothing else changed.",
+            )
+        }),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if !notes.is_empty() {
+        notes.insert(
+            notes.len().min(2),
+            Note {
+                path: "src/shared/state.rs".into(),
+                span: Some(Span {
+                    side: Side::New,
+                    line: 12,
+                    end_line: None,
+                    anchor_text: None,
+                }),
+                text: "Callers of this helper read the state once. They must not cache it.".into(),
+                critical: false,
+                kind: StopKind::Check,
+                check: Some("No caller keeps its own copy.".into()),
+                node: Some("D".into()),
+                folder: Some("/tmp/shared-lib".into()),
+            },
+        );
+    }
+    let mut provider = demo_chapter(
+        "The provider",
+        "Core",
+        Attention::High,
+        &paths[..paths.len().min(2)],
+        notes,
+    );
+    provider.diagrams = vec![Diagram {
+        title: Some("Who reads the state".into()),
+        kind: DiagramKind::Flowchart,
+        source: "flowchart LR\n  A[Provider] --> B[Cache]\n  A --> C[Views]\n  D[Shared helper] --> A".into(),
+    }];
     Guide {
         overview: Overview {
             title: "What this change does".into(),
@@ -1148,13 +1228,7 @@ pub fn guide_over(repo: &Path, files: &[FileDiff]) -> Guide {
         },
         diagrams: vec![],
         chapters: vec![
-            demo_chapter(
-                "The provider",
-                "Core",
-                Attention::High,
-                &paths[..paths.len().min(2)],
-                note.into_iter().collect(),
-            ),
+            provider,
             demo_chapter(
                 "Everything else",
                 "Skim",

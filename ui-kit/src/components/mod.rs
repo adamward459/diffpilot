@@ -31,7 +31,11 @@ pub use glass::{
     glass_panel, glass_surface, rim, segmented, slab, thumb, toggle_capsule,
 };
 pub use interaction::{DISABLED_OPACITY, Fills, State, interactive};
-pub use motion::{OVERLAY_DURATION, PANEL_DURATION, Presence, STATE_DURATION, Transition, closing_motions};
+pub use motion::{
+    BAND_FADE, BAND_STEP, CARD_DELAY, Ease, OVERLAY_DURATION, PANEL_DURATION, POP_DURATION, PROGRESS_DURATION,
+    PULSE_PERIOD, Presence, RISE_DURATION, STATE_DURATION, Transition, closing_motions, loop_phase, pop_scale,
+    reduced as reduced_motion, rise, stagger, stagger_end,
+};
 pub use overlay::{Dialog, Edge, SideSheet, dialog, side_sheet};
 pub use popover::{ArrowPopover, popover};
 pub use scroll::scroll_y;

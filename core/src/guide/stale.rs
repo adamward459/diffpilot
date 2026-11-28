@@ -119,6 +119,9 @@ pub fn check<F: Borrow<FileDiff>>(guide: &Guide, files: &[F]) -> Staleness {
                 .notes
                 .iter()
                 .map(|note| {
+                    if note.is_linked() {
+                        return Placement::Current;
+                    }
                     let (anchor, end_line, text) = match &note.span {
                         Some(span) => (span.anchor(&note.path), span.end_line, span.anchor_text.as_deref()),
                         None => (ThreadAnchor::file(&note.path), None, None),
@@ -285,6 +288,21 @@ mod tests {
         assert_eq!(status.chapters[0].notes, [Placement::FileGone, Placement::FileGone]);
         assert_eq!(status.chapters[0].lost_anchors(), 3);
         assert!(!file(&load(setup.repo.path()), "src/timer.ts").hunks.is_empty());
+    }
+
+    #[test]
+    fn a_note_in_a_linked_folder_has_no_diff_to_move_in_and_stays_current() {
+        let setup = setup();
+        let mut guide = setup.guide.clone();
+        let mut linked = guide.chapters[0].notes[0].clone();
+        linked.path = "src/client.ts".into();
+        linked.folder = Some("/shared".into());
+        guide.chapters[0].notes.push(linked);
+        let files = load(setup.repo.path());
+        let status = check(&guide, &files);
+        assert_eq!(status.chapters[0].notes.len(), 3);
+        assert_eq!(status.chapters[0].notes[2], Placement::Current);
+        assert!(status.chapters[0].is_current());
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! The guide prompt is adapted from diffity's `prompts/guide.md` (MIT, see THIRD_PARTY_NOTICES).
 
 use super::build::{
-    BULLET_WORDS, CHAPTER_SUMMARY_WORDS, FLOW_WORDS, IMPACT_WORDS, MAX_BULLETS, MAX_FLOW_STEPS, MAX_IMPACT, NOTE_WORDS,
+    BULLET_WORDS, CHAPTER_SUMMARY_WORDS, CHECK_WORDS, IMPACT_WORDS, MAX_BULLETS, MAX_IMPACT, NOTE_WORDS,
     OVERVIEW_TITLE_WORDS, PHASE_WORDS, SUMMARY_WORDS, TITLE_WORDS,
 };
 use super::linked::readable;
@@ -21,7 +21,7 @@ fn linked_section(folders: &[PathBuf]) -> String {
         .map(|folder| format!("- `{}`", folder.display()))
         .collect();
     format!(
-        "\n## Linked folders\n\nThe change depends on code in these folders outside the repo. Read them with Read, Grep and Glob to explain why the change looks the way it does, and to find code there that it may break. They are not part of the diff: add no chapters or notes for their files. An `impact` item in one of them sets `folder` to the folder exactly as listed here and `path` to the file inside it.\n\n{}\n",
+        "\n## Linked folders\n\nThe change depends on code in these folders outside the repo. Read them with Read, Grep and Glob to explain why the change looks the way it does, and to find code there that it may break. They are not part of the diff: add no chapters for their files. A stop in one sets `folder` the same way (see the review path). An `impact` item in one of them sets `folder` to the folder exactly as listed here and `path` to the file inside it.\n\n{}\n",
         lines.join("\n")
     )
 }
@@ -46,8 +46,7 @@ pub fn render(revisions: &[String], instructions: &str, linked: &[PathBuf]) -> S
         ("bullet_words", BULLET_WORDS),
         ("max_bullets", MAX_BULLETS),
         ("phase_words", PHASE_WORDS),
-        ("max_flow_steps", MAX_FLOW_STEPS),
-        ("flow_words", FLOW_WORDS),
+        ("check_words", CHECK_WORDS),
         ("impact_words", IMPACT_WORDS),
         ("max_impact", MAX_IMPACT),
     ];
@@ -124,7 +123,7 @@ mod tests {
         let prompt = render(&["HEAD".into()], "", &[]);
         assert!(prompt.contains(&format!("the overview summary {SUMMARY_WORDS}")));
         assert!(prompt.contains(&format!("a note {NOTE_WORDS}")));
-        assert!(prompt.contains(&format!("at most {MAX_FLOW_STEPS}")));
+        assert!(prompt.contains(&format!("a check {CHECK_WORDS}")));
     }
 
     #[test]

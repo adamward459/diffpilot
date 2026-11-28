@@ -1,12 +1,12 @@
 //! Builds a guide one call at a time, the way the MCP tools receive it, and checks each call against the diff.
 //!
 //! Every function returns an error text written for Claude, which fixes the call and sends it again. The word
-//! limits and the rules for phases, files and flow steps follow diffity's `set_guide` checks (MIT, see
+//! limits and the rules for phases and files follow diffity's `set_guide` checks (MIT, see
 //! THIRD_PARTY_NOTICES), spread over several calls instead of one.
 
 use super::mermaid::{self, DiagramKind, Graph};
 use super::stale;
-use super::{Attention, Chapter, ChapterFile, Diagram, FlowStep, Guide, Impact, Note, Overview, Span};
+use super::{Attention, Chapter, ChapterFile, Diagram, Guide, Impact, Note, Overview, Span, StopKind};
 use crate::anchor;
 use crate::diff::FileDiff;
 use crate::threads::Side;
@@ -22,8 +22,7 @@ pub const BULLET_WORDS: usize = 20;
 pub const MAX_BULLETS: usize = 3;
 pub const NOTE_WORDS: usize = 40;
 pub const PHASE_WORDS: usize = 4;
-pub const MAX_FLOW_STEPS: usize = 10;
-pub const FLOW_WORDS: usize = 25;
+pub const CHECK_WORDS: usize = 25;
 pub const MAX_IMPACT: usize = 8;
 pub const IMPACT_WORDS: usize = 25;
 pub const MAX_DIAGRAM_BYTES: usize = 8 * 1024;
@@ -106,13 +105,14 @@ pub struct NoteArgs {
     pub text: String,
     #[serde(default)]
     pub critical: bool,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FlowArg {
-    pub node: String,
-    pub text: String,
+    #[serde(default)]
+    pub kind: StopKind,
+    #[serde(default)]
+    pub check: Option<String>,
+    #[serde(default)]
+    pub node: Option<String>,
+    #[serde(default)]
+    pub folder: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -123,8 +123,6 @@ pub struct DiagramArgs {
     #[serde(default)]
     pub title: Option<String>,
     pub source: String,
-    #[serde(default)]
-    pub flow: Vec<FlowArg>,
 }
 
 #[derive(Default)]
@@ -355,7 +353,7 @@ fn impact_of(
         if item.site.trim().is_empty() || item.path.trim().is_empty() {
             continue;
         }
-        let (folder, path) = place(item, context)?;
+        let (folder, path) = place(item.folder.as_deref(), &item.path, context)?;
         if folder.is_none() && resolve(files, &path).is_some() {
             continue;
         }
@@ -384,9 +382,9 @@ fn impact_of(
 }
 
 /// The linked folder an impact item is in, and its path inside that folder or the repo.
-fn place(item: &ImpactArg, context: &[PathBuf]) -> Result<(Option<PathBuf>, String), String> {
-    let path = Path::new(item.path.trim().trim_start_matches("./"));
-    let named = item.folder.as_deref().map(str::trim).filter(|name| !name.is_empty());
+fn place(folder: Option<&str>, path: &str, context: &[PathBuf]) -> Result<(Option<PathBuf>, String), String> {
+    let path = Path::new(path.trim().trim_start_matches("./"));
+    let named = folder.map(str::trim).filter(|name| !name.is_empty());
     let folder = match named {
         Some(name) => Some(
             context
@@ -434,60 +432,118 @@ pub fn add_note(guide: &mut Guide, files: &[FileDiff], args: &NoteArgs) -> Resul
     if text.is_empty() {
         return Err("The note is empty.".into());
     }
+    let check = non_empty(args.check.as_deref());
     let mut problems = Problems::default();
     problems.words("the note", &text, NOTE_WORDS);
-    problems.done()?;
-    let file = resolve(files, &args.file).ok_or_else(|| not_in_diff(files, &[args.file.trim().to_string()]))?;
-    if !chapter.covers(&file.path) {
-        let listed: Vec<&str> = chapter.files.iter().map(|file| file.path.as_str()).collect();
-        return Err(format!(
-            "`{}` is not one of chapter {}'s files: {}. Put the note on one of them.",
-            file.path,
-            args.chapter,
-            listed.join(", ")
-        ));
+    if let Some(check) = &check {
+        problems.words("the check", check, CHECK_WORDS);
     }
-    let span = match args.line.filter(|line| *line > 0) {
-        Some(line) => Some(span(file, args.side.unwrap_or(Side::New), line, args.end_line)?),
-        None => None,
+    problems.done()?;
+    let linked = non_empty(args.folder.as_deref());
+    let (path, folder, span) = match linked {
+        Some(name) => {
+            let (folder, path) = place(Some(&name), &args.file, &guide.context)?;
+            let folder = folder.ok_or_else(|| unknown_folder(&name, &guide.context))?;
+            let span = match args.line.filter(|line| *line > 0) {
+                Some(line) => Some(linked_span(&folder, &path, line, args.end_line)?),
+                None => None,
+            };
+            (path, Some(folder), span)
+        }
+        None => {
+            let file = resolve(files, &args.file).ok_or_else(|| not_in_diff(files, &[args.file.trim().to_string()]))?;
+            if !chapter.covers(&file.path) {
+                let listed: Vec<&str> = chapter.files.iter().map(|file| file.path.as_str()).collect();
+                return Err(format!(
+                    "`{}` is not one of chapter {}'s files: {}. Put the note on one of them.",
+                    file.path,
+                    args.chapter,
+                    listed.join(", ")
+                ));
+            }
+            let span = match args.line.filter(|line| *line > 0) {
+                Some(line) => Some(span(file, args.side.unwrap_or(Side::New), line, args.end_line)?),
+                None => None,
+            };
+            (file.path.clone(), None, span)
+        }
     };
     chapter.notes.push(Note {
-        path: file.path.clone(),
+        path,
         span,
         text,
         critical: args.critical,
+        kind: args.kind,
+        check,
+        node: non_empty(args.node.as_deref()),
+        folder,
     });
     Ok(())
 }
 
-fn flow_steps(graph: &Graph, args: &[FlowArg]) -> Result<Vec<FlowStep>, String> {
-    let steps: Vec<&FlowArg> = args.iter().filter(|step| !step.node.trim().is_empty()).collect();
-    let mut problems = Problems::default();
-    if steps.len() > MAX_FLOW_STEPS {
-        problems.0.push(format!(
-            "flow has {} steps (max {MAX_FLOW_STEPS}); keep the main path",
-            steps.len()
+fn linked_span(folder: &Path, path: &str, line: u32, end_line: Option<u32>) -> Result<Span, String> {
+    let content = std::fs::read_to_string(folder.join(path)).map_err(|_| {
+        format!(
+            "`{path}` in the linked folder `{}` is not a text file.",
+            folder.display()
+        )
+    })?;
+    let lines: Vec<&str> = content.lines().collect();
+    let end = end_line.filter(|end| *end >= line).unwrap_or(line);
+    if end as usize > lines.len() {
+        return Err(format!(
+            "Lines {line}-{end} are past the end of `{path}` in the linked folder, which has {} lines.",
+            lines.len()
         ));
     }
-    let known: Option<Vec<&str>> = match graph {
+    Ok(Span {
+        side: Side::New,
+        line,
+        end_line: (end > line).then_some(end),
+        anchor_text: Some(lines[line as usize - 1..end as usize].join("\n")),
+    })
+}
+
+fn node_ids(graph: &Graph) -> Option<Vec<&str>> {
+    match graph {
         Graph::Flowchart(chart) => Some(chart.nodes.iter().map(|node| node.id.as_str()).collect()),
         Graph::Sequence(sequence) => Some(sequence.participants.iter().map(|part| part.id.as_str()).collect()),
         Graph::Source => None,
-    };
-    let mut flow = Vec::new();
-    for step in steps {
-        let node = clean(&step.node);
-        if known.as_ref().is_some_and(|known| !known.contains(&node.as_str())) {
-            return Err(format!(
-                "Flow step `{node}` is not in the diagram. Use the ids as written in it, such as `A` for `A[Load]`."
-            ));
-        }
-        let text = clean(&step.text);
-        problems.words(&format!("flow step `{node}` text"), &text, FLOW_WORDS);
-        flow.push(FlowStep { node, text });
     }
-    problems.done()?;
-    Ok(flow)
+}
+
+fn check_nodes(guide: &Guide) -> Result<(), String> {
+    for (at, chapter) in guide.chapters.iter().enumerate() {
+        let graphs: Vec<Graph> = chapter
+            .diagrams
+            .iter()
+            .filter_map(|diagram| diagram.graph().ok())
+            .collect();
+        let known: Option<Vec<&str>> = graphs
+            .iter()
+            .map(node_ids)
+            .collect::<Option<Vec<_>>>()
+            .map(|lists| lists.concat());
+        let Some(known) = known else { continue };
+        for note in &chapter.notes {
+            let Some(node) = note.node.as_deref().filter(|node| !known.contains(node)) else {
+                continue;
+            };
+            return Err(if known.is_empty() {
+                format!(
+                    "A note of chapter {} names the node `{node}`, but the chapter has no diagram. Add one with add_diagram, or leave out `node`.",
+                    at + 1
+                )
+            } else {
+                format!(
+                    "A note of chapter {} names the node `{node}`, which is not in the chapter's diagrams. Use one of: {}.",
+                    at + 1,
+                    known.join(", ")
+                )
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Adds a diagram to a chapter, or to the overview when `args.chapter` is unset.
@@ -502,15 +558,12 @@ pub fn add_diagram(guide: &mut Guide, args: &DiagramArgs) -> Result<DiagramKind,
             source.len()
         ));
     }
-    let graph =
-        mermaid::parse(source).map_err(|error| format!("{error} Fix the Mermaid text and call the tool again."))?;
+    mermaid::parse(source).map_err(|error| format!("{error} Fix the Mermaid text and call the tool again."))?;
     let kind = mermaid::kind_of(source).unwrap_or(DiagramKind::Other(String::new()));
-    let flow = flow_steps(&graph, &args.flow)?;
     let diagram = Diagram {
         title: non_empty(args.title.as_deref()),
         kind: kind.clone(),
         source: source.to_string(),
-        flow,
     };
     let count = guide.chapters.len();
     let target = match args.chapter {
@@ -547,6 +600,7 @@ pub fn finish(guide: &mut Guide, files: &[FileDiff]) -> Result<Finished, String>
     if guide.chapters.is_empty() {
         return Err("Add at least one chapter with add_chapter.".into());
     }
+    check_nodes(guide)?;
     let leftover: Vec<String> = files
         .iter()
         .filter(|file| !guide.covers(&file.path))
@@ -877,8 +931,163 @@ mod tests {
         );
     }
 
+    fn linked_setup() -> (tempfile::TempDir, PathBuf, Setup) {
+        let linked = tempfile::tempdir().unwrap();
+        let folder = linked.path().to_path_buf();
+        std::fs::create_dir_all(folder.join("src")).unwrap();
+        std::fs::write(folder.join("src/client.ts"), "one\ntwo\nthree\n").unwrap();
+        let mut setup = setup();
+        setup.guide.context = vec![folder.clone()];
+        add_chapter(&mut setup.guide, &setup.files, &chapter("Send", json!(["src/send.ts"]))).unwrap();
+        (linked, folder, setup)
+    }
+
+    fn linked_note(folder: &Path, file: &str, line: Option<u32>) -> NoteArgs {
+        serde_json::from_value(json!({
+            "chapter": 1, "folder": folder.display().to_string(), "file": file, "line": line, "text": "A caller."
+        }))
+        .unwrap()
+    }
+
     #[test]
-    fn a_diagram_must_parse_and_its_flow_must_name_its_nodes() {
+    fn a_note_in_a_linked_folder_keeps_the_text_of_its_lines_and_needs_no_diff() {
+        let (_linked, folder, mut setup) = linked_setup();
+        let mut args = linked_note(&folder, "src/client.ts", Some(2));
+        args.end_line = Some(3);
+        args.kind = StopKind::Read;
+        add_note(&mut setup.guide, &setup.files, &args).unwrap();
+        add_note(
+            &mut setup.guide,
+            &setup.files,
+            &linked_note(&folder, "./src/client.ts", None),
+        )
+        .unwrap();
+        let notes = &setup.guide.chapters[0].notes;
+        assert_eq!(
+            (notes[0].folder.as_ref(), notes[0].path.as_str(), notes[0].kind),
+            (Some(&folder), "src/client.ts", StopKind::Read)
+        );
+        let span = notes[0].span.as_ref().unwrap();
+        assert_eq!(
+            (span.side, span.line, span.end_line, span.anchor_text.as_deref()),
+            (Side::New, 2, Some(3), Some("two\nthree"))
+        );
+        assert_eq!(
+            (notes[1].span.as_ref(), notes[1].path.as_str()),
+            (None, "src/client.ts")
+        );
+    }
+
+    #[test]
+    fn a_linked_note_is_refused_outside_the_linked_folders_or_off_the_file() {
+        let (_linked, folder, mut setup) = linked_setup();
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::fs::write(elsewhere.path().join("a.ts"), "x").unwrap();
+        let outside = add_note(
+            &mut setup.guide,
+            &setup.files,
+            &linked_note(elsewhere.path(), "a.ts", None),
+        )
+        .unwrap_err();
+        assert!(
+            outside.contains("is not a linked folder") && outside.contains(&folder.display().to_string()),
+            "{outside}"
+        );
+        let missing = add_note(
+            &mut setup.guide,
+            &setup.files,
+            &linked_note(&folder, "src/gone.ts", None),
+        )
+        .unwrap_err();
+        assert!(
+            missing.contains("`src/gone.ts` is not a file in the linked folder"),
+            "{missing}"
+        );
+        let past = add_note(
+            &mut setup.guide,
+            &setup.files,
+            &linked_note(&folder, "src/client.ts", Some(4)),
+        )
+        .unwrap_err();
+        assert!(
+            past.contains("past the end of `src/client.ts`") && past.contains("3 lines"),
+            "{past}"
+        );
+        assert!(setup.guide.chapters[0].notes.is_empty());
+
+        setup.guide.context.clear();
+        let none = add_note(
+            &mut setup.guide,
+            &setup.files,
+            &linked_note(&folder, "src/client.ts", None),
+        )
+        .unwrap_err();
+        assert!(none.contains("none are linked"), "{none}");
+    }
+
+    #[test]
+    fn a_stop_keeps_its_kind_check_and_node_and_the_check_has_a_word_limit() {
+        let mut setup = setup();
+        add_chapter(&mut setup.guide, &setup.files, &chapter("Send", json!(["src/send.ts"]))).unwrap();
+        let mut args = note(1, "src/send.ts", Some(5));
+        args.kind = StopKind::Skim;
+        args.check = Some(" Delay is in seconds. ".into());
+        args.node = Some("Timer".into());
+        add_note(&mut setup.guide, &setup.files, &args).unwrap();
+        let stop = &setup.guide.chapters[0].notes[0];
+        assert_eq!(
+            (stop.kind, stop.check.as_deref(), stop.node.as_deref()),
+            (StopKind::Skim, Some("Delay is in seconds."), Some("Timer"))
+        );
+        assert_eq!(note(1, "src/send.ts", None).kind, StopKind::Check);
+
+        args.check = Some("word ".repeat(CHECK_WORDS + 1));
+        let error = add_note(&mut setup.guide, &setup.files, &args).unwrap_err();
+        assert!(
+            error.contains(&format!("the check is {} words", CHECK_WORDS + 1)),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn finishing_refuses_a_node_that_is_not_in_the_chapters_diagrams_and_names_the_ids() {
+        let mut setup = setup();
+        set_overview(
+            &mut setup.guide,
+            &OverviewArgs {
+                title: "Undo send".into(),
+                summary: "Waits.".into(),
+                before: None,
+                after: None,
+            },
+        )
+        .unwrap();
+        add_chapter(&mut setup.guide, &setup.files, &chapter("Send", json!(["src/send.ts"]))).unwrap();
+        let mut stop = note(1, "src/send.ts", Some(5));
+        stop.node = Some("Nope".into());
+        add_note(&mut setup.guide, &setup.files, &stop).unwrap();
+
+        let no_diagram = finish(&mut setup.guide, &setup.files).unwrap_err();
+        assert!(
+            no_diagram.contains("`Nope`") && no_diagram.contains("no diagram"),
+            "{no_diagram}"
+        );
+
+        let mut chart = diagram("flowchart LR\n  Send --> Timer");
+        chart.chapter = Some(1);
+        add_diagram(&mut setup.guide, &chart).unwrap();
+        let error = finish(&mut setup.guide, &setup.files).unwrap_err();
+        assert!(
+            error.contains("`Nope`") && error.contains("Use one of: Send, Timer"),
+            "{error}"
+        );
+
+        setup.guide.chapters[0].notes[0].node = Some("Timer".into());
+        assert!(finish(&mut setup.guide, &setup.files).is_ok());
+    }
+
+    #[test]
+    fn a_diagram_must_parse() {
         let mut setup = setup();
         add_chapter(&mut setup.guide, &setup.files, &chapter("Send", json!(["src/send.ts"]))).unwrap();
 
@@ -888,32 +1097,12 @@ mod tests {
             "{broken}"
         );
 
-        let mut flowing = diagram("flowchart LR\n  Send[Send]:::changed --> Timer[[Timer]]:::added");
-        flowing.flow = vec![
-            FlowArg {
-                node: "Send".into(),
-                text: "The user sends.".into(),
-            },
-            FlowArg {
-                node: "Timer".into(),
-                text: "A timer starts.".into(),
-            },
-        ];
+        let flowing = diagram("flowchart LR\n  Send[Send]:::changed --> Timer[[Timer]]:::added");
         assert_eq!(add_diagram(&mut setup.guide, &flowing), Ok(DiagramKind::Flowchart));
-        assert_eq!(setup.guide.diagrams[0].flow.len(), 2);
         assert!(matches!(setup.guide.diagrams[0].graph(), Ok(Graph::Flowchart(_))));
-
-        flowing.flow[1].node = "Nope".into();
-        let error = add_diagram(&mut setup.guide, &flowing).unwrap_err();
-        assert!(error.contains("`Nope` is not in the diagram"), "{error}");
-        assert_eq!(setup.guide.diagrams.len(), 1);
 
         let mut sequence = diagram("sequenceDiagram\n  UI->>Service: send");
         sequence.chapter = Some(1);
-        sequence.flow = vec![FlowArg {
-            node: "Service".into(),
-            text: "Queues it.".into(),
-        }];
         assert_eq!(add_diagram(&mut setup.guide, &sequence), Ok(DiagramKind::Sequence));
         assert_eq!(setup.guide.chapters[0].diagrams.len(), 1);
 

@@ -53,6 +53,16 @@ impl Span {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StopKind {
+    Read,
+    #[default]
+    Check,
+    Skim,
+}
+
+/// A stop on the chapter's review path. The notes of a chapter are its stops, in the order to read them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Note {
     pub path: String,
@@ -60,6 +70,22 @@ pub struct Note {
     pub text: String,
     /// The reviewer should take extra care here: security, data loss, hard to undo, easy to get wrong.
     pub critical: bool,
+    #[serde(default)]
+    pub kind: StopKind,
+    #[serde(default)]
+    pub check: Option<String>,
+    /// A node id in one of the chapter's diagrams.
+    #[serde(default)]
+    pub node: Option<String>,
+    /// A linked folder. `path` is then inside it, and the stop has no diff.
+    #[serde(default)]
+    pub folder: Option<PathBuf>,
+}
+
+impl Note {
+    pub fn is_linked(&self) -> bool {
+        self.folder.is_some()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,17 +106,10 @@ pub struct Impact {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowStep {
-    pub node: String,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Diagram {
     pub title: Option<String>,
     pub kind: DiagramKind,
     pub source: String,
-    pub flow: Vec<FlowStep>,
 }
 
 impl Diagram {
@@ -200,6 +219,27 @@ mod tests {
         assert_eq!(span(Some(8)).last_line(), 8);
         assert_eq!(span(Some(2)).last_line(), 5);
         assert_eq!(span(None).anchor("a.ts"), ThreadAnchor::line("a.ts", Side::New, 5));
+    }
+
+    #[test]
+    fn a_guide_stored_before_review_paths_still_loads() {
+        let old = r#"{
+            "overview": { "title": "T", "summary": "S", "before": null, "after": null },
+            "diagrams": [{ "title": null, "kind": "flowchart", "source": "flowchart LR\n  A --> B",
+                           "flow": [{ "node": "A", "text": "Start." }] }],
+            "chapters": [{ "title": "C", "summary": "S", "phase": null, "attention": "normal", "points": [],
+                           "focus": [], "files": [], "impact": [], "diagrams": [],
+                           "notes": [{ "path": "a.ts", "span": null, "text": "Mind this.", "critical": true }] }],
+            "fingerprint": "f", "file_fingerprints": {}, "head": null
+        }"#;
+        let guide: Guide = serde_json::from_str(old).unwrap();
+        let note = &guide.chapters[0].notes[0];
+        assert_eq!(
+            (note.kind, note.check.as_ref(), note.node.as_ref(), note.folder.as_ref()),
+            (StopKind::Check, None, None, None)
+        );
+        assert!(note.critical && !note.is_linked());
+        assert_eq!(guide.diagrams[0].source, "flowchart LR\n  A --> B");
     }
 
     #[test]

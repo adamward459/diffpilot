@@ -75,6 +75,13 @@ const SCHEMA: &str = "
       fingerprint TEXT NOT NULL,
       PRIMARY KEY (repo, branch, path)
     ) WITHOUT ROWID;
+
+    CREATE TABLE IF NOT EXISTS reviewed_stops (
+      guide_id INTEGER NOT NULL REFERENCES guides (id) ON DELETE CASCADE,
+      chapter INTEGER NOT NULL,
+      note INTEGER NOT NULL,
+      PRIMARY KEY (guide_id, chapter, note)
+    ) WITHOUT ROWID;
 ";
 
 pub(super) fn create(conn: &Connection) -> Result<()> {

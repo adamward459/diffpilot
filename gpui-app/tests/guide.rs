@@ -1,11 +1,11 @@
 use diffpilot::diff_pane::rows::{BlockId, RowKind};
-use diffpilot::guide::session::{GuideRun, Step};
+use diffpilot::guide::session::{GuideRun, GuideSession, Step};
 use diffpilot::repo_view::{Nav, RepoView};
 use diffpilot::runs::Runs;
 use diffpilot::testing::{self, demo_guide, fixture, open_repo_in_workspace};
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::FileDiff;
-use diffpilot_core::guide::{Diagram, DiagramKind, FlowStep, Guide};
+use diffpilot_core::guide::{Diagram, DiagramKind, Guide, Note, Span, StopKind};
 use diffpilot_core::mcp::McpBridge;
 use diffpilot_core::review::ReviewModel;
 use diffpilot_core::run::RunKind;
@@ -268,27 +268,39 @@ fn a_stored_guide_opens_on_the_overview_and_start_reading_shows_chapter_one(app:
         }
     });
     assert!(
-        cx.debug_bounds("guide-mark-continue").is_some(),
-        "the inspector shows in a chapter"
+        cx.debug_bounds("guide-review-count").is_some(),
+        "the inspector shows the review path in a chapter with stops"
     );
+    assert!(cx.debug_bounds("guide-mark-continue").is_none());
 }
 
 #[gpui::test]
-fn mark_viewed_and_continue_marks_the_chapter_and_opens_the_next(app: &mut TestAppContext) {
+fn mark_viewed_and_continue_marks_a_chapter_without_stops_and_opens_the_next(app: &mut TestAppContext) {
     let (world, cx) = open(app, false);
     store_guide(&world, cx);
     show_guide(&world, cx);
-    click(cx, "guide-start-reading");
+    let guide = world.view.read_with(cx, |view, _| view.guide());
+    guide.update(cx, |guide, cx| guide.go(Step::Chapter(1), cx));
+    cx.run_until_parked();
     click(cx, "guide-mark-continue");
     cx.run_until_parked();
 
-    let guide = world.view.read_with(cx, |view, _| view.guide());
-    assert_eq!(guide.read_with(cx, |guide, _| guide.step()), Step::Chapter(1));
-    assert_eq!(pane_paths(&world, cx), ["base.txt", "docs/committed.md"]);
+    assert_eq!(
+        guide.read_with(cx, |guide, _| guide.step()),
+        Step::Overview,
+        "past the last chapter is the overview"
+    );
     let viewed = guide.read_with(cx, |guide, _| guide.viewed().clone());
-    assert!(viewed.contains("src/staged.rs"), "{viewed:?}");
+    assert!(
+        viewed.contains("base.txt") && viewed.contains("docs/committed.md"),
+        "{viewed:?}"
+    );
     assert_eq!(guide.read_with(cx, |guide, _| guide.read_count()), 1);
-    assert_eq!(guide.read_with(cx, |guide, _| guide.first_unread()), 1);
+    assert_eq!(
+        guide.read_with(cx, |guide, _| guide.first_unread()),
+        0,
+        "the chapter with stops is read when its stops are reviewed"
+    );
 }
 
 #[gpui::test]
@@ -345,17 +357,207 @@ fn the_chapter_keys_step_through_the_chapters_and_back_to_the_overview(app: &mut
     let (world, cx) = open(app, false);
     store_guide(&world, cx);
     show_guide(&world, cx);
-    click(cx, "guide-start-reading");
     let guide = world.view.read_with(cx, |view, _| view.guide());
+    guide.update(cx, |guide, cx| guide.go(Step::Chapter(1), cx));
     let step = |cx: &mut VisualTestContext| guide.read_with(cx, |guide, _| guide.step());
 
-    world.view.update(cx, |view, cx| view.step_chapter(1, cx));
-    assert_eq!(step(cx), Step::Chapter(1));
-    world.view.update(cx, |view, cx| view.step_chapter(1, cx));
-    assert_eq!(step(cx), Step::Overview, "past the last chapter is the overview");
+    testing::press(cx, "]");
+    assert_eq!(
+        step(cx),
+        Step::Overview,
+        "a chapter with no stops steps to the next chapter, past the last is the overview"
+    );
 
-    world.view.update(cx, |view, cx| view.step_chapter(-1, cx));
+    testing::press(cx, "[");
     assert_eq!(step(cx), Step::Overview, "the keys do nothing outside a chapter");
+
+    guide.update(cx, |guide, cx| guide.go(Step::Chapter(1), cx));
+    testing::press(cx, "[");
+    assert_eq!(step(cx), Step::Chapter(0));
+}
+
+fn read_stops(guide: &mut Guide) {
+    guide.chapters[0].notes[0].kind = StopKind::Read;
+    guide.chapters[0].notes[1].check = Some("Is the value ever negative?".into());
+}
+
+fn open_first_chapter(world: &World, cx: &mut VisualTestContext) -> Entity<GuideSession> {
+    store_guide_with(world, cx, read_stops);
+    show_guide(world, cx);
+    click(cx, "guide-start-reading");
+    world.view.read_with(cx, |view, _| view.guide())
+}
+
+fn stop(guide: &Entity<GuideSession>, cx: &mut VisualTestContext) -> Option<usize> {
+    guide.read_with(cx, |guide, _| guide.current_stop())
+}
+
+fn card_line(world: &World, cx: &mut VisualTestContext, slot: u32) -> Option<u32> {
+    let pane = world.view.read_with(cx, |view, _| view.pane());
+    pane.read_with(cx, |pane, _| {
+        let state = pane.state();
+        let row = state.rows.block_row(slot)?;
+        let RowKind::Line { hunk, line } = state.rows.rows[row - 1].kind else {
+            return None;
+        };
+        state.files[0].hunks[hunk as usize].lines[line as usize].new
+    })
+}
+
+#[gpui::test]
+fn entering_a_chapter_shows_the_first_stop_card_and_the_key_moves_it_to_the_next_stop(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let guide = open_first_chapter(&world, cx);
+    assert_eq!(stop(&guide, cx), Some(0));
+    assert!(testing::shows(cx, "pane:stop-card:1"), "the first stop is expanded");
+    assert!(testing::shows(cx, "pane:stop-kind"));
+    assert!(testing::shows(cx, "pane:stop-looks-good"));
+    assert_eq!(card_line(&world, cx, 0), Some(5));
+
+    testing::press(cx, "]");
+    assert_eq!(stop(&guide, cx), Some(1));
+    assert!(testing::shows(cx, "pane:stop-card:2"));
+    assert!(testing::shows(cx, "pane:stop-check:Is the value ever negative?"));
+    assert!(testing::shows(cx, "pane:stop-critical"), "the second note is critical");
+    assert_eq!(card_line(&world, cx, 1), Some(7));
+
+    testing::press(cx, "[");
+    assert_eq!(stop(&guide, cx), Some(0));
+}
+
+#[gpui::test]
+fn v_marks_the_stop_reviewed_and_moves_on_and_the_mark_survives_reopening(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let guide = open_first_chapter(&world, cx);
+
+    testing::press(cx, "v");
+    assert_eq!(stop(&guide, cx), Some(1));
+    assert!(guide.read_with(cx, |guide, _| guide.reviewed().contains(&(0, 0))));
+    let id = guide.read_with(cx, |guide, _| guide.stored().unwrap().id);
+    assert!(world.store.reviewed_stops(id).unwrap().contains(&(0, 0)));
+    assert_eq!(guide.read_with(cx, |guide, _| guide.read_count()), 0);
+
+    testing::press(cx, "v");
+    assert_eq!(stop(&guide, cx), Some(1), "at the end the cursor stays");
+    assert_eq!(
+        guide.read_with(cx, |guide, _| guide.read_count()),
+        1,
+        "all stops reviewed reads the chapter"
+    );
+
+    let review = world.view.read_with(cx, |view, _| view.review());
+    let original = review.read_with(cx, |review, _| review.host().comparison.clone());
+    for comparison in [Comparison::Staged, original] {
+        world
+            .view
+            .update_in(cx, |view, window, cx| view.select_comparison(comparison, window, cx));
+        cx.run_until_parked();
+    }
+    let reopened = world.view.read_with(cx, |view, _| view.guide());
+    assert_ne!(reopened.entity_id(), guide.entity_id(), "the session was rebuilt");
+    assert_eq!(reopened.read_with(cx, |guide, _| guide.reviewed().len()), 2);
+    reopened.update(cx, |guide, cx| guide.go(Step::Chapter(0), cx));
+    assert_eq!(
+        stop(&reopened, cx),
+        Some(0),
+        "every stop is reviewed, so the entry is the first stop"
+    );
+}
+
+#[gpui::test]
+fn a_skipped_stop_is_the_next_open_one_after_looks_good(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let guide = open_first_chapter(&world, cx);
+
+    testing::click(cx, "pane:stop-skip");
+    assert_eq!(stop(&guide, cx), Some(1));
+    assert!(
+        guide.read_with(cx, |guide, _| guide.reviewed().is_empty()),
+        "skip marks nothing"
+    );
+    testing::press(cx, "v");
+    assert_eq!(stop(&guide, cx), Some(0), "the skipped stop is still open");
+}
+
+#[gpui::test]
+fn entering_a_chapter_starts_at_the_first_unreviewed_stop(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let guide = open_first_chapter(&world, cx);
+    testing::press(cx, "v");
+    guide.update(cx, |guide, cx| guide.go(Step::Overview, cx));
+    guide.update(cx, |guide, cx| guide.go(Step::Chapter(0), cx));
+    assert_eq!(stop(&guide, cx), Some(1));
+}
+
+#[gpui::test]
+fn the_last_stop_hands_the_key_to_the_next_chapter_and_the_first_stop_to_the_previous_one(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let guide = open_first_chapter(&world, cx);
+    testing::press(cx, "]");
+    assert_eq!(stop(&guide, cx), Some(1));
+
+    testing::press(cx, "]");
+    assert_eq!(guide.read_with(cx, |guide, _| guide.step()), Step::Chapter(1));
+    assert_eq!(pane_paths(&world, cx), ["base.txt", "docs/committed.md"]);
+
+    testing::press(cx, "[");
+    assert_eq!(guide.read_with(cx, |guide, _| guide.step()), Step::Chapter(0));
+    assert_eq!(stop(&guide, cx), Some(0));
+    testing::press(cx, "[");
+    assert_eq!(
+        guide.read_with(cx, |guide, _| guide.step()),
+        Step::Overview,
+        "before the first stop of the first chapter"
+    );
+}
+
+#[gpui::test]
+fn the_looks_good_button_works_like_the_key(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let guide = open_first_chapter(&world, cx);
+
+    testing::click(cx, "pane:stop-looks-good");
+    assert_eq!(stop(&guide, cx), Some(1));
+    assert!(guide.read_with(cx, |guide, _| guide.reviewed().contains(&(0, 0))));
+    assert!(testing::shows(cx, "pane:stop-card:2"));
+}
+
+#[gpui::test]
+fn the_comment_button_starts_a_comment_on_the_stop_line(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    open_first_chapter(&world, cx);
+    testing::press(cx, "]");
+    testing::click(cx, "pane:stop-comment");
+    assert!(
+        testing::shows(cx, "thread:cancel:src/staged.rs:7"),
+        "a draft opens on the second stop's line"
+    );
+}
+
+#[gpui::test]
+fn a_note_in_a_linked_folder_is_a_stop_and_the_pane_shows_no_card_for_it(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    store_guide_with(&world, cx, |guide| {
+        let mut linked = guide.chapters[0].notes[0].clone();
+        linked.path = "lib/util.rs".into();
+        linked.folder = Some("/tmp/shared".into());
+        guide.chapters[0].notes.insert(1, linked);
+    });
+    show_guide(&world, cx);
+    click(cx, "guide-start-reading");
+    let guide = world.view.read_with(cx, |view, _| view.guide());
+    testing::press(cx, "]");
+    assert_eq!(stop(&guide, cx), Some(1), "the linked note is the second stop");
+    assert_eq!(pane_paths(&world, cx), ["src/staged.rs"], "no wrong file is revealed");
+    let pane = world.view.read_with(cx, |view, _| view.pane());
+    assert_eq!(
+        pane.read_with(cx, |pane, _| pane.state().blocks.len()),
+        2,
+        "the two diff notes only"
+    );
+    testing::press(cx, "]");
+    assert_eq!(stop(&guide, cx), Some(2));
+    assert!(testing::shows(cx, "pane:stop-card:3"));
 }
 
 fn flowchart() -> Diagram {
@@ -363,16 +565,6 @@ fn flowchart() -> Diagram {
         title: Some("Undo path".into()),
         kind: DiagramKind::Flowchart,
         source: "flowchart LR\n  A[Browser]:::changed -->|POST| B{Valid}\n  B --> C(Handler):::added".into(),
-        flow: vec![
-            FlowStep {
-                node: "A".into(),
-                text: "The browser sends the request.".into(),
-            },
-            FlowStep {
-                node: "B".into(),
-                text: "The request is checked.".into(),
-            },
-        ],
     }
 }
 
@@ -394,17 +586,6 @@ fn a_flowchart_is_drawn_on_the_overview_and_the_source_switch_shows_its_text(app
 }
 
 #[gpui::test]
-fn the_walkthrough_shows_the_step_text_under_the_diagram(app: &mut TestAppContext) {
-    let (world, cx) = open(app, false);
-    store_guide_with(&world, cx, |guide| guide.diagrams = vec![flowchart()]);
-    show_guide(&world, cx);
-    assert!(cx.debug_bounds("guide-diagram-step-text").is_none());
-
-    click(cx, "guide-diagram-next");
-    assert!(cx.debug_bounds("guide-diagram-step-text").is_some());
-}
-
-#[gpui::test]
 fn a_diagram_that_cannot_be_drawn_falls_back_to_its_source_with_a_note(app: &mut TestAppContext) {
     let (world, cx) = open(app, false);
     store_guide_with(&world, cx, |guide| {
@@ -412,7 +593,6 @@ fn a_diagram_that_cannot_be_drawn_falls_back_to_its_source_with_a_note(app: &mut
             title: None,
             kind: DiagramKind::Other("gantt".into()),
             source: "gantt\n  title Plan".into(),
-            flow: vec![],
         }];
     });
     show_guide(&world, cx);
@@ -433,7 +613,6 @@ fn a_chapter_diagram_is_drawn_in_the_inspector(app: &mut TestAppContext) {
             title: Some("Retry".into()),
             kind: DiagramKind::Sequence,
             source: "sequenceDiagram\n  A->>B: request\n  B-->>A: reply".into(),
-            flow: vec![],
         }];
     });
     show_guide(&world, cx);
@@ -624,7 +803,7 @@ fn long_overview_text_wraps_inside_its_cards_and_chapter_rows(app: &mut TestAppC
 #[gpui::test]
 fn long_inspector_text_wraps_and_a_long_next_label_stays_in_its_button(app: &mut TestAppContext) {
     let (world, cx) = open(app, false);
-    cx.simulate_resize(gpui::size(gpui::px(900.), gpui::px(900.)));
+    cx.simulate_resize(gpui::size(gpui::px(900.), gpui::px(1800.)));
     store_guide_with(&world, cx, long_guide);
     show_guide(&world, cx);
     let guide = world.view.read_with(cx, |view, _| view.guide());
@@ -641,4 +820,332 @@ fn long_inspector_text_wraps_and_a_long_next_label_stays_in_its_button(app: &mut
     let label = testing::bounds(cx, "guide-next-label");
     assert!(inside(button, inspector), "{button:?} {inspector:?}");
     assert!(inside(label, button), "{label:?} is inside {button:?}");
+}
+
+fn map_chart() -> Diagram {
+    Diagram {
+        title: Some("Pipeline".into()),
+        kind: DiagramKind::Flowchart,
+        source: "flowchart LR\n  A[Parser] --> B[Writer]\n  B --> C[Output]".into(),
+    }
+}
+
+fn path_guide(guide: &mut Guide) {
+    read_stops(guide);
+    guide.chapters[0].diagrams = vec![map_chart()];
+    guide.chapters[0].notes[0].node = Some("A".into());
+    guide.chapters[0].notes[1].node = Some("B".into());
+    let moved = guide.chapters[1].files.pop().unwrap();
+    guide.chapters[0].files.push(moved);
+}
+
+fn open_path_chapter(world: &World, cx: &mut VisualTestContext) -> Entity<GuideSession> {
+    cx.simulate_resize(gpui::size(gpui::px(1300.), gpui::px(1100.)));
+    store_guide_with(world, cx, path_guide);
+    show_guide(world, cx);
+    click(cx, "guide-start-reading");
+    world.view.read_with(cx, |view, _| view.guide())
+}
+
+#[gpui::test]
+fn the_panel_lists_the_stops_and_a_row_click_moves_the_stop_card(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let guide = open_path_chapter(&world, cx);
+    assert!(testing::shows(cx, "guide-review-count"));
+    assert!(testing::shows(cx, "guide-stop-row:1"));
+    assert!(testing::shows(cx, "guide-stop-row:2"));
+    assert!(testing::shows(cx, "pane:stop-card:1"));
+    assert!(
+        !testing::shows(cx, "guide-stop-check:Is the value ever negative?"),
+        "only the current row shows its check"
+    );
+
+    testing::click(cx, "guide-stop-row:2");
+    assert_eq!(stop(&guide, cx), Some(1));
+    assert!(testing::shows(cx, "pane:stop-card:2"));
+    assert!(testing::shows(cx, "guide-stop-check:Is the value ever negative?"));
+    assert_eq!(card_line(&world, cx, 1), Some(7));
+
+    testing::click(cx, "guide-stop-prev");
+    assert_eq!(stop(&guide, cx), Some(0));
+    testing::click(cx, "guide-stop-next");
+    assert_eq!(stop(&guide, cx), Some(1));
+}
+
+#[gpui::test]
+fn only_a_critical_stop_has_a_danger_mark_in_the_panel_list(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    open_path_chapter(&world, cx);
+    assert!(testing::shows(cx, "guide-stop-row:2"));
+    assert!(testing::shows(cx, "guide-stop-critical:2"));
+    assert!(testing::shows(cx, "guide-stop-row:1"));
+    assert!(!testing::shows(cx, "guide-stop-critical:1"));
+}
+
+fn fill_width(cx: &mut VisualTestContext, selector: &str) -> f32 {
+    f32::from(testing::settled_bounds(cx, selector).size.width)
+}
+
+#[gpui::test]
+fn reviewing_a_stop_checks_its_row_and_fills_the_navigator_bar(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let guide = open_path_chapter(&world, cx);
+    assert!(fill_width(cx, "guide-chapter-bar:1") < 0.5);
+    assert!(testing::shows(cx, "guide-chapter-progress:1"));
+
+    testing::press(cx, "v");
+    assert!(testing::shows(cx, "guide-stop-done:1"));
+    let half = fill_width(cx, "guide-chapter-bar:1");
+    assert!(
+        (half - 14.0).abs() < 1.0,
+        "one of two stops fills half of the bar: {half}"
+    );
+    assert!(!testing::shows(cx, "guide-chapter-reviewed"));
+
+    testing::press(cx, "v");
+    assert!(testing::shows(cx, "guide-stop-done:2"));
+    assert!((fill_width(cx, "guide-chapter-bar:1") - 28.0).abs() < 1.0);
+    assert!(
+        testing::shows(cx, "guide-chapter-reviewed"),
+        "every stop is reviewed, so the chapter is"
+    );
+
+    testing::click(cx, "guide-chapter-reviewed-next");
+    assert_eq!(guide.read_with(cx, |guide, _| guide.step()), Step::Chapter(1));
+}
+
+#[gpui::test]
+fn a_map_node_with_stops_moves_to_its_first_stop(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let guide = open_path_chapter(&world, cx);
+    assert!(testing::shows(cx, "guide-map"));
+    assert_eq!(stop(&guide, cx), Some(0));
+
+    testing::click(cx, "guide-map-node:B");
+    assert_eq!(stop(&guide, cx), Some(1));
+    assert!(testing::shows(cx, "pane:stop-card:2"));
+
+    testing::click(cx, "guide-map-node:A");
+    assert_eq!(stop(&guide, cx), Some(0));
+    assert!(
+        !testing::shows(cx, "guide-map-node:C"),
+        "a node without stops is not a button"
+    );
+}
+
+#[gpui::test]
+fn the_overview_counts_the_stops_and_start_review_opens_the_first_open_one(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    cx.simulate_resize(gpui::size(gpui::px(1300.), gpui::px(1100.)));
+    store_guide_with(&world, cx, |guide| {
+        path_guide(guide);
+        let mut extra = guide.chapters[0].notes[0].clone();
+        extra.path = "base.txt".into();
+        extra.span = None;
+        extra.node = None;
+        guide.chapters[1].notes.push(extra);
+    });
+    show_guide(&world, cx);
+    let guide = world.view.read_with(cx, |view, _| view.guide());
+    assert!(testing::shows(cx, "guide-review-banner"));
+    assert!(testing::shows(cx, "guide-review-counts"));
+    assert!(testing::shows(cx, "guide-chapter-stops:0"));
+    assert!(testing::shows(cx, "guide-chapter-stops:1"));
+
+    testing::click(cx, "guide-review-start");
+    assert_eq!(guide.read_with(cx, |guide, _| guide.step()), Step::Chapter(0));
+    assert_eq!(stop(&guide, cx), Some(0));
+
+    testing::press(cx, "v");
+    testing::press(cx, "v");
+    guide.update(cx, |guide, cx| guide.go(Step::Overview, cx));
+    testing::click(cx, "guide-review-start");
+    assert_eq!(
+        guide.read_with(cx, |guide, _| guide.step()),
+        Step::Chapter(1),
+        "chapter one is reviewed, so the review starts at the next chapter with an open stop"
+    );
+
+    guide.update(cx, |guide, cx| guide.go(Step::Overview, cx));
+    testing::click(cx, "guide-chapter-review:0");
+    assert_eq!(guide.read_with(cx, |guide, _| guide.step()), Step::Chapter(0));
+}
+
+#[gpui::test]
+fn a_chapter_file_that_no_stop_points_at_is_listed_as_not_on_the_path(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let guide = open_path_chapter(&world, cx);
+    assert!(testing::shows(cx, "guide-not-on-path"));
+    assert!(testing::shows(cx, "guide-off-path:docs/committed.md"));
+    assert!(
+        !testing::shows(cx, "guide-off-path:src/staged.rs"),
+        "the stops point at this file"
+    );
+    testing::click(cx, "guide-off-path:docs/committed.md");
+    assert_eq!(guide.read_with(cx, |guide, _| guide.step()), Step::Chapter(0));
+    assert_eq!(pane_paths(&world, cx), ["src/staged.rs", "docs/committed.md"]);
+}
+
+const READER: &str = "use std::fmt;\n\nstruct Reader {\n    path: String,\n}\n\nimpl Reader {\n    fn read(&self) -> String {\n        std::fs::read_to_string(&self.path).unwrap()\n    }\n}\n";
+
+fn linked_folder() -> tempfile::TempDir {
+    let folder = tempfile::tempdir().unwrap();
+    testing::write(folder.path(), "src/reader.rs", READER);
+    folder
+}
+
+fn linked_at(at: usize, folder: &Path, file: &str, anchor: &str) -> impl FnOnce(&mut Guide) {
+    let (folder, file, anchor) = (folder.to_path_buf(), file.to_string(), anchor.to_string());
+    move |guide| {
+        read_stops(guide);
+        guide.context.push(folder.clone());
+        guide.chapters[0].notes.insert(
+            at,
+            Note {
+                path: file,
+                span: Some(Span {
+                    side: diffpilot_core::threads::Side::New,
+                    line: 9,
+                    end_line: None,
+                    anchor_text: Some(anchor),
+                }),
+                text: "Readers call this once per file. They never cache it.".into(),
+                critical: false,
+                kind: StopKind::Check,
+                check: Some("No caller keeps its own copy.".into()),
+                node: None,
+                folder: Some(folder),
+            },
+        );
+    }
+}
+
+fn open_with_linked(
+    world: &World,
+    cx: &mut VisualTestContext,
+    at: usize,
+    file: &str,
+    anchor: &str,
+    folder: &Path,
+) -> Entity<GuideSession> {
+    store_guide_with(world, cx, linked_at(at, folder, file, anchor));
+    show_guide(world, cx);
+    click(cx, "guide-start-reading");
+    world.view.read_with(cx, |view, _| view.guide())
+}
+
+#[gpui::test]
+fn a_linked_stop_shows_the_file_with_its_lines_banded_and_v_returns_to_the_diff(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let folder = linked_folder();
+    let guide = open_with_linked(
+        &world,
+        cx,
+        1,
+        "src/reader.rs",
+        "        std::fs::read_to_string(&self.path).unwrap()",
+        folder.path(),
+    );
+
+    testing::press(cx, "]");
+    assert_eq!(stop(&guide, cx), Some(1));
+    assert!(testing::shows(cx, "pane:linked-pill"));
+    assert!(testing::shows(cx, "pane:linked-context"));
+    assert!(
+        testing::shows(
+            cx,
+            "pane:linked-band:9:        std::fs::read_to_string(&self.path).unwrap()"
+        ),
+        "the stop's line is banded"
+    );
+    assert!(
+        testing::shows(cx, "pane:linked-line:5"),
+        "four lines of context sit above"
+    );
+    assert!(
+        testing::shows(cx, "pane:linked-line:11"),
+        "and below, up to the end of the file"
+    );
+    assert!(
+        !testing::shows(cx, "pane:linked-line:4"),
+        "nothing further above (never drawn in this window)"
+    );
+    assert!(testing::shows(cx, "pane:stop-card:2"));
+    assert!(testing::shows(cx, "pane:stop-looks-good"));
+    assert!(!testing::shows(cx, "pane:linked-moved"));
+
+    testing::press(cx, "v");
+    assert_eq!(stop(&guide, cx), Some(2));
+    assert!(guide.read_with(cx, |guide, _| guide.reviewed().contains(&(0, 1))));
+    assert!(
+        testing::shows(cx, "pane:stop-card:3"),
+        "the diff pane shows the next card"
+    );
+}
+
+#[gpui::test]
+fn a_linked_stop_has_no_comment_button(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let folder = linked_folder();
+    let guide = open_with_linked(
+        &world,
+        cx,
+        0,
+        "src/reader.rs",
+        "        std::fs::read_to_string(&self.path).unwrap()",
+        folder.path(),
+    );
+    assert_eq!(stop(&guide, cx), Some(0));
+    assert!(testing::shows(cx, "pane:stop-card:1"));
+    assert!(testing::shows(cx, "pane:stop-skip"));
+    assert!(
+        !testing::shows(cx, "pane:stop-comment"),
+        "a file outside the diff has no line to comment on"
+    );
+}
+
+#[gpui::test]
+fn the_looks_good_button_on_a_linked_stop_marks_it_and_moves_on(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let folder = linked_folder();
+    let guide = open_with_linked(
+        &world,
+        cx,
+        0,
+        "src/reader.rs",
+        "        std::fs::read_to_string(&self.path).unwrap()",
+        folder.path(),
+    );
+    testing::press(cx, "]");
+    testing::click(cx, "pane:stop-looks-good");
+    assert_eq!(stop(&guide, cx), Some(2));
+    assert!(testing::shows(cx, "pane:stop-card:3"));
+    testing::press(cx, "[");
+    assert_eq!(stop(&guide, cx), Some(1));
+    assert!(guide.read_with(cx, |guide, _| guide.reviewed().contains(&(0, 1))));
+}
+
+#[gpui::test]
+fn a_linked_stop_whose_file_is_gone_says_so_and_keeps_the_card(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let folder = linked_folder();
+    let guide = open_with_linked(&world, cx, 1, "src/missing.rs", "x", folder.path());
+    testing::press(cx, "]");
+    assert_eq!(stop(&guide, cx), Some(1));
+    assert!(testing::shows(cx, "pane:linked-gone"));
+    assert!(testing::shows(cx, "pane:linked-pill"));
+    assert!(!testing::shows(cx, "pane:linked-band:9:x"));
+    assert!(testing::shows(cx, "pane:stop-card:2"));
+}
+
+#[gpui::test]
+fn a_linked_stop_whose_lines_changed_shows_the_file_with_a_moved_note(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    let folder = linked_folder();
+    let guide = open_with_linked(&world, cx, 1, "src/reader.rs", "let text = old_code();", folder.path());
+    testing::press(cx, "]");
+    assert_eq!(stop(&guide, cx), Some(1));
+    assert!(testing::shows(cx, "pane:linked-moved"));
+    assert!(testing::shows(cx, "pane:linked-line:5"));
+    assert!(testing::shows(cx, "pane:stop-card:2"));
 }

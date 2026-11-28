@@ -28,7 +28,7 @@ The reviewer can read *what* the code does in the diff. Tell them *why*: the pro
 
 Write it the way you would explain the change to a teammate sitting next to you: plain words, short sentences, no filler, no praise. Say the one thing that matters and stop. The reviewer is about to read the code anyway.
 
-- Each field has a word limit, and the tool rejects text over it. Aim well under it. A chapter title is at most {{title_words}} words, the overview title {{overview_title_words}}, the overview summary {{summary_words}}, a chapter summary {{chapter_summary_words}}, a note {{note_words}}, a point or a focus item {{bullet_words}} (at most {{max_bullets}} of each), a phase {{phase_words}}.
+- Each field has a word limit, and the tool rejects text over it. Aim well under it. A chapter title is at most {{title_words}} words, the overview title {{overview_title_words}}, the overview summary {{summary_words}}, a chapter summary {{chapter_summary_words}}, a note {{note_words}}, a check {{check_words}}, a point or a focus item {{bullet_words}} (at most {{max_bullets}} of each), a phase {{phase_words}}.
 - At most one `code` name per sentence. A sentence full of identifiers reads like the diff, not like an explanation.
 - A chapter summary says why the chapter exists. Put the rest in `points`, one fact each, or leave it out.
 - `focus` is what to check while reading the chapter's files.
@@ -37,13 +37,22 @@ Too dense: "The data lives on the existing `youtube` Tiptap node as `duration`, 
 
 Better: "Video details are stored on the YouTube embed itself, so they get saved and published with the article." Then a point: "Only the video editor gets the details panel; plain articles keep the old embed."
 
-## Notes
+## Plan the review path
 
-A note shows in the diff under its line. Add one only where it saves the reviewer real time, never to say what the code plainly shows. Pin it to the line it is about with `line` (and `endLine`, `side` for removed code). Leave out `line` only for a point about the whole file. Set `critical: true` for a spot that needs extra care: security, data loss, something hard to undo or easy to get wrong. Lines must be inside a hunk, as the `@@` headers show.
+The notes of a chapter are its review path: the changes worth a look, in the order to review them. The reviewer walks the stops one by one. Each stop says why the change matters and what to check. Call `add_note` once per stop, in review order.
+
+- Pick the changes that need a human eye: logic, a changed contract, a risky edge. Leave out what needs no review (renames, imports, formatting, generated code). A small chapter may have one or two stops, or none.
+- `text` is the why: what the change is for, not what the lines do ({{note_words}} words at most). It is shown under the line, and the first sentence is the stop's title.
+- `kind` says how to read it: `check` (the default) to verify one thing, `read` to understand a change before the next stop, `skim` for a quick look.
+- `check` is the one thing to verify at this stop, as an action ("Confirm the delay is in seconds", {{check_words}} words at most). Leave it out for a `read` or `skim` stop that has nothing to verify.
+- `critical: true` only for real risk: security, data loss, something hard to undo or easy to get wrong.
+- Pin the stop to its line with `line` (and `endLine`, `side` for removed code). Lines must be inside a hunk, as the `@@` headers show. Leave out `line` only for a point about the whole file.
+- A stop may point into a linked folder, with `folder` set as listed above and `file` inside it. Do this only when the change affects that code (a caller or a reader of what changed). Add `line` to pin it. Such a stop has no diff.
+- When the chapter has a diagram, set `node` to the id of the node the stop belongs to, so the map can show where the reviewer is. `finish_guide` refuses an id that is not in the chapter's diagrams.
 
 ## Show how it runs
 
-When the change adds or reshapes a flow between parts (modules, services, processes), call `add_diagram` with no `chapter` for the overview diagram. Use Mermaid `flowchart LR` or `flowchart TD` for structure, or `sequenceDiagram` for a call order. Mark flowchart nodes `:::added`, `:::changed` or `:::removed`, so one picture shows before and after. Link a node that maps to code with `%% ref node:<id> [[path#L12]]`, and an arrow whose call matters with `%% ref edge:<from>-><to> [[path#L12]]`. Then add `flow` steps: the nodes (or participants) in the order a request goes through them, at most {{max_flow_steps}}, one sentence each ({{flow_words}} words), so the reviewer can play the diagram step by step. A chapter can have a diagram too, if it shows something prose would not. Most chapters need none.
+When the change adds or reshapes a flow between parts (modules, services, processes), call `add_diagram` with no `chapter` for the overview diagram. Use Mermaid `flowchart LR` or `flowchart TD` for structure, or `sequenceDiagram` for a call order. Mark flowchart nodes `:::added`, `:::changed` or `:::removed`, so one picture shows before and after. Link a node that maps to code with `%% ref node:<id> [[path#L12]]`, and an arrow whose call matters with `%% ref edge:<from>-><to> [[path#L12]]`. A chapter can have a diagram too, and then its stops can point at its nodes. Add one only if it shows something prose would not. Most chapters need none.
 
 ## Show what it may break
 
@@ -57,7 +66,7 @@ In any text, `[[path]]` or `[[path#L12]]` renders as a link that jumps to that f
 
 1. Call `set_overview` once: a title, a summary of what the change does and why, and optionally `before` and `after` (how it worked, how it works now).
 2. Call `add_chapter` for each chapter, in reading order. It returns the chapter number.
-3. Call `add_note` and `add_diagram` for the chapters that need them.
+3. Call `add_diagram` for the chapters that need one, then `add_note` for each stop of the chapter, in review order.
 4. Call `finish_guide` last. It adds any file you left out to a closing chapter and saves the guide.
 
 If a tool returns an error, fix exactly what it names (cut text that is too long, do not just drop it) and call it again. Then reply with one line: the number of chapters and their titles.

@@ -525,6 +525,24 @@ pub const FEATURES: &[Feature] = &[
                     ("DIFFPILOT_APPEARANCE", "dark"),
                 ],
             },
+            Scene {
+                name: "inspector-light",
+                target: Binary::app_example("scenes"),
+                env: &[
+                    ("DIFFPILOT_SCENE", "guide-inspector"),
+                    ("DIFFPILOT_APPEARANCE", "light"),
+                ],
+            },
+            Scene {
+                name: "linked-light",
+                target: Binary::app_example("scenes"),
+                env: &[("DIFFPILOT_SCENE", "guide-linked"), ("DIFFPILOT_APPEARANCE", "light")],
+            },
+            Scene {
+                name: "inspector-dark",
+                target: Binary::app_example("scenes"),
+                env: &[("DIFFPILOT_SCENE", "guide-inspector"), ("DIFFPILOT_APPEARANCE", "dark")],
+            },
         ],
     },
     Feature {

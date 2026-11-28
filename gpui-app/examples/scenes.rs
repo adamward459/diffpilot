@@ -127,6 +127,11 @@ impl Stage {
             "pane-preview" => self.pane_preview(&view).await,
             "guide-overview" => self.guide(&view, false).await,
             "guide-chapter" => self.guide(&view, true).await,
+            "guide-inspector" => {
+                self.guide(&view, true).await;
+                "inspector"
+            }
+            "guide-linked" => self.guide_linked(&view).await,
             "sidebar" => "sidebar",
             "toolbar" => "toolbar",
             "settings" => self.settings().await,
@@ -281,6 +286,10 @@ impl Stage {
     }
 
     async fn guide(&self, view: &Entity<RepoView>, chapter: bool) -> &'static str {
+        self.guide_with(view, chapter, None).await
+    }
+
+    async fn guide_with(&self, view: &Entity<RepoView>, chapter: bool, linked: Option<PathBuf>) -> &'static str {
         let files: Vec<FileDiff> = self.files(view).iter().map(|file| (**file).clone()).collect();
         let (review, guide) = self
             .cx
@@ -291,7 +300,17 @@ impl Stage {
             .update(|cx| review.read(cx).session_id())
             .expect("the app is running");
         let repo = PathBuf::from(std::env::var_os("DIFFPILOT_REPO").expect("DIFFPILOT_REPO names the repo"));
-        let stored = guide_over(&repo, &files);
+        let mut stored = guide_over(&repo, &files);
+        if let Some(folder) = linked {
+            for note in stored.chapters[0].notes.iter_mut().filter(|note| note.is_linked()) {
+                note.folder = Some(folder.clone());
+                if let Some(span) = note.span.as_mut() {
+                    span.line = 12;
+                    span.end_line = Some(13);
+                }
+            }
+            stored.context.push(folder);
+        }
         let store = self.claude.store();
         store
             .save_draft(session, RunId(1), ReviewModel::STANDARD, &stored)
@@ -311,6 +330,33 @@ impl Stage {
         }
         self.with_view(view, |view, window, cx| view.show_nav(Nav::Guide, window, cx))
             .await;
+        "content"
+    }
+
+    /// The guide's chapter with its linked stop current, over a real file in a temp folder.
+    async fn guide_linked(&self, view: &Entity<RepoView>) -> &'static str {
+        let folder = std::env::temp_dir().join("diffpilot-scene-linked");
+        std::fs::create_dir_all(folder.join("src/shared")).expect("the folder is made");
+        let lines: Vec<String> = (1..=24)
+            .map(|line| match line {
+                12 => "export function readState(store: Store) {".into(),
+                13 => "  const state = store.current();".into(),
+                _ => format!("  // line {line}"),
+            })
+            .collect();
+        std::fs::write(folder.join("src/shared/state.rs"), lines.join("\n")).expect("the file is written");
+        self.guide_with(view, true, Some(folder)).await;
+        let guide = self.cx.update(|cx| view.read(cx).guide()).expect("the app is running");
+        guide
+            .update(&mut self.cx.clone(), |guide, cx| {
+                let linked = guide
+                    .stored()
+                    .and_then(|stored| stored.guide.chapters[0].notes.iter().position(|note| note.is_linked()));
+                if let Some(note) = linked {
+                    guide.go_stop(note, cx);
+                }
+            })
+            .expect("the guide is alive");
         "content"
     }
 

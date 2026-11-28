@@ -2,7 +2,7 @@ mod common;
 
 use common::*;
 use diffpilot_core::diff;
-use diffpilot_core::guide::{self, Attention, DiagramKind, Graph, prompt};
+use diffpilot_core::guide::{self, Attention, DiagramKind, Graph, StopKind, prompt};
 use diffpilot_core::mcp::{Binding, McpBridge, Notice};
 use diffpilot_core::policy::EditPermission;
 use diffpilot_core::review::{Effort, ModelName, ReviewModel};
@@ -62,7 +62,7 @@ fn chapter_a() -> Value {
 fn note_a() -> Value {
     call(
         "add_note",
-        json!({ "chapter": 1, "file": "a.ts", "line": 3, "text": "An extra export nobody asked for.", "critical": true }),
+        json!({ "chapter": 1, "file": "a.ts", "line": 3, "text": "An extra export nobody asked for.", "critical": true, "kind": "read", "check": "Nothing imports it.", "node": "Count" }),
     )
 }
 
@@ -72,8 +72,7 @@ fn diagram_a() -> Value {
         json!({
             "chapter": 1,
             "title": "Who calls what",
-            "source": "flowchart LR\n  Caller[Caller] --> Count[count]:::changed\n  %% ref node:Count [[a.ts#L1]]",
-            "flow": [{ "node": "Caller", "text": "A caller reads it." }, { "node": "Count", "text": "It is now named." }]
+            "source": "flowchart LR\n  Caller[Caller] --> Count[count]:::changed\n  %% ref node:Count [[a.ts#L1]]"
         }),
     )
 }
@@ -203,7 +202,10 @@ fn a_guide_run_builds_the_guide_through_mcp_and_saves_it_for_the_review() {
         panic!("a flowchart");
     };
     assert_eq!((chart.nodes.len(), chart.edges.len(), chart.refs.len()), (2, 1, 1));
-    assert_eq!(first.diagrams[0].flow.len(), 2);
+    assert_eq!(
+        (note.kind, note.check.as_deref(), note.node.as_deref()),
+        (StopKind::Read, Some("Nothing imports it."), Some("Count"))
+    );
     assert_eq!(guide.chapters[1].attention, Attention::Low);
     assert!(guide.head.is_some() && !guide.fingerprint.is_empty());
 

@@ -1,54 +1,45 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeMark {
+    pub id: String,
+    pub reviewed: usize,
+    pub total: usize,
+    pub linked: bool,
+}
+
+impl NodeMark {
+    pub fn done(&self) -> bool {
+        self.total > 0 && self.reviewed == self.total
+    }
+}
+
+/// What the lit chapter map shows: the node of the current stop and the review state of the nodes that have stops.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Focus {
-    pub node: String,
-    pub edge: Option<(String, String)>,
-    pub visited: Vec<String>,
+    pub node: Option<String>,
+    pub marks: Vec<NodeMark>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeState {
     Normal,
     Active,
-    Dim,
+    Done,
 }
 
 impl Focus {
-    pub fn node_state(&self, id: &str, visited: bool) -> NodeState {
-        if id == self.node {
+    pub fn mark(&self, id: &str) -> Option<&NodeMark> {
+        self.marks.iter().find(|mark| mark.id == id)
+    }
+
+    pub fn node_state(&self, id: &str) -> NodeState {
+        if self.node.as_deref() == Some(id) {
             NodeState::Active
-        } else if visited {
-            NodeState::Normal
+        } else if self.mark(id).is_some_and(NodeMark::done) {
+            NodeState::Done
         } else {
-            NodeState::Dim
+            NodeState::Normal
         }
     }
-
-    pub fn has_visited(&self, id: &str) -> bool {
-        self.visited.iter().any(|seen| seen == id)
-    }
-}
-
-/// Port of diffity's `flowFocus`. `nodes` are the node ids of the walkthrough steps in order.
-pub fn flow_focus(nodes: &[String], active: Option<usize>) -> Option<Focus> {
-    let active = active?;
-    let node = nodes.get(active)?;
-    let previous = active
-        .checked_sub(1)
-        .map(|at| &nodes[at])
-        .filter(|previous| *previous != node);
-    Some(Focus {
-        node: node.clone(),
-        edge: previous.map(|previous| (previous.clone(), node.clone())),
-        visited: nodes[..active].to_vec(),
-    })
-}
-
-pub fn next_step(step: Option<usize>, total: usize) -> usize {
-    step.map_or(0, |at| at + 1).min(total.saturating_sub(1))
-}
-
-pub fn previous_step(step: Option<usize>) -> Option<usize> {
-    step.and_then(|at| at.checked_sub(1))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -73,58 +64,53 @@ pub fn fit(size: (f32, f32), available: f32) -> Fit {
     }
 }
 
+/// A box as fractions of the whole diagram, so a click target can follow the diagram when it is scaled.
+pub fn fractions(rect: (f32, f32, f32, f32), size: (f32, f32)) -> (f32, f32, f32, f32) {
+    let (x, y, w, h) = rect;
+    let (width, height) = size;
+    if width <= 0.0 || height <= 0.0 {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+    (x / width, y / height, w / width, h / height)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn ids(list: &[&str]) -> Vec<String> {
-        list.iter().map(|id| (*id).to_string()).collect()
+    fn focus() -> Focus {
+        Focus {
+            node: Some("b".into()),
+            marks: vec![
+                NodeMark {
+                    id: "a".into(),
+                    reviewed: 2,
+                    total: 2,
+                    linked: false,
+                },
+                NodeMark {
+                    id: "b".into(),
+                    reviewed: 1,
+                    total: 1,
+                    linked: false,
+                },
+                NodeMark {
+                    id: "c".into(),
+                    reviewed: 0,
+                    total: 1,
+                    linked: true,
+                },
+            ],
+        }
     }
 
     #[test]
-    fn nothing_active_gives_no_focus() {
-        assert_eq!(flow_focus(&ids(&["a", "b"]), None), None);
-        assert_eq!(flow_focus(&ids(&["a", "b"]), Some(5)), None);
-        assert_eq!(flow_focus(&[], Some(0)), None);
-    }
-
-    #[test]
-    fn the_third_step_lights_the_edge_from_the_second_and_has_visited_the_first_two() {
-        let focus = flow_focus(&ids(&["a", "b", "c"]), Some(2)).unwrap();
-        assert_eq!(focus.node, "c");
-        assert_eq!(focus.edge, Some(("b".into(), "c".into())));
-        assert_eq!(focus.visited, ids(&["a", "b"]));
-    }
-
-    #[test]
-    fn the_first_step_has_no_edge_and_nothing_visited() {
-        let focus = flow_focus(&ids(&["a", "b"]), Some(0)).unwrap();
-        assert_eq!(focus.edge, None);
-        assert!(focus.visited.is_empty());
-    }
-
-    #[test]
-    fn a_repeated_node_lights_no_edge() {
-        let focus = flow_focus(&ids(&["a", "a"]), Some(1)).unwrap();
-        assert_eq!(focus.edge, None);
-    }
-
-    #[test]
-    fn nodes_are_active_visited_or_dim() {
-        let focus = flow_focus(&ids(&["a", "b", "c"]), Some(1)).unwrap();
-        assert_eq!(focus.node_state("b", false), NodeState::Active);
-        assert_eq!(focus.node_state("a", focus.has_visited("a")), NodeState::Normal);
-        assert_eq!(focus.node_state("c", focus.has_visited("c")), NodeState::Dim);
-    }
-
-    #[test]
-    fn stepping_starts_at_the_first_node_stops_at_the_last_and_goes_back_to_none() {
-        assert_eq!(next_step(None, 3), 0);
-        assert_eq!(next_step(Some(1), 3), 2);
-        assert_eq!(next_step(Some(2), 3), 2);
-        assert_eq!(previous_step(Some(2)), Some(1));
-        assert_eq!(previous_step(Some(0)), None);
-        assert_eq!(previous_step(None), None);
+    fn the_current_node_is_active_even_when_it_is_done_and_a_reviewed_node_is_done() {
+        let focus = focus();
+        assert_eq!(focus.node_state("b"), NodeState::Active);
+        assert_eq!(focus.node_state("a"), NodeState::Done);
+        assert_eq!(focus.node_state("c"), NodeState::Normal);
+        assert_eq!(focus.node_state("nowhere"), NodeState::Normal);
     }
 
     #[test]
@@ -134,5 +120,14 @@ mod tests {
         let small = fit((200.0, 100.0), 400.0);
         assert_eq!((small.scale, small.width, small.height), (1.0, 200.0, 100.0));
         assert_eq!(fit((0.0, 0.0), 400.0).scale, 1.0);
+    }
+
+    #[test]
+    fn a_box_becomes_fractions_of_the_diagram() {
+        assert_eq!(
+            fractions((50.0, 20.0, 100.0, 40.0), (200.0, 80.0)),
+            (0.25, 0.25, 0.5, 0.5)
+        );
+        assert_eq!(fractions((1.0, 1.0, 1.0, 1.0), (0.0, 0.0)), (0.0, 0.0, 0.0, 0.0));
     }
 }

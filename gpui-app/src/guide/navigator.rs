@@ -4,7 +4,7 @@ use diffpilot_core::file_kind::file_kind;
 use diffpilot_core::guide::Attention;
 use diffpilot_core::guide::reading::{ChapterKey, phase_groups};
 use diffpilot_ui_kit::components::scroll_y;
-use diffpilot_ui_kit::components::tag;
+use diffpilot_ui_kit::components::{Ease, PROGRESS_DURATION, Transition, tag};
 use diffpilot_ui_kit::{Glyph, Theme};
 use gpui::ScrollHandle;
 use gpui::prelude::FluentBuilder as _;
@@ -94,9 +94,34 @@ impl GuideNavigator {
 }
 
 impl Render for GuideNavigator {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Theme::of(cx);
         let header = self.header(cx);
+        let fractions: Vec<_> = {
+            let guide = self.guide.read(cx);
+            guide
+                .reading()
+                .chapters
+                .iter()
+                .map(|chapter| guide.progress(chapter).map(|(done, total)| done as f32 / total as f32))
+                .collect()
+        };
+        let bars: Vec<_> = fractions
+            .into_iter()
+            .enumerate()
+            .map(|(index, fraction)| {
+                fraction.map(|fraction| {
+                    Transition::follow_over(
+                        ("guide-chapter-bar", index),
+                        fraction,
+                        PROGRESS_DURATION,
+                        Ease::OutQuint,
+                        window,
+                        cx,
+                    )
+                })
+            })
+            .collect();
         let guide = self.guide.read(cx);
         let step = guide.step();
         let mut list = v_flex().id("guide-rows").px(px(6.)).pb(px(8.));
@@ -232,6 +257,41 @@ impl Render for GuideNavigator {
                         .min_w_0()
                         .child(SharedString::from(chapter.title.clone())),
                 );
+                if let (Some((done, total)), Some(bar)) = (guide.progress(chapter), bars[index]) {
+                    let success = tokens.success;
+                    let fill = bar.animate(
+                        format!("guide-chapter-bar-{index}"),
+                        tag(div(), move || format!("guide-chapter-bar:{}", index + 1)),
+                        move |fill, fraction| fill.h_full().w(gpui::relative(fraction)).rounded_full().bg(success),
+                    );
+                    item = item
+                        .child(
+                            div()
+                                .mt(px(8.))
+                                .flex_none()
+                                .w(px(28.))
+                                .h(px(3.))
+                                .rounded_full()
+                                .bg(if current {
+                                    tokens.on_accent.opacity(0.3)
+                                } else {
+                                    cx.theme().muted
+                                })
+                                .child(fill),
+                        )
+                        .child(
+                            tag(div(), move || format!("guide-chapter-progress:{}", index + 1))
+                                .mt(px(2.))
+                                .flex_none()
+                                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SMALL))
+                                .text_color(if current {
+                                    tokens.on_accent
+                                } else {
+                                    tokens.chrome.secondary
+                                })
+                                .child(format!("{done}/{total}")),
+                        );
+                }
                 if chapter.critical > 0 {
                     item = item.child(
                         div()

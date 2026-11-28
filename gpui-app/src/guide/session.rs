@@ -1,21 +1,24 @@
 use crate::claude_activity::ClaudeActivity;
-use crate::diff_pane::PaneNote;
+use crate::diff_pane::{LinkedStop, PaneNote};
+use crate::guide::path::Counts;
+use crate::guide::stops::Stops;
 use crate::review::ReviewSession;
 use crate::review::session::NO_REPO_MESSAGE;
 use crate::runs::Runs;
 use diffpilot_core::diff::FileDiff;
 use diffpilot_core::fix::Target;
 use diffpilot_core::guide::linked;
+use diffpilot_core::guide::mermaid::Graph;
 use diffpilot_core::guide::reading::{ChapterKey, Reading, ReadingChapter, reading};
 use diffpilot_core::guide::stale::{self, Staleness};
-use diffpilot_core::guide::{Diagram, prompt};
+use diffpilot_core::guide::{Chapter, Diagram, Span, prompt};
 use diffpilot_core::policy::EditPermission;
 use diffpilot_core::run::{RunKind, RunState};
 use diffpilot_core::runner::RunEvent;
 use diffpilot_core::settings::Settings;
 use diffpilot_core::store::{GuideId, RunId, SessionId, Store, StoredGuide};
 use gpui::{App, AppContext as _, Context, Entity, EventEmitter, Subscription};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -39,6 +42,8 @@ pub enum Step {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuideEvent {
     Changed,
+    /// The review cursor moved. The pane scrolls to the current stop.
+    Moved,
 }
 
 pub struct GuideSession {
@@ -56,12 +61,39 @@ pub struct GuideSession {
     kept: Option<GuideId>,
     run: GuideRun,
     step: Step,
+    stop: Option<usize>,
+    reviewed: BTreeSet<(usize, usize)>,
     viewed: HashSet<String>,
     activity: Entity<ClaudeActivity>,
     _subscriptions: [Subscription; 2],
 }
 
 impl EventEmitter<GuideEvent> for GuideSession {}
+
+fn node_graphs(chapter: &Chapter) -> Vec<Graph> {
+    chapter
+        .diagrams
+        .iter()
+        .filter(|_| chapter.notes.iter().any(|note| note.node.is_some()))
+        .filter_map(|diagram| diagram.graph().ok())
+        .collect()
+}
+
+fn node_label(graph: &Graph, id: &str) -> Option<String> {
+    match graph {
+        Graph::Flowchart(chart) => chart
+            .nodes
+            .iter()
+            .find(|node| node.id == id)
+            .map(|node| node.label.clone()),
+        Graph::Sequence(sequence) => sequence
+            .participants
+            .iter()
+            .find(|part| part.id == id)
+            .map(|part| part.label.clone()),
+        Graph::Source => None,
+    }
+}
 
 impl GuideSession {
     pub fn new(
@@ -91,11 +123,14 @@ impl GuideSession {
             kept: None,
             run: GuideRun::Idle,
             step: Step::Overview,
+            stop: None,
+            reviewed: BTreeSet::new(),
             viewed: HashSet::new(),
             activity,
             _subscriptions: subscriptions,
         };
         this.stored = this.store.current_guide(session).ok().flatten();
+        this.reload_reviewed();
         this.adopt_live_run(cx);
         this.files_may_have_changed(cx);
         this
@@ -121,7 +156,17 @@ impl GuideSession {
 
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         self.stored = self.store.current_guide(self.session).ok().flatten();
+        self.reload_reviewed();
+        self.stop = None;
         self.recompute(cx);
+    }
+
+    fn reload_reviewed(&mut self) {
+        self.reviewed = self
+            .stored
+            .as_ref()
+            .and_then(|stored| self.store.reviewed_stops(stored.id).ok())
+            .unwrap_or_default();
     }
 
     pub fn stored(&self) -> Option<&StoredGuide> {
@@ -179,8 +224,76 @@ impl GuideSession {
         }
     }
 
+    /// A chapter with stops is read when every stop is reviewed. One without stops is read when its files are viewed.
     pub fn is_read(&self, chapter: &ReadingChapter) -> bool {
-        chapter.key != ChapterKey::Extra && chapter.files.iter().all(|path| self.viewed.contains(path))
+        if chapter.key == ChapterKey::Extra {
+            return false;
+        }
+        match self.path_of(chapter) {
+            Some((index, stops)) if !stops.is_empty() => stops.all_done(|note| self.reviewed.contains(&(index, note))),
+            _ => chapter.files.iter().all(|path| self.viewed.contains(path)),
+        }
+    }
+
+    fn path_of(&self, chapter: &ReadingChapter) -> Option<(usize, Stops)> {
+        let ChapterKey::Guide(index) = chapter.key else {
+            return None;
+        };
+        let notes = &self.stored.as_ref()?.guide.chapters.get(index)?.notes;
+        Some((index, Stops::of(notes, &chapter.files)))
+    }
+
+    /// The open chapter's guide index and its stops.
+    pub fn path(&self) -> Option<(usize, Stops)> {
+        self.path_of(self.chapter()?)
+    }
+
+    pub fn has_stops(&self) -> bool {
+        self.path().is_some_and(|(_, stops)| !stops.is_empty())
+    }
+
+    /// The current stop, as an index into the open chapter's stored notes.
+    pub fn current_stop(&self) -> Option<usize> {
+        self.stop
+    }
+
+    pub fn reviewed(&self) -> &BTreeSet<(usize, usize)> {
+        &self.reviewed
+    }
+
+    /// Reviewed and total stops of a chapter that has stops.
+    pub fn progress(&self, chapter: &ReadingChapter) -> Option<(usize, usize)> {
+        let (index, stops) = self.path_of(chapter).filter(|(_, stops)| !stops.is_empty())?;
+        let done = stops
+            .iter()
+            .filter(|note| self.reviewed.contains(&(index, *note)))
+            .count();
+        Some((done, stops.len()))
+    }
+
+    /// The stop counts of a chapter that has stops.
+    pub fn counts(&self, chapter: &ReadingChapter) -> Option<Counts> {
+        let (index, stops) = self.path_of(chapter).filter(|(_, stops)| !stops.is_empty())?;
+        Some(Counts::of(&self.stored.as_ref()?.guide.chapters[index].notes, &stops))
+    }
+
+    /// The first chapter that still has a stop to review.
+    pub fn first_open(&self) -> Option<usize> {
+        self.reading
+            .chapters
+            .iter()
+            .position(|chapter| self.progress(chapter).is_some_and(|(done, total)| done < total))
+    }
+
+    pub fn start_review(&mut self, cx: &mut Context<Self>) {
+        if let Some(index) = self.first_open() {
+            self.go(Step::Chapter(index), cx);
+        }
+    }
+
+    fn entry_stop(&self) -> Option<usize> {
+        let (index, stops) = self.path()?;
+        stops.entry(|note| self.reviewed.contains(&(index, note)))
     }
 
     pub fn read_count(&self) -> usize {
@@ -231,6 +344,15 @@ impl GuideSession {
     }
 
     pub fn go(&mut self, step: Step, cx: &mut Context<Self>) {
+        self.enter(step, true, cx);
+    }
+
+    /// Like `go`, but the pane does not scroll to the chapter's first stop.
+    pub fn jump(&mut self, step: Step, cx: &mut Context<Self>) {
+        self.enter(step, false, cx);
+    }
+
+    fn enter(&mut self, step: Step, reveal: bool, cx: &mut Context<Self>) {
         let step = match step {
             Step::Chapter(index) if index < self.reading.chapters.len() => step,
             Step::Chapter(_) => Step::Overview,
@@ -238,8 +360,60 @@ impl GuideSession {
         };
         if step != self.step {
             self.step = step;
-            self.announce(cx);
+            self.stop = self.entry_stop();
+            cx.emit(if reveal && self.stop.is_some() {
+                GuideEvent::Moved
+            } else {
+                GuideEvent::Changed
+            });
+            cx.notify();
         }
+    }
+
+    pub fn go_stop(&mut self, note: usize, cx: &mut Context<Self>) {
+        if self.path().is_some_and(|(_, stops)| stops.contains(note)) && self.stop != Some(note) {
+            self.stop = Some(note);
+            cx.emit(GuideEvent::Moved);
+            cx.notify();
+        }
+    }
+
+    /// The next stop. After the last one, the next chapter.
+    pub fn next_stop(&mut self, cx: &mut Context<Self>) {
+        let after = self
+            .stop
+            .zip(self.path())
+            .and_then(|(note, (_, stops))| stops.next(note));
+        match after {
+            Some(note) => self.go_stop(note, cx),
+            None => self.next(cx),
+        }
+    }
+
+    /// The previous stop. Before the first one, the previous chapter.
+    pub fn previous_stop(&mut self, cx: &mut Context<Self>) {
+        let before = self
+            .stop
+            .zip(self.path())
+            .and_then(|(note, (_, stops))| stops.previous(note));
+        match before {
+            Some(note) => self.go_stop(note, cx),
+            None => self.previous(cx),
+        }
+    }
+
+    /// Marks the current stop reviewed and moves to the next open one. When none is open, the cursor stays.
+    pub fn looks_good(&mut self, cx: &mut Context<Self>) {
+        let (Some((index, stops)), Some(note), Some(stored)) = (self.path(), self.stop, &self.stored) else {
+            return;
+        };
+        self.store.set_stop_reviewed(stored.id, index, note, true).ok();
+        self.reviewed.insert((index, note));
+        if let Some(open) = stops.next_open(note, |other| self.reviewed.contains(&(index, other))) {
+            self.stop = Some(open);
+        }
+        cx.emit(GuideEvent::Moved);
+        cx.notify();
     }
 
     pub fn start_reading(&mut self, cx: &mut Context<Self>) {
@@ -265,43 +439,85 @@ impl GuideSession {
         }
     }
 
-    /// The notes of the current chapter as the pane shows them: a note whose line moved follows it, and a note
-    /// whose code is gone sits under its file header.
+    /// The stops of the current chapter as the pane shows them: a note whose line moved follows it, and a note
+    /// whose code is gone sits under its file header. A linked stop has no diff, so the pane shows nothing for it.
     pub fn pane_notes(&self) -> Vec<PaneNote> {
         use diffpilot_core::anchor::Placement;
-        let (Some(chapter), Some(stored)) = (self.chapter(), &self.stored) else {
+        let (Some((index, stops)), Some(stored)) = (self.path(), &self.stored) else {
             return Vec::new();
         };
-        let ChapterKey::Guide(index) = chapter.key else {
-            return Vec::new();
-        };
-        let notes = &stored.guide.chapters[index].notes;
+        let chapter = &stored.guide.chapters[index];
         let placements = self
             .staleness
             .as_ref()
             .and_then(|staleness| staleness.chapters.get(index))
             .map(|status| status.notes.as_slice())
             .unwrap_or_default();
-        notes
+        let graphs = node_graphs(chapter);
+        chapter
+            .notes
             .iter()
             .enumerate()
-            .filter(|(_, note)| chapter.files.contains(&note.path))
+            .filter(|(position, note)| !note.is_linked() && stops.contains(*position))
             .map(|(position, note)| {
-                let at = note.span.as_ref().map(|span| (span.side, span.line));
-                let (side, line) = match (placements.get(position), at) {
-                    (Some(Placement::Moved { line, .. }), Some((side, _))) => (side, Some(*line)),
-                    (Some(Placement::Outdated), _) | (_, None) => (diffpilot_core::threads::Side::New, None),
-                    (_, Some((side, line))) => (side, Some(line)),
+                let at = note.span.as_ref().map(|span| (span.side, span.line, span.last_line()));
+                let (side, line, last) = match (placements.get(position), at) {
+                    (Some(Placement::Moved { line, end_line }), Some((side, ..))) => (side, Some(*line), *end_line),
+                    (Some(Placement::Outdated), _) | (_, None) => (diffpilot_core::threads::Side::New, None, None),
+                    (_, Some((side, line, last))) => (side, Some(line), Some(last)),
                 };
+                let node = note
+                    .node
+                    .as_deref()
+                    .and_then(|id| graphs.iter().find_map(|graph| node_label(graph, id)));
                 PaneNote {
                     path: note.path.clone(),
                     side,
                     line,
+                    end_line: line.zip(last).and_then(|(line, last)| (last > line).then_some(last)),
                     text: note.text.clone(),
                     critical: note.critical,
+                    kind: note.kind,
+                    check: note.check.clone(),
+                    number: stops.number(position).unwrap_or(0),
+                    total: stops.len(),
+                    node,
+                    current: self.stop == Some(position),
                 }
             })
             .collect()
+    }
+
+    /// The current stop when it points into a linked folder. The pane shows it as a read-only excerpt.
+    pub fn linked_stop(&self) -> Option<LinkedStop> {
+        let ((index, stops), stored, position) = (self.path()?, self.stored.as_ref()?, self.stop?);
+        let chapter = &stored.guide.chapters[index];
+        let note = chapter.notes.get(position)?;
+        let folder = note.folder.clone()?;
+        let span = note.span.as_ref();
+        let line = span.map(|span| span.line);
+        let node = note
+            .node
+            .as_deref()
+            .and_then(|id| node_graphs(chapter).iter().find_map(|graph| node_label(graph, id)));
+        Some(LinkedStop {
+            note: PaneNote {
+                path: note.path.clone(),
+                side: diffpilot_core::threads::Side::New,
+                line,
+                end_line: span.map(Span::last_line).filter(|last| Some(*last) > line),
+                text: note.text.clone(),
+                critical: note.critical,
+                kind: note.kind,
+                check: note.check.clone(),
+                number: stops.number(position).unwrap_or(0),
+                total: stops.len(),
+                node,
+                current: true,
+            },
+            folder,
+            anchor_text: span.and_then(|span| span.anchor_text.clone()),
+        })
     }
 
     fn files_may_have_changed(&mut self, cx: &mut Context<Self>) {
@@ -366,6 +582,12 @@ impl GuideSession {
             && index >= self.reading.chapters.len()
         {
             self.step = Step::Overview;
+        }
+        if self
+            .stop
+            .is_none_or(|note| !self.path().is_some_and(|(_, stops)| stops.contains(note)))
+        {
+            self.stop = self.entry_stop();
         }
         self.announce(cx);
     }
@@ -484,6 +706,7 @@ impl GuideSession {
         };
         if written {
             self.step = Step::Overview;
+            self.stop = None;
             self.kept = None;
             self.reload(cx);
         } else {

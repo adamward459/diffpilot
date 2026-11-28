@@ -59,6 +59,7 @@ actions!(
         ToggleGuide,
         NextChapter,
         PreviousChapter,
+        LooksGood,
         ToggleInspector,
         ToggleClaudeArea,
         ToggleComments,
@@ -94,6 +95,7 @@ pub fn init(cx: &mut App) {
         gpui::KeyBinding::new("c", ToggleComments, Some("!Input")),
         gpui::KeyBinding::new("]", NextChapter, Some("!Input")),
         gpui::KeyBinding::new("[", PreviousChapter, Some("!Input")),
+        gpui::KeyBinding::new("v", LooksGood, Some("!Input")),
     ]);
     crate::sidebar::bind_keys(cx);
     crate::diff_pane::bind_keys(cx);
@@ -784,6 +786,11 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &PreviousChapter, _, cx| {
                 if let Some(repo) = this.active_view() {
                     repo.update(cx, |repo, cx| repo.step_chapter(-1, cx));
+                }
+            }))
+            .on_action(cx.listener(|this, _: &LooksGood, _, cx| {
+                if let Some(repo) = this.active_view() {
+                    repo.update(cx, |repo, cx| repo.looks_good(cx));
                 }
             }))
             .on_action(cx.listener(|this, _: &ToggleInspector, _, cx| {

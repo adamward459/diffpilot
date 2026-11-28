@@ -8,6 +8,7 @@ mod guides;
 mod rows;
 mod runs;
 mod schema;
+mod stops;
 mod viewed;
 
 pub use data::{BranchData, DataScope, RepoData};

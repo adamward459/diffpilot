@@ -94,17 +94,21 @@ pub fn definitions() -> Vec<ToolDef> {
         ),
         tool(
             "add_note",
-            "Pin a short note under a line of the diff. Add one only where it saves the reviewer time. The file must be one of the chapter's files and the lines must be inside a hunk.",
+            "Add the next stop of the chapter's review path. The notes of a chapter are its review path, so add them in the order the reviewer should read them. Add one only where it saves the reviewer time. A diff stop's file must be one of the chapter's files and its lines must be inside a hunk.",
             json!({
                 "type": "object",
                 "properties": {
                     "chapter": { "type": "integer", "minimum": 1, "description": "Chapter number from add_chapter." },
-                    "file": { "type": "string" },
-                    "line": { "type": "integer", "minimum": 1, "description": "Leave out for a note about the whole file." },
+                    "file": { "type": "string", "description": "A file of the chapter, or a path inside `folder`." },
+                    "line": { "type": "integer", "minimum": 1, "description": "Leave out for a stop about the whole file." },
                     "endLine": { "type": "integer", "minimum": 1 },
                     "side": { "type": "string", "enum": ["new", "old"] },
-                    "text": { "type": "string", "description": "Markdown, one or two sentences." },
-                    "critical": { "type": "boolean", "description": "The reviewer should take extra care here: security, data loss, hard to undo, easy to get wrong." }
+                    "text": { "type": "string", "description": "Markdown, one or two sentences: why this change matters." },
+                    "critical": { "type": "boolean", "description": "The reviewer should take extra care here: security, data loss, hard to undo, easy to get wrong." },
+                    "kind": { "type": "string", "enum": ["read", "check", "skim"], "description": "read: understand it. check (default): verify one thing. skim: a quick look." },
+                    "check": { "type": "string", "description": "The one thing to verify, as an action." },
+                    "node": { "type": "string", "description": "The id of the node in the chapter's diagram this stop belongs to." },
+                    "folder": { "type": "string", "description": "A linked folder, exactly as the prompt lists it, when the stop is in code outside the diff. `file` is then relative to it and `line` is checked against the file." }
                 },
                 "required": ["chapter", "file", "text"]
             }),
@@ -112,22 +116,13 @@ pub fn definitions() -> Vec<ToolDef> {
         ),
         tool(
             "add_diagram",
-            "Add a Mermaid diagram to a chapter, or to the overview when `chapter` is left out. Use `flowchart LR` / `flowchart TD` (mark nodes :::added, :::changed or :::removed) or `sequenceDiagram`. A diagram that does not parse is refused with its line number.",
+            "Add a Mermaid diagram to a chapter, or to the overview when `chapter` is left out. Use `flowchart LR` / `flowchart TD` (mark nodes :::added, :::changed or :::removed) or `sequenceDiagram`. A diagram that does not parse is refused with its line number. Stops of the chapter can name its node ids.",
             json!({
                 "type": "object",
                 "properties": {
                     "chapter": { "type": "integer", "minimum": 1 },
                     "title": { "type": "string" },
-                    "source": { "type": "string", "description": "The Mermaid text." },
-                    "flow": {
-                        "type": "array",
-                        "description": "The nodes (or participants) in the order a request goes through them, so the reviewer can step through the diagram.",
-                        "items": {
-                            "type": "object",
-                            "properties": { "node": { "type": "string" }, "text": { "type": "string", "description": "One sentence." } },
-                            "required": ["node", "text"]
-                        }
-                    }
+                    "source": { "type": "string", "description": "The Mermaid text." }
                 },
                 "required": ["source"]
             }),
@@ -135,7 +130,7 @@ pub fn definitions() -> Vec<ToolDef> {
         ),
         tool(
             "finish_guide",
-            "Save the guide. Call it last. Files that no chapter names go to a closing chapter.",
+            "Save the guide. Call it last. Files that no chapter names go to a closing chapter. A stop whose `node` is not in its chapter's diagrams is refused.",
             json!({ "type": "object", "properties": {} }),
             false,
         ),

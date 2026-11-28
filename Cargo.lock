@@ -1400,6 +1400,7 @@ dependencies = [
  "diffpilot-core",
  "gpui",
  "gpui-component",
+ "objc",
 ]
 
 [[package]]

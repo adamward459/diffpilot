@@ -181,7 +181,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::guide::{Attention, Chapter, ChapterFile, Diagram, DiagramKind, FlowStep, Impact, Note, Overview, Span};
+    use crate::guide::{Attention, Chapter, ChapterFile, Diagram, DiagramKind, Impact, Note, Overview, Span, StopKind};
     use crate::store::SessionKey;
     use crate::threads::Side;
 
@@ -197,10 +197,6 @@ mod tests {
                 title: Some("Flow".into()),
                 kind: DiagramKind::Flowchart,
                 source: "flowchart LR\n  A --> B".into(),
-                flow: vec![FlowStep {
-                    node: "A".into(),
-                    text: "Start.".into(),
-                }],
             }],
             chapters: vec![Chapter {
                 title: "The timer".into(),
@@ -223,6 +219,10 @@ mod tests {
                     span: None,
                     text: "Check the unit.".into(),
                     critical: true,
+                    kind: StopKind::Check,
+                    check: Some("Units are seconds.".into()),
+                    node: Some("A".into()),
+                    folder: None,
                 }],
                 diagrams: vec![],
                 impact: vec![Impact {

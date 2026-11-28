@@ -5,28 +5,31 @@ use crate::diff_pane::layout::{
     column_width,
 };
 use crate::diff_pane::lines::{
-    self, CODE_SIZE, Column, Fonts, Frame, LineCache, LineKey, LineRequest, PaintFiller, Style, Thumb,
+    self, Band, CODE_SIZE, Column, Fonts, Frame, LineCache, LineKey, LineRequest, PaintFiller, Style, Thumb,
 };
+use crate::diff_pane::linked::{Excerpt, LinkedStop};
 use crate::diff_pane::preview::{self, ImageMode, PreviewCard, PreviewEvent};
 use crate::diff_pane::rows::{BlockId, BlockSlot, Notice, RowKind};
 use crate::diff_pane::selection::{Extent, Selection, Spot, column_line, word_at};
 use crate::diff_pane::stage_lines;
 use crate::diff_pane::state::{Geometry, PaneState, ThreadSteps, ThumbDrag};
 use crate::guide::note::{NoteCard, NoteEvent};
+use crate::guide::stop_card::{StopCard, StopEvent};
 use crate::guide::text::CodeRef;
 use crate::review::{CardEvent, ReviewEvent, ReviewSession, ThreadCard, ThreadChange, card_key};
 use diffpilot_core::changes::FileStatus;
 use diffpilot_core::comparison::Comparison;
 use diffpilot_core::diff::{DiffMode, FileDiff, LineKind};
 use diffpilot_core::file_kind::file_kind;
+use diffpilot_core::guide::StopKind;
 use diffpilot_core::stage::Action;
 use diffpilot_core::threads::{Side, ThreadAnchor, ThreadId};
 use diffpilot_ui_kit::Glyph;
 use diffpilot_ui_kit::Theme;
 use diffpilot_ui_kit::components::menu::{MenuAt, MenuItem, MenuSection, menu_at, menu_button};
 use diffpilot_ui_kit::components::{
-    BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, glass_panel, glyph_icon, label_switch,
-    status_badge, tag, viewed_toggle,
+    BAND_FADE, BAND_STEP, BadgeTone, Button, ChipTone, Look, State, bar_button, chip_label, glass_panel, glyph_icon,
+    label_switch, reduced_motion, stagger, stagger_end, status_badge, tag, viewed_toggle,
 };
 use diffpilot_ui_kit::regions::region;
 use gpui::{
@@ -68,9 +71,17 @@ pub enum DiffPaneEvent {
     ShownMode(DiffMode),
     ThreadSteps,
     OpenRef(CodeRef),
+    /// The reviewer pressed Looks good or Skip for now on the stop card.
+    StopDone(StopDone),
     RevealInFinder(String),
     /// A stage, unstage or discard changed the repository, so the diff is stale.
     Changed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StopDone {
+    LooksGood,
+    Skip,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,13 +89,45 @@ pub struct PaneNote {
     pub path: String,
     pub side: Side,
     pub line: Option<u32>,
+    /// The last line of a span of several lines.
+    pub end_line: Option<u32>,
     pub text: String,
     pub critical: bool,
+    pub kind: StopKind,
+    pub check: Option<String>,
+    pub number: usize,
+    pub total: usize,
+    /// The label of the node in the chapter's diagram that the stop belongs to.
+    pub node: Option<String>,
+    pub current: bool,
+}
+
+enum NoteView {
+    Compact(Entity<NoteCard>),
+    Stop(Entity<StopCard>),
+}
+
+impl NoteView {
+    fn height(&self, width: Pixels, window: &Window, cx: &App) -> Pixels {
+        match self {
+            Self::Compact(card) => card.read(cx).height(width, window, cx),
+            Self::Stop(card) => card.read(cx).height(width, window, cx),
+        }
+    }
+
+    fn view(&self) -> AnyView {
+        match self {
+            Self::Compact(card) => card.clone().into(),
+            Self::Stop(card) => card.clone().into(),
+        }
+    }
 }
 
 struct Note {
-    view: Entity<NoteCard>,
+    view: NoteView,
     anchor: ThreadAnchor,
+    /// Where the current stop's card sits when its span has several lines: under the last one.
+    end_anchor: Option<ThreadAnchor>,
     _opened: Subscription,
 }
 
@@ -168,6 +211,9 @@ pub struct DiffPane {
     review: Option<Review>,
     notes: Vec<Note>,
     note_data: Vec<PaneNote>,
+    band: Option<Band>,
+    band_since: Option<Instant>,
+    linked: Option<Excerpt>,
     pending_focus: Option<ThreadId>,
     mouse: Option<(Pixels, Pixels)>,
     origin: (Pixels, Pixels),
@@ -236,6 +282,9 @@ impl DiffPane {
             review: None,
             notes: Vec::new(),
             note_data: Vec::new(),
+            band: None,
+            band_since: None,
+            linked: None,
             pending_focus: None,
             mouse: None,
             origin: (px(0.0), px(0.0)),
@@ -347,23 +396,85 @@ impl DiffPane {
         self.notes = notes
             .iter()
             .map(|note| {
-                let view = cx.new(|_| NoteCard::new(&note.text, note.critical));
-                let opened = cx.subscribe_in(&view, window, |_, _, NoteEvent::Open(code): &NoteEvent, _, cx| {
-                    cx.emit(DiffPaneEvent::OpenRef(code.clone()));
-                });
+                let (view, opened) = if note.current {
+                    let card = cx.new(|_| StopCard::new(note));
+                    let opened = cx.subscribe_in(&card, window, |this, _, event: &StopEvent, window, cx| {
+                        this.on_stop_event(event, window, cx);
+                    });
+                    (NoteView::Stop(card), opened)
+                } else {
+                    let card = cx.new(|_| NoteCard::new(&note.text, note.critical));
+                    let opened = cx.subscribe_in(&card, window, |_, _, NoteEvent::Open(code): &NoteEvent, _, cx| {
+                        cx.emit(DiffPaneEvent::OpenRef(code.clone()));
+                    });
+                    (NoteView::Compact(card), opened)
+                };
+                let anchor_at = |line: u32| ThreadAnchor::line(&note.path, note.side, line);
                 let anchor = match note.line {
-                    Some(line) => ThreadAnchor::line(&note.path, note.side, line),
+                    Some(line) => anchor_at(line),
                     None => ThreadAnchor::file(&note.path),
                 };
+                let end_anchor = note
+                    .line
+                    .zip(note.end_line)
+                    .filter(|_| note.current)
+                    .map(|(_, end)| anchor_at(end));
                 Note {
                     view,
                     anchor,
+                    end_anchor,
                     _opened: opened,
                 }
             })
             .collect();
+        let band = notes.iter().find(|note| note.current).and_then(Band::of);
+        if band != self.band {
+            self.band_since = band.as_ref().filter(|_| !reduced_motion()).map(|_| Instant::now());
+        }
+        self.band = band;
         self.note_data = notes;
         self.rebuild_blocks(window, cx);
+    }
+
+    /// Shows the linked stop's file in place of the diff, or the diff again with `None`.
+    pub fn set_linked(&mut self, stop: Option<LinkedStop>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.linked.as_ref().map(Excerpt::stop) == stop.as_ref() {
+            return;
+        }
+        self.linked = stop.map(|stop| {
+            let card = cx.new(|_| StopCard::new(&stop.note).without_comment());
+            let events = cx.subscribe_in(&card, window, |this, _, event: &StopEvent, window, cx| {
+                this.on_stop_event(event, window, cx);
+            });
+            Excerpt::new(stop, card, events)
+        });
+        cx.notify();
+    }
+
+    pub fn shows_linked(&self) -> bool {
+        self.linked.is_some()
+    }
+
+    fn on_stop_event(&mut self, event: &StopEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match event {
+            StopEvent::Open(code) => cx.emit(DiffPaneEvent::OpenRef(code.clone())),
+            StopEvent::LooksGood => cx.emit(DiffPaneEvent::StopDone(StopDone::LooksGood)),
+            StopEvent::Skip => cx.emit(DiffPaneEvent::StopDone(StopDone::Skip)),
+            StopEvent::Comment => {
+                let Some(note) = self.note_data.iter().find(|note| note.current) else {
+                    return;
+                };
+                let anchor = match note.line {
+                    Some(line) => ThreadAnchor::line(&note.path, note.side, line),
+                    None => ThreadAnchor::file(&note.path),
+                };
+                let Some(review) = &self.review else { return };
+                let id = review
+                    .session
+                    .update(cx, |session, cx| session.create_thread(anchor, cx));
+                self.focus_thread(id, window, cx);
+            }
+        }
     }
 
     pub fn reveal_line(&mut self, path: &str, side: Side, line: u32, cx: &mut Context<Self>) {
@@ -532,9 +643,13 @@ impl DiffPane {
             self.review.as_mut().expect("review is set").cards = cards;
         }
         for (index, note) in self.notes.iter().enumerate() {
+            let anchor = match &note.end_anchor {
+                Some(end) if self.has_anchor_line(end) => end.clone(),
+                _ => note.anchor.clone(),
+            };
             slots.push(BlockSlot {
                 id: BlockId::Note(index as u32),
-                anchor: note.anchor.clone(),
+                anchor,
             });
             added.push(BlockId::Note(index as u32));
         }
@@ -551,10 +666,26 @@ impl DiffPane {
         self.sync(cx);
     }
 
+    fn has_anchor_line(&self, anchor: &ThreadAnchor) -> bool {
+        let ThreadAnchor::Line { path, side, line } = anchor else {
+            return false;
+        };
+        self.state.files.iter().filter(|file| file.path == *path).any(|file| {
+            file.hunks.iter().flat_map(|hunk| &hunk.lines).any(|diff_line| {
+                let number = match (side, diff_line.kind) {
+                    (Side::Old, LineKind::Deleted) => diff_line.old,
+                    (Side::New, LineKind::Added | LineKind::Context) => diff_line.new,
+                    _ => None,
+                };
+                number == Some(*line)
+            })
+        })
+    }
+
     fn card_height(&self, id: BlockId, width: Pixels, window: &Window, cx: &App) -> Option<f32> {
         let height = match id {
             BlockId::Thread(id) => self.card(id)?.read(cx).height(width, window, cx),
-            BlockId::Note(index) => self.notes.get(index as usize)?.view.read(cx).height(width, window, cx),
+            BlockId::Note(index) => self.notes.get(index as usize)?.view.height(width, window, cx),
         };
         Some(f32::from(height))
     }
@@ -1254,6 +1385,15 @@ impl DiffPane {
         let scroll = self.state.scroll();
         let viewport = geometry.height;
         let selection = self.selection;
+        let band = self.band.as_ref().map(|band| (band, band.colors(&self.theme)));
+        let band_age = self.band_since.map(|since| since.elapsed());
+        if let (Some(age), Some((band, _))) = (band_age, band) {
+            if age < stagger_end(band.line_count(), BAND_STEP, BAND_FADE) {
+                window.request_animation_frame();
+            } else {
+                self.band_since = None;
+            }
+        }
         let mut painted = Vec::new();
         let mut fillers = Vec::new();
         for index in self.state.visible_rows() {
@@ -1265,6 +1405,7 @@ impl DiffPane {
             };
             let (y, height) = (self.state.tops.top(index) - scroll, self.state.tops.height(index));
             let file = &self.state.files[row.file as usize];
+            let banded = band.filter(|(band, _)| band.path == file.path);
             for (column, line) in cells {
                 let Some(line) = line else {
                     if column != Column::Unified {
@@ -1293,7 +1434,15 @@ impl DiffPane {
                     column,
                     selected,
                 };
-                painted.push(self.lines.line(&style, window, request, viewport));
+                let mut paint = self.lines.line(&style, window, request, viewport);
+                paint.band = banded.and_then(|(band, colors)| {
+                    let offset = band.offset(diff_line)?;
+                    Some(match band_age {
+                        Some(age) => colors.lit(stagger(age, offset, BAND_STEP, BAND_FADE)),
+                        None => colors,
+                    })
+                });
+                painted.push(paint);
             }
         }
         if let Some(started) = started {
@@ -1703,7 +1852,7 @@ impl DiffPane {
         let thread = &self.state.blocks[slot as usize];
         let card: AnyView = match thread.id {
             BlockId::Thread(id) => self.card(id)?.clone().into(),
-            BlockId::Note(index) => self.notes.get(index as usize)?.view.clone().into(),
+            BlockId::Note(index) => self.notes.get(index as usize)?.view.view(),
         };
         let key = match (thread.id, &self.review) {
             (BlockId::Thread(id), Some(review)) => review.session.read(cx).thread(id).map(card_key),
@@ -1820,6 +1969,14 @@ impl Render for DiffPane {
         }
         self.theme = current;
         let theme = self.theme;
+        if let Some(excerpt) = &self.linked {
+            return region(tag(div().id("diff-pane"), || "pane:linked"), || "pane".into())
+                .size_full()
+                .overflow_hidden()
+                .font(self.fonts.ui.clone())
+                .child(excerpt.element(&theme, &self.fonts))
+                .into_any_element();
+        }
         let scroll = self.state.scroll();
         let mut root = region(tag(div().id("diff-pane"), || "pane"), || "pane".into())
             .key_context(KEY_CONTEXT)
@@ -1888,7 +2045,8 @@ impl Render for DiffPane {
                 .justify_center()
                 .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
                 .text_color(theme.diff.muted)
-                .child("No changes");
+                .child("No changes")
+                .into_any_element();
         }
         let pane = cx.entity();
         let painter = pane.clone();
@@ -1998,7 +2156,7 @@ impl Render for DiffPane {
         if let Some(menu_state) = &self.line_menu {
             root = root.child(self.line_menu(menu_state, cx));
         }
-        root
+        root.into_any_element()
     }
 }
 

@@ -1,4 +1,4 @@
-use super::focus::{Focus, NodeState};
+use super::focus::{Focus, NodeMark, NodeState};
 use diffpilot_core::guide::layout::{
     BlockGeom, BoxGeom, EdgeGeom, FlowLayout, GroupGeom, Layout, Measure, MessageGeom, ParticipantGeom, Point, Rect,
     SequenceLayout,
@@ -69,6 +69,7 @@ pub struct Palette {
     changed: Hsla,
     removed: Hsla,
     removed_bg: Hsla,
+    success: Hsla,
 }
 
 impl Palette {
@@ -88,6 +89,7 @@ impl Palette {
             changed: theme.amber,
             removed: theme.danger,
             removed_bg: theme.diff.del_bg,
+            success: theme.success,
         }
     }
 
@@ -147,10 +149,9 @@ fn tone(palette: &Palette, class: Option<&str>, state: NodeState) -> Tone {
             tone.fill = palette.claude_bg;
             tone.width = 2.2;
         }
-        NodeState::Dim => {
-            tone.stroke = tone.stroke.opacity(0.35);
-            tone.fill = tone.fill.opacity(0.35);
-            tone.text = tone.text.opacity(0.4);
+        NodeState::Done => {
+            tone.stroke = palette.success;
+            tone.fill = palette.success.opacity(0.14);
         }
     }
     tone
@@ -284,6 +285,19 @@ impl Pen<'_> {
         }
     }
 
+    /// A small pill on the top edge of `r`, set in from the right corner.
+    fn badge(&mut self, text: &str, r: Rect, color: Hsla, background: Hsla) {
+        let width = self.text_width(text) + 10.0;
+        let height = self.line_height() + 2.0;
+        let rect = Rect::new(r.right() - width - BADGE_INSET, r.y - height / 2.0, width, height);
+        let quad = fill(self.bounds(rect), background)
+            .corner_radii(self.px(height / 2.0))
+            .border_widths(self.px(1.0))
+            .border_color(color);
+        self.window.paint_quad(quad);
+        self.centered(text, rect.center(), color, false);
+    }
+
     fn label(&mut self, text: &str, center: Point, color: Hsla, background: Hsla) {
         let width = self.text_width(text) + 8.0;
         let height = self.line_height() + 2.0;
@@ -304,6 +318,7 @@ fn direction(from: Point, to: Point) -> (f32, f32) {
     }
 }
 
+const BADGE_INSET: f32 = 8.0;
 const HEAD_LENGTH: f32 = 9.0;
 const HEAD_HALF: f32 = 4.0;
 
@@ -422,18 +437,22 @@ fn shape_points(shape: Shape, r: Rect) -> Option<Vec<Point>> {
     Some(points)
 }
 
-fn paint_box(pen: &mut Pen, palette: &Palette, node: &BoxGeom, state: NodeState) {
-    let tone = tone(palette, node.class.as_deref(), state);
+fn corner(shape: Shape, r: Rect) -> f32 {
+    match shape {
+        Shape::Stadium | Shape::Circle => r.h.min(r.w) / 2.0,
+        Shape::Round | Shape::Cylinder => 10.0,
+        _ => 5.0,
+    }
+}
+
+fn paint_box(pen: &mut Pen, palette: &Palette, node: &BoxGeom, state: NodeState, mark: Option<&NodeMark>) {
+    let mut tone = tone(palette, node.class.as_deref(), state);
+    tone.dashed |= mark.is_some_and(|mark| mark.linked);
     let r = node.rect;
     if let Some(points) = shape_points(node.shape, r) {
         pen.polygon(&points, &tone);
     } else {
-        let radius = match node.shape {
-            Shape::Stadium | Shape::Circle => r.h.min(r.w) / 2.0,
-            Shape::Round | Shape::Cylinder => 10.0,
-            _ => 5.0,
-        };
-        pen.quad(r, radius, &tone);
+        pen.quad(r, corner(node.shape, r), &tone);
         if node.shape == Shape::Subroutine {
             for x in [r.x + 6.0, r.right() - 6.0] {
                 pen.stroke(
@@ -447,6 +466,15 @@ fn paint_box(pen: &mut Pen, palette: &Palette, node: &BoxGeom, state: NodeState)
         }
     }
     pen.centered(&node.label, r.center(), tone.text, state == NodeState::Active);
+    if let Some(mark) = mark {
+        let text = format!("{}/{}", mark.reviewed, mark.total);
+        let color = match state {
+            NodeState::Active => palette.claude,
+            NodeState::Done => palette.success,
+            NodeState::Normal => palette.text2,
+        };
+        pen.badge(&text, r, color, palette.background);
+    }
 }
 
 fn paint_group(pen: &mut Pen, palette: &Palette, group: &GroupGeom) {
@@ -467,20 +495,78 @@ fn paint_group(pen: &mut Pen, palette: &Palette, group: &GroupGeom) {
     );
 }
 
-fn paint_edge(pen: &mut Pen, palette: &Palette, edge: &EdgeGeom, lit: bool, dim: bool) {
+const DASH_ON: f32 = 6.0;
+const DASH_OFF: f32 = 5.0;
+const PULSE_REACH: f32 = 10.0;
+
+fn length(points: &[Point]) -> f32 {
+    points.windows(2).map(|pair| distance(pair[0], pair[1])).sum()
+}
+
+fn distance(a: Point, b: Point) -> f32 {
+    ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt()
+}
+
+/// The part of the polyline between `from` and `to`, both measured along it.
+fn slice(points: &[Point], from: f32, to: f32) -> Vec<Point> {
+    let mut part = Vec::new();
+    let mut at = 0.0;
+    for pair in points.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let segment = distance(a, b);
+        let (start, end) = (at, at + segment);
+        at = end;
+        if segment <= 0.0 || end <= from || start >= to {
+            continue;
+        }
+        let along = |d: f32| {
+            let f = (d - start) / segment;
+            Point::new(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f)
+        };
+        if part.is_empty() {
+            part.push(along(from.max(start)));
+        }
+        part.push(along(to.min(end)));
+    }
+    part
+}
+
+/// Dashes along the polyline. `shift` moves the whole pattern forward, so a changing shift makes the dashes march.
+fn dash_runs(points: &[Point], shift: f32) -> Vec<Vec<Point>> {
+    let period = DASH_ON + DASH_OFF;
+    let total = length(points);
+    let mut runs = Vec::new();
+    let mut start = shift - period;
+    while start < total {
+        let (from, to) = (start.max(0.0), (start + DASH_ON).min(total));
+        if to > from {
+            runs.push(slice(points, from, to));
+        }
+        start += period;
+    }
+    runs
+}
+
+fn paint_edge(pen: &mut Pen, palette: &Palette, edge: &EdgeGeom, lit: bool, phase: Option<f32>) {
     if edge.style == LineStyle::Invisible || edge.points.len() < 2 {
         return;
     }
-    let mut color = if lit { palette.claude } else { palette.muted };
-    if dim && !lit {
-        color = color.opacity(0.35);
-    }
+    let color = if lit { palette.claude } else { palette.muted };
     let width = match edge.style {
         LineStyle::Thick => 2.6,
         _ => 1.4,
     } + if lit { 0.8 } else { 0.0 };
     let dash = (edge.style == LineStyle::Dotted).then_some((2.0, 3.0));
-    pen.stroke(&edge.points, false, width, color, dash);
+    match phase.filter(|_| lit) {
+        Some(phase) => {
+            pen.stroke(&edge.points, false, width, color.opacity(0.3), None);
+            let shift = (phase * 2.0).fract() * (DASH_ON + DASH_OFF);
+            for run in dash_runs(&edge.points, shift) {
+                pen.stroke(&run, false, width, color, None);
+            }
+        }
+        None => pen.stroke(&edge.points, false, width, color, dash),
+    }
     let last = edge.points.len() - 1;
     tip(
         pen,
@@ -499,31 +585,40 @@ fn paint_edge(pen: &mut Pen, palette: &Palette, edge: &EdgeGeom, lit: bool, dim:
         palette.background,
     );
     if let Some((text, center)) = &edge.label {
-        let text_color = if dim && !lit {
-            palette.muted.opacity(0.5)
-        } else {
-            palette.text2
-        };
-        pen.label(text, *center, text_color, palette.background);
+        pen.label(text, *center, palette.text2, palette.background);
     }
 }
 
-fn paint_flow(pen: &mut Pen, palette: &Palette, flow: &FlowLayout, focus: Option<&Focus>) {
+fn paint_pulse(pen: &mut Pen, palette: &Palette, node: &BoxGeom, phase: f32) {
+    let reach = PULSE_REACH * phase;
+    let r = node.rect;
+    let ring = Rect::new(r.x - reach, r.y - reach, r.w + 2.0 * reach, r.h + 2.0 * reach);
+    let tone = Tone {
+        stroke: palette.claude.opacity(0.5 * (1.0 - phase)),
+        fill: gpui::transparent_black(),
+        text: palette.text,
+        width: 1.6,
+        dashed: false,
+    };
+    pen.quad(ring, corner(node.shape, r) + reach, &tone);
+}
+
+fn paint_flow(pen: &mut Pen, palette: &Palette, flow: &FlowLayout, focus: Option<&Focus>, phase: Option<f32>) {
     for group in &flow.groups {
         paint_group(pen, palette, group);
     }
     for edge in &flow.edges {
-        let lit = focus
-            .and_then(|focus| focus.edge.as_ref())
-            .and_then(|(a, b)| flow.edge_between(a, b))
-            .is_some_and(|lit| std::ptr::eq(lit, edge));
-        paint_edge(pen, palette, edge, lit, focus.is_some());
+        let lit = focus.is_some_and(|focus| focus.node.as_deref() == Some(edge.to.as_str()));
+        paint_edge(pen, palette, edge, lit, phase);
     }
     for node in &flow.boxes {
-        let state = focus.map_or(NodeState::Normal, |focus| {
-            focus.node_state(&node.id, focus.has_visited(&node.id))
-        });
-        paint_box(pen, palette, node, state);
+        if let Some(phase) =
+            phase.filter(|_| focus.is_some_and(|focus| focus.node_state(&node.id) == NodeState::Active))
+        {
+            paint_pulse(pen, palette, node, phase);
+        }
+        let state = focus.map_or(NodeState::Normal, |focus| focus.node_state(&node.id));
+        paint_box(pen, palette, node, state, focus.and_then(|focus| focus.mark(&node.id)));
     }
 }
 
@@ -657,6 +752,8 @@ pub struct Drawing {
     pub layout: std::rc::Rc<Layout>,
     pub palette: Palette,
     pub focus: Option<Focus>,
+    /// Where the lit node's pulse and the marching dashes are in their loop, from 0 to 1. `None` draws them at rest.
+    pub phase: Option<f32>,
     pub font: Font,
     pub font_size: f32,
 }
@@ -674,8 +771,42 @@ impl Drawing {
             font_size: self.font_size,
         };
         match &*self.layout {
-            Layout::Flow(flow) => paint_flow(&mut pen, &self.palette, flow, self.focus.as_ref()),
+            Layout::Flow(flow) => paint_flow(&mut pen, &self.palette, flow, self.focus.as_ref(), self.phase),
             Layout::Sequence(seq) => paint_sequence(&mut pen, &self.palette, seq),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn line() -> Vec<Point> {
+        vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0), Point::new(10.0, 10.0)]
+    }
+
+    #[test]
+    fn a_slice_follows_the_polyline_around_a_corner() {
+        assert_eq!(length(&line()), 20.0);
+        assert_eq!(
+            slice(&line(), 8.0, 13.0),
+            vec![Point::new(8.0, 0.0), Point::new(10.0, 0.0), Point::new(10.0, 3.0)]
+        );
+        assert_eq!(
+            slice(&line(), 2.0, 4.0),
+            vec![Point::new(2.0, 0.0), Point::new(4.0, 0.0)]
+        );
+    }
+
+    #[test]
+    fn dashes_stay_on_the_line_and_move_with_the_shift() {
+        let at_rest = dash_runs(&line(), 0.0);
+        assert_eq!(at_rest[0], vec![Point::new(0.0, 0.0), Point::new(6.0, 0.0)]);
+        let moved = dash_runs(&line(), 3.0);
+        assert_eq!(moved[0], vec![Point::new(3.0, 0.0), Point::new(9.0, 0.0)]);
+        assert_eq!(moved[1][0], Point::new(10.0, 4.0));
+        for run in at_rest.iter().chain(&moved) {
+            assert!(run.len() >= 2 && length(run) <= DASH_ON + 0.001);
         }
     }
 }
