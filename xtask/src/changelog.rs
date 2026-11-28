@@ -55,16 +55,6 @@ pub fn release(rest: &[String]) -> Result {
     if !is_semver {
         return Err(format!("{version} is not a version like 1.2.3").into());
     }
-    let branch = run(Command::new("git").args(["branch", "--show-current"]))?;
-    if branch.trim() != "main" {
-        return Err(format!("release from main, not {}", branch.trim()).into());
-    }
-    if !run(Command::new("git").args(["status", "--porcelain"]))?
-        .trim()
-        .is_empty()
-    {
-        return Err("commit or stash your changes before a release".into());
-    }
     let date = run(Command::new("date").args(["-u", "+%Y-%m-%d"]))?.trim().to_owned();
     let changelog = root().join(FILE);
     fs::write(
@@ -74,12 +64,7 @@ pub fn release(rest: &[String]) -> Result {
     let manifest = root().join(MANIFEST);
     fs::write(&manifest, set_version(&fs::read_to_string(&manifest)?, version)?)?;
     // Resolving the workspace rewrites the diffpilot entry in Cargo.lock.
-    run(Command::new("cargo").args(["metadata", "--format-version", "1"]))?;
-    let tag = format!("v{version}");
-    run(Command::new("git").args(["commit", "-am", &format!("chore(release): {tag}")]))?;
-    run(Command::new("git").args(["tag", "-a", &tag, "-m", &format!("diffpilot {tag}")]))?;
-    println!("Tagged {tag}. Push it to build and publish the release:\n  git push origin main {tag}");
-    Ok(())
+    run(Command::new("cargo").args(["metadata", "--format-version", "1"])).map(drop)
 }
 
 fn is_link(line: &str) -> bool {

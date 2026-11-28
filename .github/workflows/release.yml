@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release
 
 defaults:
   run:
@@ -20,6 +20,7 @@ jobs:
     runs-on: macos-15
     env:
       TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,20 +45,23 @@ jobs:
           rustup toolchain install
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
-      - name: Check the tag is on main and matches the app version
+      # The release commit goes on top of the tagged commit and is pushed to main, so main must not have moved.
+      - name: Check the tag is the tip of main
         run: |
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "::error::$TAG is not on main"
-            exit 1
-          fi
-          version="$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.name == "diffpilot") | .version')"
-          if [ "v$version" != "$TAG" ]; then
-            echo "::error::$TAG does not match the diffpilot version $version in gpui-app/Cargo.toml. Run cargo xtask release."
+          if [ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]; then
+            echo "::error::$TAG must point at the tip of main. Pull, tag the latest main, and push the tag again."
             exit 1
           fi
 
-      - name: Read the release notes
-        run: cargo xtask release-notes "$TAG" > "$RUNNER_TEMP/notes.md"
+      - name: Move the Unreleased notes into the version and commit
+        run: |
+          version="${TAG#v}"
+          cargo xtask release "$version"
+          cargo xtask release-notes "$version" > "$RUNNER_TEMP/notes.md"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(release): $TAG"
+          git tag -f -a "$TAG" -m "diffpilot $TAG"
 
       - name: Build the universal app
         id: bundle
@@ -65,7 +69,15 @@ jobs:
           zip="$(cargo xtask bundle --universal --zip | tail -1)"
           echo "zip=$zip" >> "$GITHUB_OUTPUT"
 
+      # A push made with the workflow's own token does not start this workflow again.
+      - name: Push the release commit and move the tag onto it
+        id: push
+        run: git push --atomic origin HEAD:main "+refs/tags/$TAG"
+
       - name: Publish the GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: gh release create "$TAG" "${{ steps.bundle.outputs.zip }}" --verify-tag --notes-file "$RUNNER_TEMP/notes.md" --title "diffpilot $TAG"
+
+      # Frees the tag name while main is untouched, so pushing the same tag again retries the release.
+      - name: Delete the tag if the release failed before main was updated
+        if: failure() && steps.push.outcome != 'success'
+        run: git push origin ":refs/tags/$TAG"
