@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- The guide overview's diagram has an Expand button. It opens the diagram at full size in a window you can scroll. Press Escape, click outside, or click the close button to go back.
+- Guide diagrams are drawn larger, so their labels stay readable. A diagram that does not fit scrolls inside its card, with scrollbars on both sides.
+
+### Fixed
+
+- The guide overview no longer shows the Before and After text, chapter summaries, or other text one letter per line when the summary at the top runs over several lines.
+
 ## [0.2.1] - 2026-11-28
 
 ### Changed

@@ -1693,7 +1693,10 @@ impl Render for RepoView {
                             .flex_1()
                             .min_h_0()
                             .child(
+                                // As a block, Taffy gave the guide's wrapped text a stale 0 px width.
                                 region(div(), || "content".into())
+                                    .flex()
+                                    .flex_col()
                                     .flex_1()
                                     .min_w_0()
                                     .h_full()

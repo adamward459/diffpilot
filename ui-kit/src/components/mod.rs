@@ -38,5 +38,5 @@ pub use motion::{
 };
 pub use overlay::{Dialog, Edge, SideSheet, dialog, side_sheet};
 pub use popover::{ArrowPopover, popover};
-pub use scroll::scroll_y;
+pub use scroll::{scroll_xy, scroll_y};
 pub use tour::{Tour, TourCard, tour, tour_card};

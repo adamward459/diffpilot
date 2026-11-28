@@ -586,6 +586,36 @@ fn a_flowchart_is_drawn_on_the_overview_and_the_source_switch_shows_its_text(app
 }
 
 #[gpui::test]
+fn expand_opens_the_diagram_at_full_size_and_escape_or_close_shuts_it(app: &mut TestAppContext) {
+    let (world, cx) = open(app, false);
+    store_guide_with(&world, cx, |guide| guide.diagrams = vec![flowchart()]);
+    show_guide(&world, cx);
+    assert!(cx.debug_bounds("guide-diagram-sheet").is_none());
+
+    let card = cx.debug_bounds("guide-diagram-canvas").expect("the diagram is drawn");
+    click(cx, "guide-diagram-expand");
+    let sheet = cx
+        .debug_bounds("guide-diagram-sheet:canvas")
+        .expect("the sheet draws the diagram");
+    assert!(sheet.size.width >= card.size.width, "{sheet:?} vs {card:?}");
+    assert!(sheet.size.height >= card.size.height, "{sheet:?} vs {card:?}");
+
+    testing::press(cx, "escape");
+    assert!(testing::shows(cx, "guide-diagram-sheet:closing"));
+    testing::wait_for_motion(cx);
+
+    click(cx, "guide-diagram-expand");
+    click(cx, "guide-diagram-sheet:close");
+    testing::wait_for_motion(cx);
+    assert!(!testing::shows(cx, "guide-diagram-source"));
+    click(cx, "guide-diagram-view:Source");
+    assert!(
+        testing::shows(cx, "guide-diagram-source"),
+        "the closed sheet no longer covers the card"
+    );
+}
+
+#[gpui::test]
 fn a_diagram_that_cannot_be_drawn_falls_back_to_its_source_with_a_note(app: &mut TestAppContext) {
     let (world, cx) = open(app, false);
     store_guide_with(&world, cx, |guide| {

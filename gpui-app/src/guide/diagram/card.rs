@@ -1,18 +1,24 @@
 use super::paint::{Drawing, Palette, TextMeasure};
 use diffpilot_core::guide::layout::{Layout, layout};
 use diffpilot_core::guide::{Diagram, DiagramKind};
-use diffpilot_ui_kit::Theme;
-use diffpilot_ui_kit::components::scroll_y;
-use diffpilot_ui_kit::components::{ChipTone, chip_label, segmented_control, tag};
-use gpui::ScrollHandle;
-use gpui::{
-    AnyElement, App, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
-    Styled as _, Window, canvas, div, font, px,
+use diffpilot_ui_kit::components::scroll_xy;
+use diffpilot_ui_kit::components::{
+    Button, ChipTone, Presence, chip_label, dialog, icon_button, segmented_control, tag,
 };
-use gpui_component::{ActiveTheme, h_flex};
+use diffpilot_ui_kit::{Glyph, Theme};
+use gpui::{
+    AnyElement, App, Entity, EntityId, FocusHandle, FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent,
+    ParentElement as _, ScrollHandle, SharedString, Styled as _, Window, anchored, canvas, deferred, div, font, point,
+    px,
+};
+use gpui_component::{ActiveTheme, h_flex, v_flex};
 use std::rc::Rc;
 
 const MAX_HEIGHT: f32 = 340.0;
+const MIN_SCALE: f32 = 0.6;
+const SHEET_MARGIN: f32 = 32.0;
+const SHEET_PADDING: f32 = 16.0;
+const SHEET_HEADER: f32 = 44.0;
 const PARSE_NOTE: &str = "This diagram could not be read, so its source is shown.";
 const KIND_NOTE: &str = "This kind of diagram is not drawn yet, so its source is shown.";
 
@@ -64,6 +70,15 @@ impl CardState {
         };
         self.key = Some(key);
     }
+}
+
+/// Shrinks a diagram to fit `MAX_HEIGHT`, but never below `MIN_SCALE`, so labels stay readable. A diagram that is
+/// still too big scrolls inside the card.
+fn card_scale(height: f32) -> f32 {
+    if height <= 0. {
+        return 1.;
+    }
+    (MAX_HEIGHT / height).clamp(MIN_SCALE, 1.)
 }
 
 fn kind_name(diagram: &Diagram, parsed: &Parsed) -> String {
@@ -163,9 +178,29 @@ pub fn diagram_card(id: &str, diagram: &Diagram, window: &mut Window, cx: &mut A
     if let (Some(layout), View::Diagram) = (drawn, view) {
         header = header.children(legend(&theme, layout));
     }
+    let sheet = window.use_keyed_state(SharedString::from(format!("{id}-sheet")), cx, |_, _| {
+        Presence::overlay(false)
+    });
+    let sheet_scroll = window.use_keyed_state(SharedString::from(format!("{id}-sheet-scroll")), cx, |_, _| {
+        ScrollHandle::new()
+    });
+    let sheet_focus = window.use_keyed_state(SharedString::from(format!("{id}-sheet-focus")), cx, |_, cx| {
+        cx.focus_handle()
+    });
+    let view_id = window.current_view();
     if drawn.is_some() {
         let switch = state.clone();
-        header = header.child(div().flex_1()).child(segmented_control(
+        let (open, focus) = (sheet.clone(), sheet_focus.read(cx).clone());
+        header = header.child(div().flex_1()).child(tag(
+            Button::new(SharedString::from(format!("{id}-expand")))
+                .label("Expand")
+                .on_click(move |_, window, cx| {
+                    focus.focus(window);
+                    Presence::drive(&open, true, view_id, cx);
+                }),
+            || "guide-diagram-expand",
+        ));
+        header = header.child(segmented_control(
             &theme,
             "guide-diagram-view",
             &["Diagram", "Source"],
@@ -186,6 +221,32 @@ pub fn diagram_card(id: &str, diagram: &Diagram, window: &mut Window, cx: &mut A
         .p(px(12.))
         .child(header);
 
+    if let Ok(layout) = &parsed
+        && sheet.read(cx).is_mounted()
+    {
+        let drawing = Drawing {
+            layout: layout.clone(),
+            palette: Palette::of(&theme),
+            focus: None,
+            phase: None,
+            font: font(family.clone()),
+            font_size,
+        };
+        let title = diagram.title.clone().unwrap_or_else(|| "Diagram".into());
+        let focus = sheet_focus.read(cx).clone();
+        card = card.child(full_size(
+            id,
+            title,
+            drawing,
+            &sheet,
+            (focus, sheet_scroll.read(cx).clone()),
+            view_id,
+            &theme,
+            window,
+            cx,
+        ));
+    }
+
     match (parsed, view) {
         (Ok(layout), View::Diagram) => {
             let (width, height) = layout.size();
@@ -197,25 +258,29 @@ pub fn diagram_card(id: &str, diagram: &Diagram, window: &mut Window, cx: &mut A
                 font: font(family),
                 font_size,
             };
-            let mut surface = div().w_full().max_w(px(width)).mx_auto().child(
-                canvas(
-                    |_, _, _| (),
-                    move |bounds, (), window, cx| drawing.paint(bounds, window, cx),
-                )
-                .size_full(),
-            );
-            if width > 0.0 && height > 0.0 {
-                surface.style().aspect_ratio = Some(width / height);
-            }
+            let scale = card_scale(height);
+            let surface = div()
+                .w(px(width * scale))
+                .h(px(height * scale))
+                .flex_none()
+                .mx_auto()
+                .child(
+                    canvas(
+                        |_, _, _| (),
+                        move |bounds, (), window, cx| drawing.paint(bounds, window, cx),
+                    )
+                    .size_full(),
+                );
             card = card.child(
-                scroll_y(
+                scroll_xy(
                     &state.read(cx).scroll,
                     div()
                         .id(SharedString::from(format!("{id}-scroll")))
+                        .flex()
                         .child(tag(surface, || "guide-diagram-canvas")),
                 )
                 .w_full()
-                .max_h(px(MAX_HEIGHT)),
+                .h(px((height * scale).min(MAX_HEIGHT))),
             );
         }
         (parsed, _) => {
@@ -231,4 +296,97 @@ pub fn diagram_card(id: &str, diagram: &Diagram, window: &mut Window, cx: &mut A
         }
     }
     card.into_any_element()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn full_size(
+    id: &str,
+    title: String,
+    drawing: Drawing,
+    sheet: &Entity<Presence>,
+    (focus, scroll): (FocusHandle, ScrollHandle),
+    view: EntityId,
+    theme: &Theme,
+    window: &Window,
+    cx: &App,
+) -> AnyElement {
+    let (width, height) = drawing.layout.size();
+    let viewport = window.viewport_size();
+    let panel_width = (width + 2. * SHEET_PADDING).min(f32::from(viewport.width) - 2. * SHEET_MARGIN);
+    let panel_height = (height + SHEET_HEADER + 2. * SHEET_PADDING).min(f32::from(viewport.height) - 2. * SHEET_MARGIN);
+    let close = {
+        let sheet = sheet.clone();
+        move |cx: &mut App| Presence::drive(&sheet, false, view, cx)
+    };
+    let header = h_flex()
+        .h(px(SHEET_HEADER))
+        .flex_none()
+        .gap(px(8.))
+        .child(
+            div()
+                .flex_1()
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::BODY))
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(SharedString::from(title)),
+        )
+        .child(tag(
+            icon_button(
+                SharedString::from(format!("{id}-sheet-close")),
+                Glyph::X,
+                theme.ui.muted,
+            )
+            .on_click({
+                let close = close.clone();
+                move |_, _, cx| close(cx)
+            }),
+            || "guide-diagram-sheet:close",
+        ));
+    let body = scroll_xy(
+        &scroll,
+        div().id(SharedString::from(format!("{id}-sheet-scroll"))).child(tag(
+            div().w(px(width)).h(px(height)).flex_none().child(
+                canvas(
+                    |_, _, _| (),
+                    move |bounds, (), window, cx| drawing.paint(bounds, window, cx),
+                )
+                .size_full(),
+            ),
+            || "guide-diagram-sheet:canvas",
+        )),
+    )
+    .w_full()
+    .flex_1();
+    let content = v_flex()
+        .w(px(panel_width))
+        .h(px(panel_height))
+        .overflow_hidden()
+        .px(px(SHEET_PADDING))
+        .pb(px(SHEET_PADDING))
+        .track_focus(&focus)
+        .on_key_down({
+            let close = close.clone();
+            move |event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape" {
+                    cx.stop_propagation();
+                    close(cx);
+                }
+            }
+        })
+        .child(header)
+        .child(body);
+    let presence = *sheet.read(cx);
+    deferred(
+        anchored().position(point(px(0.), px(0.))).child(
+            div().w(viewport.width).h(viewport.height).child(
+                dialog(SharedString::from(format!("{id}-sheet")), &presence)
+                    .tags("guide-diagram-sheet", "guide-diagram-sheet:panel")
+                    .size(panel_width, panel_height)
+                    .margin(SHEET_MARGIN)
+                    .on_backdrop_click(move |_, _, cx| close(cx))
+                    .child(content),
+            ),
+        ),
+    )
+    .with_priority(1)
+    .into_any_element()
 }
