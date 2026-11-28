@@ -48,6 +48,6 @@ fn a_click_in_the_scroll_lane_jumps_there_and_selects_nothing(app: &mut TestAppC
     let selected = (0..30)
         .map(|file| format!("zz/f{file:02}.txt"))
         .chain(["base.txt", "docs/committed.md", "src/staged.rs"].map(String::from))
-        .any(|path| shows(cx, &format!("pane:selection-hud:{path}:1")));
+        .any(|path| shows(cx, &format!("pane:selection:{path}:1")));
     assert!(!selected, "the click selects no line");
 }

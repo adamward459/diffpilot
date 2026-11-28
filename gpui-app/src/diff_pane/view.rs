@@ -131,12 +131,6 @@ struct Note {
     _opened: Subscription,
 }
 
-struct LineMenu {
-    at: Point<Pixels>,
-    path: String,
-    line: Option<u32>,
-}
-
 #[derive(Clone)]
 enum Highlight {
     Missing,
@@ -229,7 +223,7 @@ pub struct DiffPane {
     last_scroll: Option<Instant>,
     lane_hovered: bool,
     thumb_drag: Option<ThumbDrag>,
-    line_menu: Option<LineMenu>,
+    line_menu: Option<Point<Pixels>>,
     selection: Option<Selection>,
     confirming: bool,
     stage_error: Option<String>,
@@ -768,14 +762,24 @@ impl DiffPane {
         if self.under_sticky(y) {
             return;
         }
-        let target = self
-            .line_at(x, y)
-            .and_then(|hovered| self.open_line(hovered.file, (hovered.hunk, hovered.line)));
-        self.line_menu = target.map(|(path, line)| LineMenu {
-            at: event.position,
-            path,
-            line,
-        });
+        let Some(row) = self.state.tops.row_at(self.state.scroll() + f32::from(y)) else {
+            return;
+        };
+        let keep = self
+            .selection
+            .is_some_and(|selection| !selection.is_caret() && selection.covers(self.state.rows.rows[row]));
+        if !keep {
+            let Some(selection) = self.selection_at(3, x, y) else {
+                return;
+            };
+            self.selection = Some(Selection {
+                dragging: false,
+                ..selection
+            });
+        }
+        self.confirming = false;
+        self.stage_error = None;
+        self.line_menu = Some(event.position);
         cx.notify();
     }
 
@@ -992,31 +996,18 @@ impl DiffPane {
             .font(self.fonts.ui.clone())
     }
 
-    fn hud_separator(&self) -> Div {
-        div().w(px(1.0)).h(px(16.0)).mx(px(2.0)).bg(self.theme.ui.line)
-    }
-
-    fn selection_hud(&self, selection: Selection, y: f32, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn changed_lines(&self, selection: Selection) -> usize {
         let file = &self.state.files[selection.file];
-        let lines = selection.lines(file);
-        let (Some(&first), Some(&last)) = (lines.first(), lines.last()) else {
-            return div().id("selection-hud");
-        };
-        let changed = lines
+        selection
+            .lines(file)
             .iter()
             .filter(|&&(hunk, line)| file.hunks[hunk as usize].lines[line as usize].kind != LineKind::Context)
-            .count();
-        let open = self.open_line(selection.file, first);
-        let can_comment = self.review.is_some() && {
-            let line = &file.hunks[last.0 as usize].lines[last.1 as usize];
-            line.new.is_some() || line.kind == LineKind::Deleted
-        };
-        let blocked = match &self.preview_source {
-            Some(source) if source.comparison.includes_uncommitted() => {
-                (changed == 0).then_some("Select a changed line first")
-            }
-            _ => Some("This comparison has no uncommitted changes"),
-        };
+            .count()
+    }
+
+    fn confirm_bar(&self, selection: Selection, y: f32, cx: &mut Context<Self>) -> Stateful<Div> {
+        let file = &self.state.files[selection.file];
+        let changed = self.changed_lines(selection);
         let button = |id: &'static str, glyph: Glyph, label: &'static str| {
             Button::new(id)
                 .label(label)
@@ -1024,16 +1015,10 @@ impl DiffPane {
                 .icon(glyph, 12.0)
                 .h(px(26.0))
         };
-        let stage_button = |id: &'static str, glyph: Glyph, label: &'static str, tip: &'static str| {
-            button(id, glyph, label)
-                .disabled(blocked.is_some())
-                .tooltip(blocked.unwrap_or(tip))
-        };
         let (left, width) = self.column_span(selection.column);
         let right = self.state.geometry().width - left - width;
-        let count = lines.len();
         let mut bar = tag(self.hud().id("selection-hud"), || {
-            format!("pane:selection-hud:{}:{count}", file.path)
+            format!("pane:selection-hud:{}", file.path)
         })
         .absolute()
         .top(px(y))
@@ -1048,104 +1033,48 @@ impl DiffPane {
                     .child(message.clone()),
             );
         }
-        if self.confirming {
-            let noun = if changed == 1 { "line" } else { "lines" };
-            return bar
-                .child(
-                    div()
-                        .px(px(6.0))
-                        .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
-                        .child(format!("Discard {changed} changed {noun}?")),
-                )
-                .child(tag(
-                    button("selection-discard-confirm", Glyph::Undo2, "Discard").on_click(
-                        cx.listener(|this, _: &ClickEvent, _, cx| this.act_on_selection(Action::Discard, cx)),
-                    ),
-                    || "pane:selection-discard-confirm".to_string(),
-                ))
-                .child(tag(
-                    button("selection-discard-cancel", Glyph::X, "Cancel").on_click(cx.listener(
-                        |this, _: &ClickEvent, _, cx| {
-                            this.confirming = false;
-                            cx.notify();
-                        },
-                    )),
-                    || "pane:selection-discard-cancel".to_string(),
-                ));
+        if !self.confirming {
+            return bar;
         }
-        bar.child(tag(
-            stage_button("selection-stage", Glyph::Plus, "Stage", "Stage the selected lines")
-                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.act_on_selection(Action::Stage, cx))),
-            || "pane:selection-stage".to_string(),
-        ))
-        .child(tag(
-            stage_button(
-                "selection-unstage",
-                Glyph::Undo2,
-                "Unstage",
-                "Unstage the selected lines",
-            )
-            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.act_on_selection(Action::Unstage, cx))),
-            || "pane:selection-unstage".to_string(),
-        ))
-        .child(tag(
-            stage_button(
-                "selection-discard",
-                Glyph::X,
-                "Discard\u{2026}",
-                "Discard the selected changes",
-            )
-            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                this.confirming = true;
-                this.stage_error = None;
-                cx.notify();
-            })),
-            || "pane:selection-discard".to_string(),
-        ))
-        .child(self.hud_separator())
-        .child(tag(
-            button("selection-copy", Glyph::Copy, "Copy")
-                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.copy_selection(cx))),
-            || "pane:selection-copy".to_string(),
-        ))
-        .child(tag(
-            button("selection-open", Glyph::ExternalLink, "Open in Editor")
-                .disabled(open.is_none())
-                .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                    if let Some((path, line)) = open.clone() {
-                        cx.emit(DiffPaneEvent::OpenInEditor { path, line });
-                    }
-                })),
-            || "pane:selection-open".to_string(),
-        ))
-        .child(self.hud_separator())
-        .child(tag(
-            button("selection-comment", Glyph::MessageSquarePlus, "Comment")
-                .disabled(!can_comment)
-                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                    this.selection = None;
-                    this.add_comment(selection.file, last, window, cx);
-                })),
-            || "pane:selection-comment".to_string(),
-        ))
-        .child(self.hud_separator())
-        .child(
-            Button::new("selection-ask")
-                .label("Ask Claude")
-                .look(Look::Ghost)
-                .icon_color(Glyph::Sparkles, 12.0, self.theme.ui.claude)
-                .h(px(26.0))
-                .disabled(true),
+        let noun = if changed == 1 { "line" } else { "lines" };
+        bar.child(
+            div()
+                .px(px(6.0))
+                .text_size(diffpilot_ui_kit::text_px(diffpilot_ui_kit::text_size::SECONDARY))
+                .child(format!("Discard {changed} changed {noun}?")),
         )
+        .child(tag(
+            button("selection-discard-confirm", Glyph::Undo2, "Discard")
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.act_on_selection(Action::Discard, cx))),
+            || "pane:selection-discard-confirm".to_string(),
+        ))
+        .child(tag(
+            button("selection-discard-cancel", Glyph::X, "Cancel").on_click(cx.listener(
+                |this, _: &ClickEvent, _, cx| {
+                    this.confirming = false;
+                    cx.notify();
+                },
+            )),
+            || "pane:selection-discard-cancel".to_string(),
+        ))
     }
 
-    fn line_menu(&self, menu_state: &LineMenu, cx: &mut Context<Self>) -> MenuAt {
-        let label = match menu_state.line {
-            Some(line) => format!("Open in Editor at Line {line}"),
-            None => "Open in Editor".to_string(),
-        };
+    fn line_menu(&self, at: Point<Pixels>, selection: Selection, cx: &mut Context<Self>) -> MenuAt {
+        let file = &self.state.files[selection.file];
+        let lines = selection.lines(file);
+        let first = lines.first().copied();
+        let last = lines.last().copied();
+        let open = first.and_then(|first| self.open_line(selection.file, first));
+        let comment_at = last.filter(|&(hunk, line)| {
+            let line = &file.hunks[hunk as usize].lines[line as usize];
+            self.review.is_some() && (line.new.is_some() || line.kind == LineKind::Deleted)
+        });
+        let can_stage = self
+            .preview_source
+            .as_ref()
+            .is_some_and(|source| source.comparison.includes_uncommitted())
+            && self.changed_lines(selection) > 0;
         let pane = cx.entity();
-        let (path, line) = (menu_state.path.clone(), menu_state.line);
         let close = {
             let pane = pane.clone();
             move |_: &mut Window, cx: &mut App| {
@@ -1157,18 +1086,65 @@ impl DiffPane {
         };
         menu_at(
             "line-menu",
-            menu_state.at,
+            at,
             move |_, _| {
-                let (pane, path) = (pane.clone(), path.clone());
-                let open = MenuItem::new(label.clone(), move |_, cx| {
-                    pane.update(cx, |_, cx| {
-                        cx.emit(DiffPaneEvent::OpenInEditor {
-                            path: path.clone(),
-                            line,
+                let act = |action: Action| {
+                    let pane = pane.clone();
+                    move |_: &mut Window, cx: &mut App| pane.update(cx, |pane, cx| pane.act_on_selection(action, cx))
+                };
+                let stage = MenuItem::new("Stage", act(Action::Stage)).icon(Glyph::Plus, None);
+                let unstage = MenuItem::new("Unstage", act(Action::Unstage)).icon(Glyph::Undo2, None);
+                let discard = MenuItem::new("Discard\u{2026}", {
+                    let pane = pane.clone();
+                    move |_, cx| {
+                        pane.update(cx, |pane, cx| {
+                            pane.confirming = true;
+                            pane.stage_error = None;
+                            cx.notify();
+                        })
+                    }
+                })
+                .icon(Glyph::X, None);
+                let copy = MenuItem::new("Copy", {
+                    let pane = pane.clone();
+                    move |_, cx| pane.update(cx, |pane, cx| pane.copy_selection(cx))
+                })
+                .icon(Glyph::Copy, None)
+                .shortcut("\u{2318}C");
+                let mut copy_and_open = vec![copy.into()];
+                if let Some((path, line)) = open.clone() {
+                    let label = match line {
+                        Some(line) => format!("Open in Editor at Line {line}"),
+                        None => "Open in Editor".to_string(),
+                    };
+                    let pane = pane.clone();
+                    let open = MenuItem::new(label, move |_, cx| {
+                        pane.update(cx, |_, cx| {
+                            cx.emit(DiffPaneEvent::OpenInEditor {
+                                path: path.clone(),
+                                line,
+                            })
                         })
                     })
-                });
-                vec![MenuSection::new(vec![open.into()])]
+                    .icon(Glyph::ExternalLink, None);
+                    copy_and_open.push(open.into());
+                }
+                let mut sections = vec![
+                    MenuSection::new(vec![stage.into(), unstage.into(), discard.into()]).enabled(can_stage),
+                    MenuSection::new(copy_and_open),
+                ];
+                if let Some(at) = comment_at {
+                    let pane = pane.clone();
+                    let comment = MenuItem::new("Comment", move |window, cx| {
+                        pane.update(cx, |pane, cx| {
+                            pane.selection = None;
+                            pane.add_comment(selection.file, at, window, cx);
+                        })
+                    })
+                    .icon(Glyph::MessageSquarePlus, None);
+                    sections.push(MenuSection::new(vec![comment.into()]));
+                }
+                sections
             },
             close,
         )
@@ -2109,14 +2085,23 @@ impl Render for DiffPane {
                 if selection.extent == Extent::Chars {
                     continue;
                 }
-                root = root.child(
-                    Self::placed(y, self.state.tops.height(index))
-                        .left(px(left))
-                        .w(px(width))
-                        .bg(theme.accent.opacity(0.24)),
-                );
+                let band = Self::placed(y, self.state.tops.height(index))
+                    .left(px(left))
+                    .w(px(width))
+                    .bg(theme.accent.opacity(0.24));
+                let band = if first.is_some_and(|(top, _)| top == y) {
+                    let file = &self.state.files[selection.file];
+                    tag(band, || {
+                        format!("pane:selection:{}:{}", file.path, selection.lines(file).len())
+                    })
+                } else {
+                    band
+                };
+                root = root.child(band);
             }
-            if let Some((y, on_header)) = first.filter(|_| !selection.dragging) {
+            if let Some((y, on_header)) =
+                first.filter(|_| !selection.dragging && (self.confirming || self.stage_error.is_some()))
+            {
                 let sticky = self.state.position().and_then(|position| position.sticky);
                 let floor = sticky.map_or(0.0, |sticky| {
                     sticky.push + FILE_HEADER + sticky.hunk.map_or(0.0, |_| HUNK)
@@ -2126,7 +2111,7 @@ impl Render for DiffPane {
                 } else {
                     y - HUD - 4.0
                 };
-                hud_layer = Some(self.selection_hud(selection, top.max(floor + 4.0), cx));
+                hud_layer = Some(self.confirm_bar(selection, top.max(floor + 4.0), cx));
             }
         }
         if let Some(hovered) = self
@@ -2153,8 +2138,8 @@ impl Render for DiffPane {
         if let Some(hud) = hud_layer {
             root = root.child(hud);
         }
-        if let Some(menu_state) = &self.line_menu {
-            root = root.child(self.line_menu(menu_state, cx));
+        if let (Some(at), Some(selection)) = (self.line_menu, self.selection) {
+            root = root.child(self.line_menu(at, selection, cx));
         }
         root.into_any_element()
     }

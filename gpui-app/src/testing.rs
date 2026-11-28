@@ -495,6 +495,24 @@ fn click_times(cx: &mut VisualTestContext, position: gpui::Point<Pixels>, count:
     draw(cx);
 }
 
+/// Right-clicks at `(dx, dy)` from the left edge and bottom of the tagged element.
+pub fn right_click_below(cx: &mut VisualTestContext, selector: &str, at: (f32, f32)) {
+    let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
+    let position = below(bounds, at);
+    cx.simulate_mouse_move(position, None, Modifiers::default());
+    cx.simulate_mouse_down(position, MouseButton::Right, Modifiers::default());
+    cx.simulate_mouse_up(position, MouseButton::Right, Modifiers::default());
+    draw(cx);
+}
+
+/// Right-clicks the center of the tagged element.
+pub fn right_click(cx: &mut VisualTestContext, selector: &str) {
+    let position = settled_bounds(cx, selector).center();
+    cx.simulate_mouse_down(position, MouseButton::Right, Modifiers::default());
+    cx.simulate_mouse_up(position, MouseButton::Right, Modifiers::default());
+    draw(cx);
+}
+
 pub fn hover_below(cx: &mut VisualTestContext, selector: &str, at: (f32, f32)) {
     let bounds = bounds_of(cx, selector).unwrap_or_else(|| panic!("nothing tagged `{selector}` is on screen"));
     cx.simulate_mouse_move(below(bounds, at), None, Modifiers::default());
