@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-28
+
 ### Added
 
 - A pill next to the folder name shows how many folders are linked. Click it to add or remove linked folders, or press ⌥⌘L. The folder menu has a Linked Folders item, and shows each folder's links.
@@ -149,6 +151,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - The sidebar filter matches each word on its own, in any order, so a query like `diff pane` finds `diff_pane/view.rs`.
 - Quitting diffpilot now stops the Claude reviews, replies, and fixes that are still running. After a crash, the next launch stops the ones that were left behind.
 
-[Unreleased]: https://github.com/adamward459/diffpilot/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/adamward459/diffpilot/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/adamward459/diffpilot/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/adamward459/diffpilot/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/adamward459/diffpilot/releases/tag/v0.1.0
